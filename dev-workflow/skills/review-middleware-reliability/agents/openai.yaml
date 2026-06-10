@@ -1,0 +1,6 @@
+interface:
+  display_name: "review-middleware-reliability"
+  short_description: "评审 Redis、MQ 和外部依赖的超时、重试、幂等与降级风险"
+  default_prompt: "使用 $review-middleware-reliability 评审这次涉及缓存、消息或外部依赖的可靠性风险。"
+policy:
+  allow_implicit_invocation: false

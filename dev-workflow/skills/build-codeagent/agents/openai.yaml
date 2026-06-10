@@ -1,0 +1,6 @@
+interface:
+  display_name: "build-codeagent"
+  short_description: "统一处理多后端 codeagent 调用、并行执行、超时与恢复策略"
+  default_prompt: "使用 $build-codeagent 为这次开发任务选择合适后端，并规划超时、并行和恢复策略。"
+policy:
+  allow_implicit_invocation: false

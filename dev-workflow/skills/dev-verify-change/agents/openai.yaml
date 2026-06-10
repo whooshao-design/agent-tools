@@ -1,0 +1,6 @@
+interface:
+  display_name: "dev-verify-change"
+  short_description: "围绕本次改动执行最小有效验证，明确验证结论与后续动作"
+  default_prompt: "使用 $dev-verify-change 围绕这次改动执行最小有效验证，并输出验证结论和后续建议。"
+policy:
+  allow_implicit_invocation: true

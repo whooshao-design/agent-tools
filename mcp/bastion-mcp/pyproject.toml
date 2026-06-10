@@ -1,0 +1,12 @@
+[project]
+name = "bastion-mcp"
+version = "0.1.0"
+description = "堡垒机 MCP Server - 通过堡垒机在目标机器上执行命令"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=1.0.0",
+    "paramiko>=3.0.0",
+]
+
+[project.scripts]
+bastion-mcp = "bastion_mcp.server:main"

@@ -11,7 +11,7 @@ version: 1.0.0
 Prefer the bundled script over rewriting browser setup code:
 
 ```bash
-node /home/joney/.codex/skills/get-browser-session/scripts/browser_session.js --status --url=<url>
+node /home/joney/projects/ai/claude-code-skills/java-backend/skills/get-browser-session/scripts/browser_session.js --status --url=<url>
 ```
 
 Use the existing WSL browser tool at `~/tools/lexiao-browser` by default. Override with `--tool-dir`, `--chrome`, `--runtime-lib-dir`, or `--profile` only when the local setup differs.
@@ -23,7 +23,7 @@ When another skill needs a logged-in browser session, use this skill as the sess
 Run a headless status check first:
 
 ```bash
-node /home/joney/.codex/skills/get-browser-session/scripts/browser_session.js \
+node /home/joney/projects/ai/claude-code-skills/java-backend/skills/get-browser-session/scripts/browser_session.js \
   --url=https://lexiao.oa.fenqile.com/#/app-publish/51303 \
   --success-text=当前环境
 ```
@@ -35,7 +35,7 @@ For non-Lexiao pages, always pass a page-specific `--url` and `--profile`. If th
 For environment diagnostics:
 
 ```bash
-node /home/joney/.codex/skills/get-browser-session/scripts/browser_session.js --doctor
+node /home/joney/projects/ai/claude-code-skills/java-backend/skills/get-browser-session/scripts/browser_session.js --doctor
 ```
 
 ## Obtain Or Refresh Session
@@ -43,7 +43,7 @@ node /home/joney/.codex/skills/get-browser-session/scripts/browser_session.js --
 If the session is missing, open the headed browser and let the user complete login in the browser window:
 
 ```bash
-node /home/joney/.codex/skills/get-browser-session/scripts/browser_session.js \
+node /home/joney/projects/ai/claude-code-skills/java-backend/skills/get-browser-session/scripts/browser_session.js \
   --ensure \
   --url=https://lexiao.oa.fenqile.com/#/app-publish/51303 \
   --success-text=当前环境
@@ -64,7 +64,7 @@ If Chrome reports the profile is already in use, ask the user to close the WSL C
 After `sessionReady: true`, use the same profile for page actions. The script supports normalized text clicks:
 
 ```bash
-node /home/joney/.codex/skills/get-browser-session/scripts/browser_session.js \
+node /home/joney/projects/ai/claude-code-skills/java-backend/skills/get-browser-session/scripts/browser_session.js \
   --url=https://lexiao.oa.fenqile.com/#/app-publish/51303 \
   --click-text=分支集成 \
   --click-button=批量集成分支
@@ -77,7 +77,7 @@ The script will not force-click disabled buttons. If a button is disabled, inspe
 Use cookies only when the user explicitly asks for cookie/session details or a downstream tool genuinely requires them:
 
 ```bash
-node /home/joney/.codex/skills/get-browser-session/scripts/browser_session.js \
+node /home/joney/projects/ai/claude-code-skills/java-backend/skills/get-browser-session/scripts/browser_session.js \
   --cookies \
   --domain=lexiao.oa.fenqile.com \
   --url=https://lexiao.oa.fenqile.com/#/app-publish/51303

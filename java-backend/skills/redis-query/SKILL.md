@@ -1,7 +1,7 @@
 ---
 name: redis-query
 description: "通过 bianque 服务模拟器调用 DevService.queryRedis 进行 Redis 只读查询。适用于用户要求查询 Redis key 是否存在、类型、TTL、数量、STRING/SET/HASH/LIST/ZSET 值、Hash 指定 field 或批量排查 Redis key 来源和值时使用。"
-version: 1.0.0
+version: 1.1.0
 ---
 
 # redis-query
@@ -21,7 +21,7 @@ version: 1.0.0
 | stable | `https://stable-bianque.lexinfintech.com` | `prj` | 从 `targets.json` 或用户输入读取 |
 | pre | `https://bianque.lexinfintech.com` | `pre` | 从 `targets.json` 或用户输入读取 |
 
-默认 IP:Port 来自 `~/.codex/skills/test-dubbo-api/targets.json` 中用户指定的应用条目。不要把某个业务应用作为通用默认；如果用户给了新的 IP/Port，以用户指定为准。
+默认 IP:Port 来自 `/home/joney/projects/ai/claude-code-skills/java-backend/skills/test-dubbo-api/targets.json` 中用户指定的应用条目。不要把某个业务应用作为通用默认；如果用户给了新的 IP/Port，以用户指定为准。
 
 ## Dubbo 接口
 
@@ -47,6 +47,23 @@ version: 1.0.0
 
 实例名由目标服务的 `queryRedis` 实现决定。空串 `""` 表示该服务的默认实例；其他实例名必须来自用户、代码配置或已有上下文，不要猜测。
 
+## hawk 项目速查
+
+> 仅适用于 hawk 项目上下文；其他项目按上文规则从上下文确认。
+
+- `interface`: `com.fenqile.rc_comm.hawk.decision.manage.service.DevService`
+- 目标应用：`server_hawk_decision_manage`（IP:Port 复用 `/home/joney/projects/ai/claude-code-skills/java-backend/skills/test-dubbo-api/targets.json`）
+- 默认 IP:Port：stable `10.9.112.216:31104`，pre `10.16.26.219:31104`
+
+| 实例名 | 用途 |
+| --- | --- |
+| `HawkDecisionCache` | 决策缓存（在线） |
+| `HawkDecisionOfflineCache` | 决策缓存（离线） |
+| `HawkSupportCache` | 支撑缓存 |
+| 空串 `""` | 默认 master 实例 |
+
+常用 key 模式：`hawk:decision:snapshot:preload:water:{objectType}:{env}:server_hawk_decision_executor:{date}` — 水流量预加载。
+
 ## 查询流程
 
 1. 确认环境：用户未指定时，根据上下文选择 `pre` 或 `stable`；线上/prod Redis 不通过此默认表猜测，必须让用户给出可用 bianque 环境和服务实例。
@@ -61,7 +78,7 @@ version: 1.0.0
 优先复用 `test-dubbo-api` 的固定脚本：
 
 ```bash
-python3 /home/joney/.codex/skills/test-dubbo-api/scripts/dubbo_request.py \
+python3 /home/joney/projects/ai/claude-code-skills/java-backend/skills/test-dubbo-api/scripts/dubbo_request.py \
   --env stable \
   --service '<DEV_SERVICE>' \
   --method queryRedis \

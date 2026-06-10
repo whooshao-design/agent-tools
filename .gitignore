@@ -19,3 +19,6 @@ __pycache__/
 # Local MCP/skill credentials and machine targets
 java-backend/mcp/java-backend-mcp/.env
 java-backend/skills/test-dubbo-api/targets.json
+
+# bastion 本地凭据/机器配置
+mcp/bastion-mcp/config.json

@@ -1,0 +1,12 @@
+{
+  "bastion_host": "ssh.jumpserver.fenqile.cn",
+  "bastion_port": 39000,
+  "username": "your_username",
+  "password": "your_password",
+  "pem_path": "D:\\your_key.pem",
+  "keepalive_ip": "10.xx.xx.xx",
+  "keepalive_interval": 30,
+  "idle_cmd_interval": 60,
+  "shell_timeout": 10,
+  "connect_timeout": 15
+}

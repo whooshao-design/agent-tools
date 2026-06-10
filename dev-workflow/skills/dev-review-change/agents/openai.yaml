@@ -1,0 +1,6 @@
+interface:
+  display_name: "dev-review-change"
+  short_description: "基于证据做代码评审，识别正确性、架构、安全与稳定性问题"
+  default_prompt: "使用 $dev-review-change 基于 diff、验证结果和代码上下文评审这次改动，并给出问题和建议。"
+policy:
+  allow_implicit_invocation: true

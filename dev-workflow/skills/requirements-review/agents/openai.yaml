@@ -1,0 +1,6 @@
+interface:
+  display_name: "requirements-review"
+  short_description: "评审PRD/需求单，输出问题清单、风险与验收标准建议"
+  default_prompt: "使用 $requirements-review 评审这份需求文档，并输出结论、阻塞项、问题清单、验收标准和测试要点。"
+policy:
+  allow_implicit_invocation: false

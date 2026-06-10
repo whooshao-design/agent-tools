@@ -1,0 +1,6 @@
+interface:
+  display_name: "design-tech-review"
+  short_description: "对现有方案补做边界、异常路径、一致性与完整性专项复查"
+  default_prompt: "使用 $design-tech-review 对现有方案补做边界、异常路径、一致性和完整性检查，并指出缺口。"
+policy:
+  allow_implicit_invocation: false

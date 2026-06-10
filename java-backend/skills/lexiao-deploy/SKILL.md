@@ -90,7 +90,7 @@ For multiple apps, split the work into two phases: branch integration and build 
 Use `get-browser-session` as the session layer. Prefer the existing Lexiao browser tool:
 
 ```bash
-node /home/joney/.codex/skills/get-browser-session/scripts/browser_session.js \
+node /home/joney/projects/ai/claude-code-skills/java-backend/skills/get-browser-session/scripts/browser_session.js \
   --url=<lexiao-url> \
   --success-text=<target-app-name> \
   --login-pattern='Work Happy|QR Code|Use MOA|Account|登录|扫码|账号|密码|SSO|OAuth'
@@ -105,48 +105,48 @@ Use the bundled scripts for repeated Lexiao operations. Do not recreate temporar
 Common commands:
 
 ```bash
-node /home/joney/.codex/skills/lexiao-deploy/scripts/lexiao_project_env.js \
+node /home/joney/projects/ai/claude-code-skills/java-backend/skills/lexiao-deploy/scripts/lexiao_project_env.js \
   --action=status \
   --url=<lexiao-related-demand-url> \
   --app=<app-name>
 
-node /home/joney/.codex/skills/lexiao-deploy/scripts/lexiao_project_env.js \
+node /home/joney/projects/ai/claude-code-skills/java-backend/skills/lexiao-deploy/scripts/lexiao_project_env.js \
   --action=deploy \
   --url=<lexiao-related-demand-url> \
   --app=<app-name>
 
-node /home/joney/.codex/skills/lexiao-deploy/scripts/lexiao_pre_release.js \
+node /home/joney/projects/ai/claude-code-skills/java-backend/skills/lexiao-deploy/scripts/lexiao_pre_release.js \
   --action=list-apps \
   --url=<lexiao-url>
 
-node /home/joney/.codex/skills/lexiao-deploy/scripts/lexiao_pre_release.js \
+node /home/joney/projects/ai/claude-code-skills/java-backend/skills/lexiao-deploy/scripts/lexiao_pre_release.js \
   --action=branch-integrate \
   --url=<lexiao-url>
 
-node /home/joney/.codex/skills/lexiao-deploy/scripts/lexiao_pre_release.js \
+node /home/joney/projects/ai/claude-code-skills/java-backend/skills/lexiao-deploy/scripts/lexiao_pre_release.js \
   --action=build \
   --url=<lexiao-url> \
   --app=<app-name> \
   --app-id=<app-id> \
   --project-id=<project-id>
 
-node /home/joney/.codex/skills/lexiao-deploy/scripts/lexiao_pre_release.js \
+node /home/joney/projects/ai/claude-code-skills/java-backend/skills/lexiao-deploy/scripts/lexiao_pre_release.js \
   --action=build-many \
   --url=<lexiao-url> \
   --apps=<app-name-1>,<app-name-2>
 
-node /home/joney/.codex/skills/lexiao-deploy/scripts/lexiao_pre_release.js \
+node /home/joney/projects/ai/claude-code-skills/java-backend/skills/lexiao-deploy/scripts/lexiao_pre_release.js \
   --action=wait-build-many \
   --url=<lexiao-url> \
   --apps=<app-name-1>,<app-name-2> \
   --poll-ms=30000
 
-node /home/joney/.codex/skills/lexiao-deploy/scripts/lexiao_pre_release.js \
+node /home/joney/projects/ai/claude-code-skills/java-backend/skills/lexiao-deploy/scripts/lexiao_pre_release.js \
   --action=open-order \
   --url=<lexiao-url> \
   --app=<app-name>
 
-node /home/joney/.codex/skills/lexiao-deploy/scripts/lexiao_pre_release.js \
+node /home/joney/projects/ai/claude-code-skills/java-backend/skills/lexiao-deploy/scripts/lexiao_pre_release.js \
   --action=deploy-one \
   --url=<lexiao-url> \
   --app=<app-name> \
@@ -159,7 +159,7 @@ For gray deployment, add `--env=gray`; gray skips branch integration and build, 
 For container instance logs, use the fixed webshell helper instead of writing a new script:
 
 ```bash
-node /home/joney/.codex/skills/lexiao-deploy/scripts/webshell_log_check.js \
+node /home/joney/projects/ai/claude-code-skills/java-backend/skills/lexiao-deploy/scripts/webshell_log_check.js \
   --url=<login_pod_addr> \
   --app=<log-app-name>
 ```
@@ -171,13 +171,13 @@ node /home/joney/.codex/skills/lexiao-deploy/scripts/webshell_log_check.js \
 Prefer the fixed project-environment script over ad hoc Playwright snippets:
 
 ```bash
-node /home/joney/.codex/skills/lexiao-deploy/scripts/lexiao_project_env.js \
+node /home/joney/projects/ai/claude-code-skills/java-backend/skills/lexiao-deploy/scripts/lexiao_project_env.js \
   --action=status \
   --url=<lexiao-related-demand-url> \
   --app=<app-name> \
   --profile=/home/joney/.codex/lexiao-browser-profile
 
-node /home/joney/.codex/skills/lexiao-deploy/scripts/lexiao_project_env.js \
+node /home/joney/projects/ai/claude-code-skills/java-backend/skills/lexiao-deploy/scripts/lexiao_project_env.js \
   --action=deploy \
   --url=<lexiao-related-demand-url> \
   --app=<app-name> \

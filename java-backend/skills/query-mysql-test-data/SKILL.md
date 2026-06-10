@@ -25,8 +25,8 @@ The file must stay `0600`; do not print full host/user/password values in chat u
 Prefer the bundled script:
 
 ```bash
-node /home/joney/.codex/skills/query-mysql-test-data/scripts/mysql_readonly.js --doctor
-node /home/joney/.codex/skills/query-mysql-test-data/scripts/mysql_readonly.js --list
+node /home/joney/projects/ai/claude-code-skills/java-backend/skills/query-mysql-test-data/scripts/mysql_readonly.js --doctor
+node /home/joney/projects/ai/claude-code-skills/java-backend/skills/query-mysql-test-data/scripts/mysql_readonly.js --list
 ```
 
 Add or refresh an instance with explicit read-only credentials. Prefer environment variables for secrets so they are not echoed into shell history:
@@ -37,7 +37,7 @@ export MYSQL_PORT='<port>'
 export MYSQL_USER='<readonly_user>'
 read -r -s MYSQL_PASSWORD
 export MYSQL_PASSWORD
-node /home/joney/.codex/skills/query-mysql-test-data/scripts/mysql_readonly.js \
+node /home/joney/projects/ai/claude-code-skills/java-backend/skills/query-mysql-test-data/scripts/mysql_readonly.js \
   --add-instance <instance_name> \
   --display-name '<display_name>' \
   --mode readonly-slave \
@@ -49,20 +49,20 @@ unset MYSQL_PASSWORD
 Check connectivity:
 
 ```bash
-node /home/joney/.codex/skills/query-mysql-test-data/scripts/mysql_readonly.js --check
+node /home/joney/projects/ai/claude-code-skills/java-backend/skills/query-mysql-test-data/scripts/mysql_readonly.js --check
 ```
 
 Run a read-only query:
 
 ```bash
-node /home/joney/.codex/skills/query-mysql-test-data/scripts/mysql_readonly.js \
+node /home/joney/projects/ai/claude-code-skills/java-backend/skills/query-mysql-test-data/scripts/mysql_readonly.js \
   --query "SHOW DATABASES"
 ```
 
 Open an interactive client:
 
 ```bash
-node /home/joney/.codex/skills/query-mysql-test-data/scripts/mysql_readonly.js
+node /home/joney/projects/ai/claude-code-skills/java-backend/skills/query-mysql-test-data/scripts/mysql_readonly.js
 ```
 
 The script passes `--safe-updates` and initializes the session with:
@@ -100,7 +100,7 @@ The config format is multi-instance:
 To check a configured instance:
 
 ```bash
-node /home/joney/.codex/skills/query-mysql-test-data/scripts/mysql_readonly.js \
+node /home/joney/projects/ai/claude-code-skills/java-backend/skills/query-mysql-test-data/scripts/mysql_readonly.js \
   --instance <name> --check
 ```
 

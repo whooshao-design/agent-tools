@@ -1,0 +1,6 @@
+interface:
+  display_name: "dev-finish-branch"
+  short_description: "在提交或交付前收口分支，检查 diff、验证、评审与交付摘要"
+  default_prompt: "使用 $dev-finish-branch 检查当前分支是否已达到可提交或可交付状态，并整理交付摘要。"
+policy:
+  allow_implicit_invocation: true

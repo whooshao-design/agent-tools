@@ -1,7 +1,7 @@
 ---
 name: fix-sonarqube-issues
-description: 评估并修复 SonarQube 新代码周期内的 BLOCKER/CRITICAL 级别代码质量问题。通过 API 拉取问题清单，逐条判断误报、修复风险和人工介入点，只修改确认安全的问题并验证编译。
-version: 1.0.0
+description: Use when 需要评估并修复 SonarQube 新代码周期内的 BLOCKER/CRITICAL 级别代码质量问题。评估优先，不该修的不硬修；通过 API 拉取问题清单、逐条评估是否需要修复、仅修复确认安全的项、验证编译通过后汇总结果。
+version: 1.1.0
 ---
 
 # fix-sonarqube-issues

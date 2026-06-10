@@ -1,0 +1,6 @@
+interface:
+  display_name: "lang-java-service-patterns"
+  short_description: "对齐 Java 服务代码中的幂等、异常、事务、分层与测试模式"
+  default_prompt: "使用 $lang-java-service-patterns 检查这段 Java 服务代码的幂等、异常、事务和分层实现模式。"
+policy:
+  allow_implicit_invocation: false

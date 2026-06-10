@@ -1,0 +1,6 @@
+interface:
+  display_name: "review-db-change"
+  short_description: "评审 SQL、DDL、索引、事务边界与数据库发布兼容性风险"
+  default_prompt: "使用 $review-db-change 评审这次数据库相关改动，检查 SQL、DDL、兼容性和发布顺序风险。"
+policy:
+  allow_implicit_invocation: false

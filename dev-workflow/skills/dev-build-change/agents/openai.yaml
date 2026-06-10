@@ -1,0 +1,6 @@
+interface:
+  display_name: "dev-build-change"
+  short_description: "基于现有代码模式实施最小必要改动，并给出后续验证重点"
+  default_prompt: "使用 $dev-build-change 基于现有代码上下文实施最小必要改动，并说明影响范围和验证建议。"
+policy:
+  allow_implicit_invocation: true

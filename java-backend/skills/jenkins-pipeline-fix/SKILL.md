@@ -1,7 +1,7 @@
 ---
 name: jenkins-pipeline-fix
 description: 诊断或修复 Jenkins 流水线失败。支持 mode=diagnose/fix-tests/fix-build/auto，从 Jenkins URL 或当前 git 项目推断流水线，读取构建阶段、consoleText、编译错误和测试报告；默认只读诊断，只有用户明确要求修复时才改代码，只有明确要求时才提交或推送。
-version: 1.0.0
+version: 2.0.0
 ---
 
 # Jenkins 流水线诊断与修复

@@ -1,0 +1,6 @@
+interface:
+  display_name: "dev-clarify-task"
+  short_description: "澄清模糊开发需求，收敛范围、非目标、验收标准与依赖"
+  default_prompt: "使用 $dev-clarify-task 澄清这个开发需求，收敛范围、非目标、验收标准和关键依赖。"
+policy:
+  allow_implicit_invocation: true

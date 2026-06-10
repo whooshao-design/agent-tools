@@ -1,0 +1,6 @@
+interface:
+  display_name: "dev-design-solution"
+  short_description: "比较 2-3 个实现方案，收敛推荐路径、模块影响与风险"
+  default_prompt: "使用 $dev-design-solution 基于需求和代码上下文给出候选方案、推荐方案、风险与验证思路。"
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,6 @@
+interface:
+  display_name: "verify-browser-qa"
+  short_description: "对页面、交互和部署结果做浏览器专项验收并系统收集证据"
+  default_prompt: "使用 $verify-browser-qa 对这次页面或部署改动做浏览器专项验收，并收集可支撑结论的证据。"
+policy:
+  allow_implicit_invocation: false

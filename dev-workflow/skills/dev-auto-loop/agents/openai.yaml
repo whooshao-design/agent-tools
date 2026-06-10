@@ -1,0 +1,6 @@
+interface:
+  display_name: "dev-auto-loop"
+  short_description: "自动串联开发、验证、复查与收口阶段，按停止条件持续推进"
+  default_prompt: "使用 $dev-auto-loop 自动串联开发、验证、复查与收口阶段，直到达到停止条件。"
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,6 @@
+interface:
+  display_name: "verify-java-coverage"
+  short_description: "深挖 Java 改动的 JaCoCo 覆盖率、跨模块报告与补测建议"
+  default_prompt: "使用 $verify-java-coverage 分析这次 Java 改动的覆盖率证据、跨模块风险和补测方向。"
+policy:
+  allow_implicit_invocation: false
