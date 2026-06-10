@@ -5,6 +5,15 @@
 
 维护约定见 [AGENTS.md](AGENTS.md)。
 
+## skills/common — 跨分类复用的底层能力与方法论
+
+| Skill | 说明 |
+|---|---|
+| `get-browser-session` | 浏览器登录态会话层（被 env-access/cicd 多个 skill 复用） |
+| `build-codeagent` | 执行后端 - 多后端 codeagent 处理大改动/并行子任务（被 dev-workflow 复用） |
+| `debug-systematic` | 系统化调试方法论：复现→定位→根因→验证 |
+| `skill-authoring` | 按仓库约定创建/维护 skill 的元技能 |
+
 ## skills/dev-workflow — 研发阶段主线与编排
 
 | Skill | 说明 |
@@ -18,7 +27,6 @@
 | `dev-review-change` | 代码评审 - 基于变更证据评审正确性/架构/安全 |
 | `dev-finish-branch` | 分支收尾 - 提交、推送、收尾检查 |
 | `dev-auto-loop` | 自动编排 - 串联多个开发阶段持续推进 |
-| `build-codeagent` | 执行后端 - 多后端 codeagent 处理大改动/并行子任务 |
 
 **主线**: dev-clarify-task → dev-design-solution → design-tech-review → dev-build-change → dev-verify-change → dev-review-change → dev-finish-branch
 
@@ -39,7 +47,6 @@
 | `test-dubbo-api` | 通过 bianque 服务模拟器调用和编排 Dubbo 接口测试 | `dubbo_test` |
 | `redis-query` | 通过 DevService.queryRedis 只读查询 Redis | `redis_query` |
 | `query-mysql-test-data` | 查询测试/stable 环境 MySQL 只读数据 | `mysql_readonly` |
-| `get-browser-session` | 获取、检查和复用浏览器登录态（会话层，其他 skill 复用） | `browser_session` |
 
 ## skills/cicd — 构建与发布
 

@@ -60,7 +60,7 @@ version: 1.1.0
 固定脚本默认通过 `get-browser-session` 从 `/home/joney/.codex/lexiao-browser-profile` 获取 bianque Cookie。需要单独检查登录态时使用：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/env-access/get-browser-session/scripts/browser_session.js \
+node /home/joney/projects/ai/agent-tools/skills/common/get-browser-session/scripts/browser_session.js \
   --url=https://stable-bianque.lexinfintech.com \
   --cookies \
   --domain=stable-bianque.lexinfintech.com \

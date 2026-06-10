@@ -1,6 +1,6 @@
 ---
 name: get-browser-session
-description: 获取、检查和复用 WSL Playwright/Chromium 浏览器登录态与网页 session。Use when Codex needs to access an internal web page that requires login, verify whether an existing browser profile is authenticated, open a browser for the user to complete SSO/OTP/login, reuse the saved profile for automation, or inspect session cookies with redaction by default.
+description: 获取、检查和复用 WSL Playwright/Chromium 浏览器登录态与网页 session（底层会话层，供其他 skill 复用）。Use when 需要访问要求登录的内网页面、检查浏览器 profile 登录态是否有效、打开浏览器让用户完成 SSO/OTP 登录、复用已保存 profile 做页面自动化，或按默认脱敏方式查看 session Cookie。
 version: 1.0.0
 ---
 
@@ -11,7 +11,7 @@ version: 1.0.0
 Prefer the bundled script over rewriting browser setup code:
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/env-access/get-browser-session/scripts/browser_session.js --status --url=<url>
+node /home/joney/projects/ai/agent-tools/skills/common/get-browser-session/scripts/browser_session.js --status --url=<url>
 ```
 
 Use the existing WSL browser tool at `~/tools/lexiao-browser` by default. Override with `--tool-dir`, `--chrome`, `--runtime-lib-dir`, or `--profile` only when the local setup differs.
@@ -23,7 +23,7 @@ When another skill needs a logged-in browser session, use this skill as the sess
 Run a headless status check first:
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/env-access/get-browser-session/scripts/browser_session.js \
+node /home/joney/projects/ai/agent-tools/skills/common/get-browser-session/scripts/browser_session.js \
   --url=https://lexiao.oa.fenqile.com/#/app-publish/51303 \
   --success-text=当前环境
 ```
@@ -35,7 +35,7 @@ For non-Lexiao pages, always pass a page-specific `--url` and `--profile`. If th
 For environment diagnostics:
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/env-access/get-browser-session/scripts/browser_session.js --doctor
+node /home/joney/projects/ai/agent-tools/skills/common/get-browser-session/scripts/browser_session.js --doctor
 ```
 
 ## Obtain Or Refresh Session
@@ -43,7 +43,7 @@ node /home/joney/projects/ai/agent-tools/skills/env-access/get-browser-session/s
 If the session is missing, open the headed browser and let the user complete login in the browser window:
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/env-access/get-browser-session/scripts/browser_session.js \
+node /home/joney/projects/ai/agent-tools/skills/common/get-browser-session/scripts/browser_session.js \
   --ensure \
   --url=https://lexiao.oa.fenqile.com/#/app-publish/51303 \
   --success-text=当前环境
@@ -64,7 +64,7 @@ If Chrome reports the profile is already in use, ask the user to close the WSL C
 After `sessionReady: true`, use the same profile for page actions. The script supports normalized text clicks:
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/env-access/get-browser-session/scripts/browser_session.js \
+node /home/joney/projects/ai/agent-tools/skills/common/get-browser-session/scripts/browser_session.js \
   --url=https://lexiao.oa.fenqile.com/#/app-publish/51303 \
   --click-text=分支集成 \
   --click-button=批量集成分支
@@ -77,7 +77,7 @@ The script will not force-click disabled buttons. If a button is disabled, inspe
 Use cookies only when the user explicitly asks for cookie/session details or a downstream tool genuinely requires them:
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/env-access/get-browser-session/scripts/browser_session.js \
+node /home/joney/projects/ai/agent-tools/skills/common/get-browser-session/scripts/browser_session.js \
   --cookies \
   --domain=lexiao.oa.fenqile.com \
   --url=https://lexiao.oa.fenqile.com/#/app-publish/51303
