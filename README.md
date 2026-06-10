@@ -19,6 +19,26 @@
 
 **工作流**: requirement-clarifier → spec-generator → tech-review → code-dev → test-verify → dev-cr
 
+### java-backend
+
+Java 后端研发 MCP 与排障技能套件。
+
+| Skill | 说明 |
+|---|---|
+| `java-server-diagnostics` | Java 应用服务器只读诊断：基础状态、进程、端口、JVM、线程、GC/OOM、健康检查和日志 |
+| `server-log` | 旧日志排查兼容入口 |
+| `redis-query` | 通过 DevService.queryRedis 只读查询 Redis |
+| `test-dubbo-api` | 通过 bianque 服务模拟器调用和编排 Dubbo 接口测试 |
+| `get-browser-session` | 获取、检查和复用浏览器登录态 |
+| `chrome-cookie` | 通过 Playwright/Chromium 获取浏览器 Cookie |
+| `query-mysql-test-data` | 查询测试/stable 环境 MySQL 只读数据 |
+| `fix-sonarqube-issues` | 评估并修复 SonarQube 新代码周期 BLOCKER/CRITICAL 问题 |
+| `lexiao-deploy` | 乐效构建、发布和验收流程 |
+| `healthy-dashboard-config` | Healthy/Nightingale 大盘配置 |
+| `jenkins-pipeline-fix` | Jenkins 流水线失败诊断和修复 |
+
+MCP 代码位于 `java-backend/mcp/java-backend-mcp/`，包括 `java_app_diag`、`mysql_readonly`、`redis_query`、`dubbo_test`、`browser_session` 等 Java 后端研发工具。
+
 ## 安装
 
 ```bash
@@ -38,6 +58,7 @@ bash install.sh
 
 ```bash
 python3 install.py --groups dev-workflow
+python3 install.py --groups java-backend
 ```
 
 ### 选择性安装
@@ -84,6 +105,11 @@ claude-code-skills/
 │       ├── code-dev/
 │       ├── test-verify/
 │       └── dev-cr/
+├── java-backend/                    # Java 后端研发组
+│   ├── .claude-plugin/plugin.json
+│   ├── mcp/
+│   │   └── java-backend-mcp/
+│   └── skills/
 ├── install.py
 ├── install.sh
 ├── CLAUDE.md

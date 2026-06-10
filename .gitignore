@@ -15,3 +15,7 @@ install.log
 # Python
 __pycache__/
 *.pyc
+
+# Local MCP/skill credentials and machine targets
+java-backend/mcp/java-backend-mcp/.env
+java-backend/skills/test-dubbo-api/targets.json

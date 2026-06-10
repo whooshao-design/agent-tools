@@ -1,0 +1,4 @@
+interface:
+  display_name: "Lexiao Deploy"
+  short_description: "Deploy Lexiao project or pre-release targets and verify logs"
+  default_prompt: "Use $lexiao-deploy to deploy Lexiao project-environment artifacts or one pre-release target per app, verify server or instance logs first, then report evidence and any blockers."

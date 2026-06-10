@@ -1,0 +1,4 @@
+interface:
+  display_name: "Get Browser Session"
+  short_description: "Check and reuse WSL browser login sessions"
+  default_prompt: "Use $get-browser-session to ensure a logged-in browser session for an internal web page."

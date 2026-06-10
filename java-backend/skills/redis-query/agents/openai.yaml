@@ -1,0 +1,4 @@
+interface:
+  display_name: "Redis Query"
+  short_description: "安全只读查询 Redis key 类型、数量、TTL 和值"
+  default_prompt: "Use $redis-query to inspect a Redis key safely."

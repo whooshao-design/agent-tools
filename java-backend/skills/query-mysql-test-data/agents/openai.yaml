@@ -1,0 +1,4 @@
+interface:
+  display_name: "Query MySQL Test Data"
+  short_description: "Query stored test MySQL data safely"
+  default_prompt: "Use $query-mysql-test-data to query configured test-environment MySQL data with read-only credentials."
