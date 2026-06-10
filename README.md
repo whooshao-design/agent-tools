@@ -1,13 +1,11 @@
-# claude-code-skills
+# agent-tools
 
-个人 skill 与 MCP 套件，Claude Code 和 Codex 共用的单一事实源。
+个人 agent 工具仓库（skill + MCP），Claude Code 和 Codex 共用的单一事实源。
 两个工具的 skill 目录是指向本仓库的符号链接，MCP 注册直接指向本仓库源码——仓库内改动即双端生效。
 
-## 技能列表
+维护约定见 [AGENTS.md](AGENTS.md)。
 
-### dev-workflow
-
-开发分层工作流（按任务阶段治理，单套分层）。
+## skills/dev-workflow — 开发分层工作流
 
 | Skill | 说明 |
 |---|---|
@@ -29,35 +27,34 @@
 
 **主线**: dev-clarify-task → dev-design-solution → design-tech-review → dev-build-change → dev-verify-change → dev-review-change → dev-finish-branch
 
-### java-backend
+## skills/backend-ops — 后端研发排障/测试/发布
 
-Java 后端研发 MCP 与排障技能套件。
+| Skill | 说明 | 配套 MCP |
+|---|---|---|
+| `java-server-diagnostics` | Java 应用服务器只读诊断：进程、端口、JVM、线程、GC/OOM、健康检查和日志 | `java_app_diag` |
+| `redis-query` | 通过 DevService.queryRedis 只读查询 Redis | `redis_query` |
+| `test-dubbo-api` | 通过 bianque 服务模拟器调用和编排 Dubbo 接口测试 | `dubbo_test` |
+| `get-browser-session` | 获取、检查和复用浏览器登录态（会话层，其他 skill 复用） | `browser_session` |
+| `query-mysql-test-data` | 查询测试/stable 环境 MySQL 只读数据 | `mysql_readonly` |
+| `fix-sonarqube-issues` | 评估并修复 SonarQube 新代码周期 BLOCKER/CRITICAL 问题 | `sonarqube` |
+| `lexiao-deploy` | 乐效构建、发布和验收流程 | `lexiao` |
+| `healthy-dashboard-config` | Healthy/Nightingale 大盘配置 | `healthy` |
+| `jenkins-pipeline-fix` | Jenkins 流水线诊断与修复（默认只读诊断，修复需显式开启） | `jenkins` |
 
-| Skill | 说明 |
-|---|---|
-| `java-server-diagnostics` | Java 应用服务器只读诊断：进程、端口、JVM、线程、GC/OOM、健康检查和日志 |
-| `server-log` | 堡垒机日志排查（完整工作流） |
-| `redis-query` | 通过 DevService.queryRedis 只读查询 Redis |
-| `test-dubbo-api` | 通过 bianque 服务模拟器调用和编排 Dubbo 接口测试 |
-| `get-browser-session` | 获取、检查和复用浏览器登录态（会话层，其他 skill 复用） |
-| `query-mysql-test-data` | 查询测试/stable 环境 MySQL 只读数据 |
-| `fix-sonarqube-issues` | 评估并修复 SonarQube 新代码周期 BLOCKER/CRITICAL 问题 |
-| `lexiao-deploy` | 乐效构建、发布和验收流程 |
-| `healthy-dashboard-config` | Healthy/Nightingale 大盘配置 |
-| `jenkins-pipeline-fix` | Jenkins 流水线诊断与修复（默认只读诊断，修复需显式开启） |
+带配套 MCP 的 skill 均为"MCP 优先、脚本兜底"双轨。
 
-### MCP
+## mcp/
 
 | 位置 | 说明 |
 |---|---|
-| `java-backend/mcp/java-backend-mcp/` | Java 后端只读 MCP 集合：gitlab、jenkins、java_app_diag、browser_session、mysql_readonly、dubbo_test、redis_query、sonarqube、lexiao、healthy、observability、k8s_readonly、mq_readonly、artifact_repo、cross_repo_search 等 |
+| `mcp/devtools-mcp/` | 研发工具链只读 MCP 集合（Python 包 `devtools_mcp`）：gitlab、jenkins、java_app_diag、browser_session、mysql_readonly、dubbo_test、redis_query、sonarqube、lexiao、healthy、observability、k8s_readonly、mq_readonly、artifact_repo、config_registry、cross_repo_search |
 | `mcp/bastion-mcp/` | 堡垒机 SSH 只读通道 MCP（`config.json` 本地化，不入 git） |
 
 ## 安装
 
 ```bash
-git clone git@github.com:whooshao-design/claude-code-skills.git
-cd claude-code-skills
+git clone git@github.com:whooshao-design/agent-tools.git ~/projects/ai/agent-tools
+cd ~/projects/ai/agent-tools
 python3 install.py           # 符号链接到 ~/.claude/skills 和 ~/.codex/skills
 ```
 
@@ -73,17 +70,19 @@ python3 install.py --uninstall
 ```
 
 MCP 注册（每端一次）：Claude 用 `claude mcp add --scope user`，Codex 在 `~/.codex/config.toml`，
-PYTHONPATH 指向本仓库内对应 MCP 目录。凭据通过环境变量或本地 `.env` / `config.json` 提供，不入 git。
+PYTHONPATH 指向本仓库内对应 MCP 目录，模块形如 `python3 -m devtools_mcp.jenkins_server`。
+凭据通过环境变量或本地 `.env` / `config.json` 提供，不入 git。
 
 ## 更新
 
 ```bash
-cd ~/projects/ai/claude-code-skills && git pull
+cd ~/projects/ai/agent-tools && git pull
 ```
 
 符号链接模式下无需重装；skill 改动对新会话生效，MCP 改动需重启 Claude/Codex。
 
-## 添加新工作流组
+## 添加新内容
 
-在仓库根目录创建 `<group>/skills/<skill-name>/SKILL.md`，运行 `python3 install.py` 即可。
-SKILL.md frontmatter 必须含 `name`、`description`、`version` 三字段；脚本引用写仓库绝对路径。
+- 新 skill：在 `skills/<分类>/<skill-name>/SKILL.md` 创建（frontmatter 必须含 `name`、`description`、`version`），跑 `python3 install.py`。
+- 新分类：在 `skills/` 下建子目录即可被自动发现。
+- 新 MCP server：在 `mcp/devtools-mcp/devtools_mcp/` 加 `<xxx>_server.py`，然后在两端各注册一条。

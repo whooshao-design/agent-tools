@@ -31,9 +31,11 @@ TARGETS = {
 
 def find_groups() -> dict[str, Path]:
     groups = {}
-    for child in sorted(REPO.iterdir()):
-        if child.is_dir() and (child / "skills").is_dir():
-            groups[child.name] = child / "skills"
+    skills_root = REPO / "skills"
+    if skills_root.is_dir():
+        for child in sorted(skills_root.iterdir()):
+            if child.is_dir():
+                groups[child.name] = child
     return groups
 
 

@@ -1,7 +1,0 @@
-{
-  "name": "dev-workflow",
-  "description": "开发生命周期工作流技能套件：需求澄清 → 方案设计 → 方案评审 → 代码开发 → 测试验证 → 代码评审",
-  "author": {
-    "name": "joney"
-  }
-}
