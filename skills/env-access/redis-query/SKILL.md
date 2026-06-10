@@ -26,7 +26,7 @@ version: 1.1.0
 | stable | `https://stable-bianque.lexinfintech.com` | `prj` | 从 `targets.json` 或用户输入读取 |
 | pre | `https://bianque.lexinfintech.com` | `pre` | 从 `targets.json` 或用户输入读取 |
 
-默认 IP:Port 来自 `/home/joney/projects/ai/agent-tools/skills/backend-ops/test-dubbo-api/targets.json` 中用户指定的应用条目。不要把某个业务应用作为通用默认；如果用户给了新的 IP/Port，以用户指定为准。
+默认 IP:Port 来自 `/home/joney/projects/ai/agent-tools/skills/env-access/test-dubbo-api/targets.json` 中用户指定的应用条目。不要把某个业务应用作为通用默认；如果用户给了新的 IP/Port，以用户指定为准。
 
 ## Dubbo 接口
 
@@ -57,7 +57,7 @@ version: 1.1.0
 > 仅适用于 hawk 项目上下文；其他项目按上文规则从上下文确认。
 
 - `interface`: `com.fenqile.rc_comm.hawk.decision.manage.service.DevService`
-- 目标应用：`server_hawk_decision_manage`（IP:Port 复用 `/home/joney/projects/ai/agent-tools/skills/backend-ops/test-dubbo-api/targets.json`）
+- 目标应用：`server_hawk_decision_manage`（IP:Port 复用 `/home/joney/projects/ai/agent-tools/skills/env-access/test-dubbo-api/targets.json`）
 - 默认 IP:Port：stable `10.9.112.216:31104`，pre `10.16.26.219:31104`
 
 | 实例名 | 用途 |
@@ -83,7 +83,7 @@ version: 1.1.0
 优先复用 `test-dubbo-api` 的固定脚本：
 
 ```bash
-python3 /home/joney/projects/ai/agent-tools/skills/backend-ops/test-dubbo-api/scripts/dubbo_request.py \
+python3 /home/joney/projects/ai/agent-tools/skills/env-access/test-dubbo-api/scripts/dubbo_request.py \
   --env stable \
   --service '<DEV_SERVICE>' \
   --method queryRedis \

@@ -14,7 +14,7 @@ version: 1.1.0
 ## 核心原则
 
 - **服务元信息从代码中自动提取**：Dubbo 接口名、group、version 从项目配置文件读取
-- **部署地址从 targets.json 读取默认值**：`/home/joney/projects/ai/agent-tools/skills/backend-ops/test-dubbo-api/targets.json` 存储各应用各环境的 IP:Port，优先使用默认配置
+- **部署地址从 targets.json 读取默认值**：`/home/joney/projects/ai/agent-tools/skills/env-access/test-dubbo-api/targets.json` 存储各应用各环境的 IP:Port，优先使用默认配置
 - **调用端点是 /request，不是 /requestParams** — 混用会导致返回空或 `types: []`，务必注意
 - **支持本项目和外部项目**：当前项目自动提取，外部项目手动指定
 
@@ -27,7 +27,7 @@ version: 1.1.0
 
 ## IP:Port 默认配置
 
-读取 `/home/joney/projects/ai/agent-tools/skills/backend-ops/test-dubbo-api/targets.json`：
+读取 `/home/joney/projects/ai/agent-tools/skills/env-access/test-dubbo-api/targets.json`：
 
 ```json
 {
@@ -60,7 +60,7 @@ version: 1.1.0
 固定脚本默认通过 `get-browser-session` 从 `/home/joney/.codex/lexiao-browser-profile` 获取 bianque Cookie。需要单独检查登录态时使用：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/backend-ops/get-browser-session/scripts/browser_session.js \
+node /home/joney/projects/ai/agent-tools/skills/env-access/get-browser-session/scripts/browser_session.js \
   --url=https://stable-bianque.lexinfintech.com \
   --cookies \
   --domain=stable-bianque.lexinfintech.com \
@@ -92,7 +92,7 @@ Cookie 保存在会话上下文中，过期时可自动或手动重新获取。
 优先使用固定脚本，避免重复写 Cookie 获取和 `/request` 表单逻辑：
 
 ```bash
-python3 /home/joney/projects/ai/agent-tools/skills/backend-ops/test-dubbo-api/scripts/dubbo_request.py \
+python3 /home/joney/projects/ai/agent-tools/skills/env-access/test-dubbo-api/scripts/dubbo_request.py \
   --env stable \
   --service '<SERVICE>' \
   --method '<METHOD>' \
@@ -137,7 +137,7 @@ curl -s --max-time 60 '<BASE_URL>/serviceEmulator/request' \
 当一次测试需要造数据、调用业务接口、查询副作用、最后清理数据时，优先使用通用场景脚本，不要为单个业务接口新增专用 Python：
 
 ```bash
-python3 /home/joney/projects/ai/agent-tools/skills/backend-ops/test-dubbo-api/scripts/dubbo_scenario.py \
+python3 /home/joney/projects/ai/agent-tools/skills/env-access/test-dubbo-api/scripts/dubbo_scenario.py \
   --scenario /tmp/scenario.json \
   --env stable \
   --target service_a=<IP>:<PORT> \

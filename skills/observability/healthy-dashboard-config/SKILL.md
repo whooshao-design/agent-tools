@@ -62,7 +62,7 @@ Content-Type: application/json;charset=UTF-8
 优先使用本 skill 的脚本，避免手写 token、字符串转义和 configs 包装：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/backend-ops/healthy-dashboard-config/scripts/healthy_dashboard_config.js \
+node /home/joney/projects/ai/agent-tools/skills/observability/healthy-dashboard-config/scripts/healthy_dashboard_config.js \
   --board=16761 \
   --mode=hawk-read-through \
   --profile=/tmp/healthy-dashboard-profile \
@@ -72,7 +72,7 @@ node /home/joney/projects/ai/agent-tools/skills/backend-ops/healthy-dashboard-co
 只回读和备份：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/backend-ops/healthy-dashboard-config/scripts/healthy_dashboard_config.js \
+node /home/joney/projects/ai/agent-tools/skills/observability/healthy-dashboard-config/scripts/healthy_dashboard_config.js \
   --board=16761 \
   --profile=/tmp/healthy-dashboard-profile \
   --read

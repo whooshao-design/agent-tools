@@ -5,7 +5,7 @@
 
 维护约定见 [AGENTS.md](AGENTS.md)。
 
-## skills/dev-workflow — 开发分层工作流
+## skills/dev-workflow — 研发阶段主线与编排
 
 | Skill | 说明 |
 |---|---|
@@ -19,27 +19,42 @@
 | `dev-finish-branch` | 分支收尾 - 提交、推送、收尾检查 |
 | `dev-auto-loop` | 自动编排 - 串联多个开发阶段持续推进 |
 | `build-codeagent` | 执行后端 - 多后端 codeagent 处理大改动/并行子任务 |
-| `verify-java-coverage` | 验证增强 - JaCoCo 覆盖率深挖与门控 |
-| `verify-browser-qa` | 验证增强 - 浏览器/页面专项验收 |
-| `review-db-change` | 评审增强 - 数据库变更专项 |
-| `review-middleware-reliability` | 评审增强 - 中间件可靠性专项 |
-| `lang-java-service-patterns` | Java 服务编码模式约定 |
 
 **主线**: dev-clarify-task → dev-design-solution → design-tech-review → dev-build-change → dev-verify-change → dev-review-change → dev-finish-branch
 
-## skills/backend-ops — 后端研发排障/测试/发布
+## skills/dev-quality — 开发质量增强
+
+| Skill | 说明 |
+|---|---|
+| `review-db-change` | 评审增强 - 数据库变更专项 |
+| `review-middleware-reliability` | 评审增强 - 中间件可靠性专项 |
+| `verify-java-coverage` | 验证增强 - JaCoCo 覆盖率深挖与门控 |
+| `verify-browser-qa` | 验证增强 - 浏览器/页面专项验收 |
+| `lang-java-service-patterns` | Java 服务编码模式约定 |
+
+## skills/env-access — 测试环境接口/数据/会话访问
+
+| Skill | 说明 | 配套 MCP |
+|---|---|---|
+| `test-dubbo-api` | 通过 bianque 服务模拟器调用和编排 Dubbo 接口测试 | `dubbo_test` |
+| `redis-query` | 通过 DevService.queryRedis 只读查询 Redis | `redis_query` |
+| `query-mysql-test-data` | 查询测试/stable 环境 MySQL 只读数据 | `mysql_readonly` |
+| `get-browser-session` | 获取、检查和复用浏览器登录态（会话层，其他 skill 复用） | `browser_session` |
+
+## skills/cicd — 构建与发布
+
+| Skill | 说明 | 配套 MCP |
+|---|---|---|
+| `jenkins-pipeline-fix` | Jenkins 流水线诊断与修复（默认只读诊断，修复需显式开启） | `jenkins` |
+| `fix-sonarqube-issues` | 评估并修复 SonarQube 新代码周期 BLOCKER/CRITICAL 问题 | `sonarqube` |
+| `lexiao-deploy` | 乐效构建、发布和验收流程 | `lexiao` |
+
+## skills/observability — 运行时观测
 
 | Skill | 说明 | 配套 MCP |
 |---|---|---|
 | `java-server-diagnostics` | Java 应用服务器只读诊断：进程、端口、JVM、线程、GC/OOM、健康检查和日志 | `java_app_diag` |
-| `redis-query` | 通过 DevService.queryRedis 只读查询 Redis | `redis_query` |
-| `test-dubbo-api` | 通过 bianque 服务模拟器调用和编排 Dubbo 接口测试 | `dubbo_test` |
-| `get-browser-session` | 获取、检查和复用浏览器登录态（会话层，其他 skill 复用） | `browser_session` |
-| `query-mysql-test-data` | 查询测试/stable 环境 MySQL 只读数据 | `mysql_readonly` |
-| `fix-sonarqube-issues` | 评估并修复 SonarQube 新代码周期 BLOCKER/CRITICAL 问题 | `sonarqube` |
-| `lexiao-deploy` | 乐效构建、发布和验收流程 | `lexiao` |
 | `healthy-dashboard-config` | Healthy/Nightingale 大盘配置 | `healthy` |
-| `jenkins-pipeline-fix` | Jenkins 流水线诊断与修复（默认只读诊断，修复需显式开启） | `jenkins` |
 
 带配套 MCP 的 skill 均为"MCP 优先、脚本兜底"双轨。
 

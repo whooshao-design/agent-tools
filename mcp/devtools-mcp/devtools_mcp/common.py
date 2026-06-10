@@ -16,17 +16,26 @@ from urllib.request import Request, urlopen
 PACKAGE_DIR = Path(__file__).resolve().parent
 MCP_ROOT = PACKAGE_DIR.parent
 REPO_ROOT = MCP_ROOT.parents[1]
-DEFAULT_SKILLS_DIR = Path(os.environ.get("DEVTOOLS_SKILLS_DIR", str(REPO_ROOT / "skills" / "backend-ops")))
-if not DEFAULT_SKILLS_DIR.exists():
-    DEFAULT_SKILLS_DIR = Path.home() / ".codex" / "skills"
-
-DEFAULT_BROWSER_SCRIPT = str(DEFAULT_SKILLS_DIR / "get-browser-session" / "scripts" / "browser_session.js")
+# skills 按分类组织（skills/<category>/<skill>）；DEVTOOLS_SKILLS_DIR 可覆盖为单一扁平目录
+SKILLS_ROOT = REPO_ROOT / "skills"
 DEFAULT_BROWSER_PROFILE = os.environ.get("DEVTOOLS_BROWSER_PROFILE", str(Path.home() / ".codex" / "lexiao-browser-profile"))
 DEFAULT_INTERNAL_ALLOWED_HOSTS = ".fenqile.com,.lexinfintech.com,.lexincloud.com,localhost,127.0.0.1"
 
 
 def skill_path(skill_name: str, *parts: str) -> str:
-    return str(DEFAULT_SKILLS_DIR / skill_name / Path(*parts))
+    override = os.environ.get("DEVTOOLS_SKILLS_DIR")
+    if override:
+        return str(Path(override) / skill_name / Path(*parts))
+    if SKILLS_ROOT.is_dir():
+        for category in sorted(SKILLS_ROOT.iterdir()):
+            candidate = category / skill_name
+            if candidate.is_dir():
+                return str(candidate / Path(*parts))
+    # 兜底：两端 skill 目录均为指向本仓库的扁平符号链接
+    return str(Path.home() / ".codex" / "skills" / skill_name / Path(*parts))
+
+
+DEFAULT_BROWSER_SCRIPT = skill_path("get-browser-session", "scripts", "browser_session.js")
 
 
 def json_text(data: Any) -> str:

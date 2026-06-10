@@ -1,21 +1,32 @@
-# Java Backend MCP
+# devtools-mcp
 
-本地只读 MCP 集合，覆盖 Java 后端研发的高频链路：
+研发工具链本地只读 MCP 集合（Python 包 `devtools_mcp`），按域分组：
+
+**CI/CD 与代码质量**
 
 - `gitlab`: 查询 GitLab 项目、MR、pipeline。
 - `jenkins`: 查询 Jenkins 构建状态、阶段、console 摘要、TestNG 报告。
+- `sonarqube`: 查询 SonarQube 项目 issue，默认新代码周期 BLOCKER/CRITICAL。
+- `lexiao`: 复用乐效脚本查询、构建、打开发布单、单目标部署。
+
+**运行时观测**
+
 - `java_app_diag`: 通过既有堡垒机配置做 Java 应用服务器只读诊断，覆盖基础状态、进程、端口、JVM、线程、GC/OOM、健康检查和日志。
-- `browser_session`: 复用本地 Chromium profile，检查登录态、打开登录页、读取脱敏 Cookie、用 session 发起 GET。
+- `k8s_readonly`: 通过 `kubectl` 执行 Kubernetes 只读查询和日志读取。
+- `observability`: Prometheus/Loki/Jaeger/SkyWalking 只读查询。
+- `healthy`: 复用 Healthy/Nightingale 脚本读取或应用固定大盘模板。
+
+**数据与接口访问**
+
 - `mysql_readonly`: 复用本地只读 MySQL 实例配置，执行只读 SQL。
 - `redis_query`: 通过 bianque/Dubbo `queryRedis` 只读查询 Redis。
 - `dubbo_test`: 通过 bianque 服务模拟器调用 Dubbo 接口。
-- `config_registry`: 对 Nacos/配置中心/注册中心发起只读 GET，默认只允许公司内网相关域名。
-- `sonarqube`: 查询 SonarQube 项目 issue，默认新代码周期 BLOCKER/CRITICAL。
-- `lexiao`: 复用乐效脚本查询、构建、打开发布单、单目标部署。
-- `healthy`: 复用 Healthy/Nightingale 脚本读取或应用固定大盘模板。
-- `observability`: Prometheus/Loki/Jaeger/SkyWalking 只读查询。
-- `k8s_readonly`: 通过 `kubectl` 执行 Kubernetes 只读查询和日志读取。
 - `mq_readonly`: Kafka/RocketMQ CLI 只读查询和 MQ 控制台只读 GET。
+- `browser_session`: 复用本地 Chromium profile，检查登录态、打开登录页、读取脱敏 Cookie、用 session 发起 GET。
+
+**配置、制品与检索**
+
+- `config_registry`: 对 Nacos/配置中心/注册中心发起只读 GET，默认只允许公司内网相关域名。
 - `artifact_repo`: Maven 本地仓库、Maven 仓库元数据、Nexus search 只读查询。
 - `cross_repo_search`: 本地多仓 `rg` 搜索和 GitLab code search。
 
