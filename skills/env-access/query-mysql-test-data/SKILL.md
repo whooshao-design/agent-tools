@@ -1,7 +1,7 @@
 ---
 name: query-mysql-test-data
 description: 查询和验证公司内网测试/stable 环境 MySQL 数据。Use when Codex needs to run read-only MySQL queries against locally stored test-environment credentials, inspect schemas, validate sample records, or extend the local config for more read-only test MySQL instances. Do not use for production/online data unless explicitly reconfigured and requested.
-version: 1.0.0
+version: 1.1.0
 ---
 
 # Query MySQL Test Data

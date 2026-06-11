@@ -131,9 +131,12 @@ function assertReadOnlySql(sql) {
     .replace(/--.*$/gm, ' ')
     .trim()
     .toLowerCase();
-  const forbidden = /^(insert|update|delete|replace|create|alter|drop|truncate|rename|grant|revoke|set\s+password|load\s+data|call|do|handler|lock|unlock|flush|reset|kill|start|stop|commit|rollback)\b/;
-  if (forbidden.test(normalized)) {
-    throw new Error('拒绝执行非只读 SQL。仅允许 SELECT/SHOW/DESCRIBE/EXPLAIN 等只读语句。');
+  // 白名单 + 逐条语句校验（防多语句拼接绕过首关键字检查）；
+  // 第二道防线是连接级 SET SESSION TRANSACTION READ ONLY
+  const allowed = /^(select|show|desc|describe|explain|with|help)\b/;
+  const statements = normalized.split(';').map((s) => s.trim()).filter(Boolean);
+  if (!statements.length || !statements.every((s) => allowed.test(s))) {
+    throw new Error('拒绝执行非只读 SQL。仅允许 SELECT/SHOW/DESCRIBE/EXPLAIN/WITH 等只读语句（逐条校验）。');
   }
 }
 

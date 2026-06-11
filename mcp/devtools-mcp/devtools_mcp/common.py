@@ -275,6 +275,7 @@ def run_git(repo_dir: str | None, *args: str) -> str:
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        timeout=30,
     )
     return result.stdout.strip()
 

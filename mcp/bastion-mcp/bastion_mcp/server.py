@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import sys
 
 from mcp.server.fastmcp import FastMCP
@@ -49,14 +50,36 @@ async def connect_bastion(
     )
 
 
+# 默认只读护栏：拦截明显的写/破坏类命令与重定向写入。
+# 确需放开时设置环境变量 BASTION_ALLOW_WRITE=1（自担风险）。
+_WRITE_COMMAND = re.compile(
+    r"(^|[;&|]\s*)("
+    r"rm|mv|cp|dd|mkfs|chmod|chown|chgrp|touch|tee|truncate|shred|"
+    r"kill|pkill|killall|reboot|shutdown|halt|poweroff|systemctl|service|"
+    r"crontab|useradd|userdel|usermod|passwd|mount|umount|"
+    r"yum|apt|apt-get|dnf|rpm|pip|npm"
+    r")\b"
+)
+_WRITE_REDIRECT = re.compile(r"(?<![<>])>{1,2}(?!&\d)")
+
+
+def _is_write_command(command: str) -> bool:
+    return bool(_WRITE_COMMAND.search(command) or _WRITE_REDIRECT.search(command))
+
+
 @mcp.tool()
 async def execute_command(ip: str, command: str, timeout: int = 30) -> str:
-    """在目标机器上执行命令。
+    """在目标机器上执行只读命令。
     ip: 目标机器 IP（通过堡垒机 go 命令跳转）
-    command: 要执行的命令
+    command: 要执行的命令（默认只读护栏：写/破坏类命令与重定向写入会被拒绝）
     timeout: 命令超时秒数"""
     if not ssh_mgr or not ssh_mgr.is_connected():
         return "错误：未连接堡垒机，请先调用 connect_bastion"
+    if os.environ.get("BASTION_ALLOW_WRITE") != "1" and _is_write_command(command):
+        return (
+            "错误：命令被只读护栏拦截（包含写/破坏类命令或重定向写入）。"
+            "如确需执行，请在 MCP 注册中设置 BASTION_ALLOW_WRITE=1 后重启。"
+        )
     return await asyncio.to_thread(ssh_mgr.execute_on_target, ip, command, timeout)
 
 
@@ -95,7 +118,8 @@ def main():
     if transport == "stdio":
         mcp.run(transport="stdio")
     else:
-        mcp.settings.host = "0.0.0.0"
+        # 堡垒机通道仅限本机访问；确需外部访问时通过 BASTION_HTTP_HOST 显式放开
+        mcp.settings.host = os.environ.get("BASTION_HTTP_HOST", "127.0.0.1")
         mcp.settings.port = port
         mcp.run(transport="streamable-http")
 
