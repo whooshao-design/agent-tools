@@ -8,5 +8,27 @@
   "keepalive_interval": 30,
   "idle_cmd_interval": 60,
   "shell_timeout": 10,
-  "connect_timeout": 15
+  "connect_timeout": 15,
+  "allowed_sudo_users": [
+    "java_admin"
+  ],
+  "profiles": {
+    "db": {
+      "bastion_host": "dba.ssh.jumpserver.fenqile.cn",
+      "bastion_port": 39000,
+      "username": "your_username",
+      "password": "",
+      "pem_path": "D:\\your_dba_key.pem",
+      "keepalive_ip": "10.xx.xx.xx",
+      "clickhouse": {
+        "tool_ip": "10.xx.xx.xx",
+        "client": "/usr/bin/clickhouse-client",
+        "host": "10.xx.xx.xx",
+        "port": 10000,
+        "user": "readonly_user",
+        "password": "",
+        "database": "default"
+      }
+    }
+  }
 }

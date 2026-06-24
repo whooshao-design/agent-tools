@@ -6,7 +6,7 @@ import re
 
 from mcp.server.fastmcp import FastMCP
 
-from devtools_mcp.common import bounded_int, error_text
+from devtools_mcp.common import bounded_int, error_text, json_text
 from devtools_mcp.java_app_diag_core import (
     BastionDiagSession,
     app_log_dir,
@@ -52,6 +52,83 @@ async def _resolve_pid(ip: str, app_name: str = "", pid: str = "", timeout: int 
     raise RuntimeError(f"java process not found for app_name={app_name}: {output[:1000]}")
 
 
+def _parse_sections(output: str) -> dict[str, str]:
+    sections: dict[str, list[str]] = {}
+    current = ""
+    for line in output.splitlines():
+        stripped = line.strip()
+        if stripped == "__java_app_diag_done__":
+            continue
+        match = re.fullmatch(r"==\s*([^=]+?)\s*==", stripped)
+        if match:
+            current = match.group(1).strip()
+            sections.setdefault(current, [])
+            continue
+        if current:
+            sections[current].append(line.rstrip("\r"))
+    return {key: "\n".join(value).strip() for key, value in sections.items()}
+
+
+def _section_lines(sections: dict[str, str], name: str) -> list[str]:
+    return sorted({line.strip() for line in sections.get(name, "").splitlines() if line.strip()})
+
+
+def _truncate(value: str, max_chars: int) -> str:
+    if len(value) <= max_chars:
+        return value
+    return value[:max_chars] + "\n...[truncated]"
+
+
+def _is_command_error(output: str) -> bool:
+    return output.startswith(("错误：", "跳转失败", "命令被拒绝", "执行失败"))
+
+
+async def _resolve_app_for_error_check(ip: str, app_name: str, timeout: int) -> tuple[str, dict[str, object]]:
+    if app_name:
+        return validate_app(app_name), {"source": "input", "candidates": {"input": [app_name]}}
+
+    command = ensure_success(
+        "echo '== shared_log_apps ==' ; "
+        "find /home/product/logs -maxdepth 1 -type d -name '*_logs' | "
+        "awk -F/ '{name=$NF; sub(/_logs$/, \"\", name); print name}' | sort | uniq | head -100 ; "
+        "echo '== publish_apps ==' ; "
+        "find /home/publish_product/server_java -maxdepth 1 -type d | "
+        "awk -F/ '{print $NF}' | grep -v '^server_java$' | sort | uniq | head -100 ; "
+        "echo '== process_apps ==' ; "
+        "ps -eo args | grep -F java | grep -F '/server_java/' | grep -v grep | "
+        "awk -F'/server_java/' '{print $2}' | awk -F/ '{print $1}' | sort | uniq | head -100"
+    )
+    output = await _execute(ip, command, timeout)
+    if _is_command_error(output):
+        return "", {"error": output}
+
+    sections = _parse_sections(output)
+    shared = set(_section_lines(sections, "shared_log_apps"))
+    publish = set(_section_lines(sections, "publish_apps"))
+    process = set(_section_lines(sections, "process_apps"))
+    candidates = {
+        "shared_log_apps": sorted(shared),
+        "publish_apps": sorted(publish),
+        "process_apps": sorted(process),
+    }
+
+    if len(process) == 1:
+        return next(iter(process)), {"source": "process_apps", "candidates": candidates}
+
+    shared_publish = shared & publish
+    if len(shared_publish) == 1 and (not process or process == shared_publish):
+        return next(iter(shared_publish)), {"source": "shared_log_apps+publish_apps", "candidates": candidates}
+
+    all_candidates = shared | publish | process
+    if len(all_candidates) == 1:
+        return next(iter(all_candidates)), {"source": "single_candidate", "candidates": candidates}
+
+    return "", {
+        "error": "app_name is required because candidates did not converge to exactly one app",
+        "candidates": candidates,
+    }
+
+
 @mcp.tool()
 async def connect_app_server_bastion(password: str = "", otp: str = "", keepalive_ip: str = "") -> str:
     """连接堡垒机，供 Java 应用服务器只读诊断使用。PEM 认证足够时可不传密码。"""
@@ -92,6 +169,56 @@ async def discover_java_apps(ip: str, timeout: int = 30) -> str:
         "ps -eo pid,etime,pcpu,pmem,args | grep -F java | grep -v grep | head -50"
     )
     return await _execute(ip, command, timeout)
+
+
+@mcp.tool()
+async def check_app_error_log(
+    ip: str,
+    app_name: str = "",
+    lines: int = 120,
+    timeout: int = 30,
+    max_chars: int = 24000,
+) -> str:
+    """默认日志快检：自动连接堡垒机，可自动收敛唯一应用名，只读取共享 error.log 摘要和尾部。"""
+    try:
+        line_count = bounded_int(lines, 120, 1, 500)
+        char_limit = bounded_int(max_chars, 24000, 1000, 50000)
+        app, resolution = await _resolve_app_for_error_check(ip, app_name, timeout)
+        if not app:
+            return json_text({
+                "ip": ip,
+                "checked_files": [],
+                "error": resolution.get("error", "unable to resolve app_name"),
+                "resolution": resolution,
+            })
+        path = app_log_path(app, "error.log")
+    except ValueError as exc:
+        return error_text(str(exc))
+
+    pattern = q("ERROR|Exception|Throwable|Caused by")
+    command = ensure_success(
+        f"echo '== app ==' ; echo {q(app)} ; "
+        f"echo '== log_file ==' ; echo {q(path)} ; "
+        f"echo '== error_summary ==' ; grep -E -i {pattern} {q(path)} | tail -80 ; "
+        f"echo '== error_tail ==' ; tail -{line_count} {q(path)}"
+    )
+    output = await _execute(ip, command, timeout)
+    if _is_command_error(output):
+        return error_text(output)
+
+    sections = _parse_sections(output)
+    summary = sections.get("error_summary", "")
+    tail = sections.get("error_tail", "")
+    return json_text({
+        "ip": ip,
+        "app_name": app,
+        "resolution": resolution,
+        "checked_files": [path],
+        "error_summary_line_count": len([line for line in summary.splitlines() if line.strip()]),
+        "error_summary": _truncate(summary, char_limit // 2),
+        "error_tail": _truncate(tail, char_limit),
+        "next_step": "Only inspect info.log, debug.log, startup logs, process, JVM, GC or port diagnostics if error.log shows a concrete problem that needs localization.",
+    })
 
 
 @mcp.tool()

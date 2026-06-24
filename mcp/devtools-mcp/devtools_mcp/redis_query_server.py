@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 from mcp.server.fastmcp import FastMCP
 
@@ -11,6 +12,48 @@ from devtools_mcp.common import DEFAULT_BROWSER_PROFILE, bounded_int, command_re
 mcp = FastMCP("Redis Query")
 
 DUBBO_SCRIPT = skill_path("test-dubbo-api", "scripts", "dubbo_request.py")
+ENV_ALIASES = {
+    "stable": "stable",
+    "stable环境": "stable",
+    "prj": "stable",
+    "project": "stable",
+    "项目": "stable",
+    "项目环境": "stable",
+    "test": "stable",
+    "testing": "stable",
+    "测试": "stable",
+    "测试环境": "stable",
+    "offline": "stable",
+    "线下": "stable",
+    "线下环境": "stable",
+    "pre": "pre",
+    "pre环境": "pre",
+    "preview": "pre",
+    "预发布": "pre",
+    "预发布环境": "pre",
+    "gray": "pre",
+    "gray环境": "pre",
+    "灰度": "pre",
+    "灰度环境": "pre",
+    "prod": "pre",
+    "prod环境": "pre",
+    "online": "pre",
+    "线上": "pre",
+    "线上环境": "pre",
+    "生产": "pre",
+    "生产环境": "pre",
+}
+KEY_ENV_ALIASES = {
+    "stable": "stable",
+    "test": "stable",
+    "testing": "stable",
+    "offline": "stable",
+    "pre": "pre",
+    "preview": "pre",
+    "gray": "pre",
+    "prod": "pre",
+    "online": "pre",
+}
 
 
 def _fields(value: str) -> list[str]:
@@ -25,11 +68,33 @@ def _fields(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+def _infer_env_from_key(key: str) -> str:
+    tokens = [item for item in re.split(r"[:_\-./]+", key or "") if item]
+    for token in reversed(tokens):
+        canonical = KEY_ENV_ALIASES.get(token.lower())
+        if canonical:
+            return canonical
+    return ""
+
+
+def _resolve_env(env: str, key: str) -> str:
+    raw = str(env or "").strip()
+    if not raw or raw.lower() == "auto":
+        inferred = _infer_env_from_key(key)
+        if inferred:
+            return inferred
+        raise ValueError("env is required when key does not contain stable/pre/gray/prod/online/test/offline")
+    canonical = ENV_ALIASES.get(raw) or ENV_ALIASES.get(raw.lower())
+    if canonical:
+        return canonical
+    raise ValueError(f"unsupported env: {env}")
+
+
 @mcp.tool()
 def redis_query(
     service: str,
     key: str,
-    env: str = "stable",
+    env: str = "auto",
     app: str = "",
     ip: str = "",
     port: str = "",
@@ -44,10 +109,14 @@ def redis_query(
     """通过 DevService.queryRedis 只读查询 Redis key。默认 fetch_data=false。"""
     if not service or not key:
         return error_text("service and key are required")
+    try:
+        target_env = _resolve_env(env, key)
+    except ValueError as exc:
+        return error_text(str(exc), key=key, env=env)
     params = [instance_name or "", key, _fields(fields), bool(fetch_data)]
     args = [
         DUBBO_SCRIPT,
-        f"--env={env}",
+        f"--env={target_env}",
         f"--service={service}",
         "--method=queryRedis",
         f"--group={group}",

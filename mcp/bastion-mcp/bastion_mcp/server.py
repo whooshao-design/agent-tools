@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import sys
 
 from mcp.server.fastmcp import FastMCP
@@ -21,24 +22,44 @@ mcp = FastMCP("Bastion Host")
 ssh_mgr: SSHManager = None
 
 
-def _load_config() -> dict:
+def _load_config(profile: str = "") -> dict:
     config_path = os.environ.get(
         "BASTION_CONFIG",
         os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.json"),
     )
     with open(config_path, encoding="utf-8") as f:
-        return json.load(f)
+        config = json.load(f)
+
+    profile = profile or os.environ.get("BASTION_PROFILE", "") or config.get("default_profile", "")
+    if not profile:
+        return config
+
+    profiles = config.get("profiles", {})
+    if profile not in profiles:
+        raise ValueError(f"未知堡垒机配置 profile: {profile}")
+
+    base_config = {
+        key: value
+        for key, value in config.items()
+        if key not in ("profiles", "default_profile")
+    }
+    base_config.update(profiles[profile])
+    return base_config
 
 
 @mcp.tool()
 async def connect_bastion(
-    password: str = "", otp: str = "", keepalive_ip: str = ""
+    password: str = "", otp: str = "", keepalive_ip: str = "", profile: str = ""
 ) -> str:
     """连接堡垒机。如果需要密码和动态验证码，请提供对应参数。
     PEM 认证足够时可不传。
-    keepalive_ip: 保活用的目标机器 IP，默认使用配置文件中的值"""
+    keepalive_ip: 保活用的目标机器 IP，默认使用配置文件中的值
+    profile: 使用配置文件中的指定 profiles 条目，未传则使用默认配置"""
     global ssh_mgr
-    config = _load_config()
+    try:
+        config = _load_config(profile)
+    except ValueError as e:
+        return f"错误：{e}"
     ssh_mgr = SSHManager(config)
     # 密码优先级：工具参数 > 环境变量 BASTION_PASSWORD > config.json
     final_password = password or os.environ.get("BASTION_PASSWORD", "") or config.get("password", "")
@@ -67,6 +88,78 @@ def _is_write_command(command: str) -> bool:
     return bool(_WRITE_COMMAND.search(command) or _WRITE_REDIRECT.search(command))
 
 
+_CLICKHOUSE_READONLY_START = re.compile(
+    r"^\s*(select|with|show|describe|desc|explain)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_CLICKHOUSE_FORBIDDEN = re.compile(
+    r"\b("
+    r"insert|update|delete|alter|drop|truncate|create|rename|grant|revoke|"
+    r"attach|detach|optimize|kill|system|set|use|watch|backup|restore"
+    r")\b|\binto\s+outfile\b",
+    re.IGNORECASE,
+)
+_CLICKHOUSE_FORMATS = {
+    "TabSeparated",
+    "TabSeparatedWithNames",
+    "CSV",
+    "CSVWithNames",
+    "JSON",
+    "JSONEachRow",
+    "Pretty",
+    "PrettyCompact",
+    "Vertical",
+}
+
+
+def _validate_clickhouse_sql(sql: str) -> tuple[str, str | None]:
+    normalized = sql.strip()
+    if not normalized:
+        return "", "SQL 不能为空"
+
+    while normalized.endswith(";"):
+        normalized = normalized[:-1].strip()
+    if ";" in normalized:
+        return "", "只允许单条 SQL，不允许包含分号分隔的多语句"
+    if not _CLICKHOUSE_READONLY_START.match(normalized):
+        return "", "只允许 SELECT/WITH/SHOW/DESCRIBE/DESC/EXPLAIN 只读 SQL"
+    match = _CLICKHOUSE_FORBIDDEN.search(normalized)
+    if match:
+        return "", f"SQL 包含禁止的写入/管理关键字: {match.group(0)}"
+    return normalized, None
+
+
+def _build_clickhouse_command(config: dict, sql: str, database: str,
+                              output_format: str) -> tuple[str, str | None]:
+    ch_config = config.get("clickhouse") or {}
+    required = ("host", "port", "user", "password")
+    missing = [key for key in required if ch_config.get(key) in (None, "")]
+    if missing:
+        return "", f"缺少 clickhouse 配置字段: {', '.join(missing)}"
+
+    if output_format not in _CLICKHOUSE_FORMATS:
+        return "", f"不支持的输出格式: {output_format}"
+
+    args = [
+        ch_config.get("client", "/usr/bin/clickhouse-client"),
+        "--host", ch_config["host"],
+        "--port", str(ch_config["port"]),
+        "--user", ch_config["user"],
+        "--password", ch_config["password"],
+    ]
+    db = database or ch_config.get("database", "")
+    if db:
+        args.extend(["--database", db])
+    args.extend(["--format", output_format, "--query", sql])
+    return " ".join(shlex.quote(str(arg)) for arg in args), None
+
+
+def _truncate_output(text: str, max_chars: int) -> str:
+    if max_chars <= 0 or len(text) <= max_chars:
+        return text
+    return text[:max_chars] + f"\n... 输出已截断，原始长度 {len(text)} 字符 ..."
+
+
 @mcp.tool()
 async def execute_command(ip: str, command: str, timeout: int = 30) -> str:
     """在目标机器上执行只读命令。
@@ -81,6 +174,50 @@ async def execute_command(ip: str, command: str, timeout: int = 30) -> str:
             "如确需执行，请在 MCP 注册中设置 BASTION_ALLOW_WRITE=1 后重启。"
         )
     return await asyncio.to_thread(ssh_mgr.execute_on_target, ip, command, timeout)
+
+
+@mcp.tool()
+async def clickhouse_query(
+    sql: str,
+    ip: str = "",
+    database: str = "",
+    timeout: int = 60,
+    output_format: str = "TabSeparatedWithNames",
+    max_chars: int = 20000,
+) -> str:
+    """通过目标机器上的 clickhouse-client 执行只读 SQL。
+    sql: 仅允许 SELECT/WITH/SHOW/DESCRIBE/DESC/EXPLAIN。
+    ip: ClickHouse 工具机 IP，默认使用配置中的 keepalive_ip。
+    database: 库名，默认使用配置 clickhouse.database。
+    output_format: 输出格式，默认 TabSeparatedWithNames。
+    max_chars: 返回内容最大字符数，默认 20000。"""
+    if not ssh_mgr or not ssh_mgr.is_connected():
+        return "错误：未连接堡垒机，请先调用 connect_bastion"
+
+    readonly_sql, error = _validate_clickhouse_sql(sql)
+    if error:
+        return f"错误：{error}"
+
+    command, error = _build_clickhouse_command(
+        ssh_mgr.config,
+        readonly_sql,
+        database=database,
+        output_format=output_format,
+    )
+    if error:
+        return f"错误：{error}"
+
+    target_ip = ip or ssh_mgr.config.get("clickhouse", {}).get("tool_ip") or ssh_mgr.config.get("keepalive_ip", "")
+    if not target_ip:
+        return "错误：缺少 ClickHouse 工具机 IP，请传入 ip 或配置 keepalive_ip"
+
+    result = await asyncio.to_thread(
+        ssh_mgr.execute_raw_on_target,
+        target_ip,
+        command,
+        timeout,
+    )
+    return _truncate_output(result, max_chars)
 
 
 @mcp.tool()

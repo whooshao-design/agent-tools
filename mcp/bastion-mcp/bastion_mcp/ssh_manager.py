@@ -16,7 +16,16 @@ logger = logging.getLogger(__name__)
 ALLOWED_COMMANDS = {
     "cd", "grep", "ls", "ll", "cat", "head", "tail",
     "find", "echo", "pwd", "whoami", "hostname", "zcat", "awk",
-    "sort", "wc", "uniq", "egrep"
+    "sort", "wc", "uniq", "egrep", "id", "ps"
+}
+DEFAULT_ALLOWED_SUDO_USERS = {"java_admin"}
+SAFE_JSTAT_OPTIONS = {"-gcutil", "-gccause"}
+SAFE_JCMD_COMMANDS = {
+    "GC.heap_info",
+    "Thread.print",
+    "VM.command_line",
+    "VM.flags",
+    "VM.version",
 }
 
 # shell 认证相关关键词
@@ -25,6 +34,7 @@ _OTP_KEYWORDS = ("安全码", "验证码", "otp", "OTP", "code")
 _AUTH_FAIL_KEYWORDS = ("验证失败", "认证失败", "失败", "invalid", "Invalid", "incorrect")
 # 输入提示符：确认 shell 确实在等待用户输入，而非普通输出中碰巧包含关键词
 _INPUT_PROMPT_INDICATORS = ("请输入", "enter", "Enter", "input", "Input")
+_SUDO_PROMPT = "[sudo-password]:"
 
 
 def _is_auth_prompt(text: str, keywords: tuple[str, ...]) -> bool:
@@ -89,11 +99,85 @@ def _split_outside_quotes(text: str, separators: list[str]) -> list[str]:
     return [p.strip() for p in parts if p.strip()]
 
 
-def validate_command(command: str) -> str | None:
+def _get_allowed_sudo_users(config: dict | None) -> set[str]:
+    if not config:
+        return DEFAULT_ALLOWED_SUDO_USERS
+    users = config.get("allowed_sudo_users", list(DEFAULT_ALLOWED_SUDO_USERS))
+    if isinstance(users, str):
+        users = [users]
+    return {str(user).strip() for user in users if str(user).strip()}
+
+
+def _validate_sudo_su_command(tokens: list[str], allowed_sudo_users: set[str]) -> str | None:
+    if len(tokens) != 6:
+        return "sudo"
+    if tokens[0].split("/")[-1] != "sudo":
+        return tokens[0].split("/")[-1]
+    if tokens[1] != "/bin/su":
+        return "sudo"
+    if tokens[2] != "-":
+        return "sudo"
+    if tokens[3] not in allowed_sudo_users:
+        return tokens[3]
+    if tokens[4] != "-c" or not tokens[5].strip():
+        return "sudo"
+    return validate_command(tokens[5], allowed_sudo_users=set(), allow_sudo=False)
+
+
+def _parse_sudo_su_command(command: str, allowed_sudo_users: set[str]) -> tuple[str, str] | None:
+    parts = _split_outside_quotes(command, ["&&", "||", ";"])
+    if len(parts) != 1:
+        return None
+    segments = _split_outside_quotes(parts[0], ["|"])
+    if len(segments) != 1:
+        return None
+    try:
+        tokens = shlex.split(segments[0])
+    except ValueError:
+        return None
+    if _validate_sudo_su_command(tokens, allowed_sudo_users) is not None:
+        return None
+    return tokens[3], tokens[5]
+
+
+def _is_pid(text: str) -> bool:
+    return bool(re.fullmatch(r"[1-9][0-9]*", text))
+
+
+def _is_jstat_interval(text: str) -> bool:
+    return bool(re.fullmatch(r"[1-9][0-9]*(ms|s)?", text))
+
+
+def _is_safe_jstat(tokens: list[str]) -> bool:
+    if not 3 <= len(tokens) <= 5:
+        return False
+    if tokens[1] not in SAFE_JSTAT_OPTIONS or not _is_pid(tokens[2]):
+        return False
+    if len(tokens) >= 4 and not _is_jstat_interval(tokens[3]):
+        return False
+    if len(tokens) == 5:
+        if not tokens[4].isdigit():
+            return False
+        count = int(tokens[4])
+        if count < 1 or count > 10:
+            return False
+    return True
+
+
+def _is_safe_jcmd(tokens: list[str]) -> bool:
+    if len(tokens) != 3:
+        return False
+    return _is_pid(tokens[1]) and tokens[2] in SAFE_JCMD_COMMANDS
+
+
+def validate_command(command: str, allowed_sudo_users: set[str] | None = None,
+                     allow_sudo: bool = True) -> str | None:
     """校验命令是否在白名单内。
     支持 && 连接多条命令，支持管道 |。
     正确处理引号内的特殊字符（如 awk 脚本中的 &&、|、;）。
+    支持受控的 sudo /bin/su - <user> -c '<只读命令>'。
     返回第一个不合法的命令名，全部合法返回 None。"""
+    allowed_sudo_users = allowed_sudo_users or set()
     # 按 &&、||、; 拆分子命令（引号感知）
     parts = _split_outside_quotes(command, ["&&", "||", ";"])
     for part in parts:
@@ -111,6 +195,23 @@ def validate_command(command: str) -> str | None:
             if not tokens:
                 continue
             cmd_name = tokens[0].split("/")[-1]  # 处理 /usr/bin/grep 等绝对路径
+            if cmd_name == "sudo":
+                if len(parts) != 1 or len(segments) != 1:
+                    return cmd_name
+                if not allow_sudo:
+                    return cmd_name
+                sudo_rejected = _validate_sudo_su_command(tokens, allowed_sudo_users)
+                if sudo_rejected:
+                    return sudo_rejected
+                continue
+            if cmd_name == "jstat":
+                if not _is_safe_jstat(tokens):
+                    return cmd_name
+                continue
+            if cmd_name == "jcmd":
+                if not _is_safe_jcmd(tokens):
+                    return cmd_name
+                continue
             if cmd_name not in ALLOWED_COMMANDS:
                 return cmd_name
     return None
@@ -140,6 +241,15 @@ def recv_until_idle(channel, timeout=10, idle=1.5):
     return buf.decode("utf-8", errors="replace")
 
 
+def _decode_output(buf: bytes) -> str:
+    for enc in ("utf-8", "gbk", "gb2312"):
+        try:
+            return buf.decode(enc)
+        except (UnicodeDecodeError, ValueError):
+            continue
+    return buf.decode("utf-8", errors="replace")
+
+
 def strip_ansi(text):
     """去除 ANSI 转义码"""
     return re.sub(r'\x1b\[[0-9;]*m', '', text)
@@ -150,6 +260,42 @@ def send_cmd(channel, cmd, timeout=10):
     channel.send(cmd + "\n")
     time.sleep(0.5)
     return recv_until_idle(channel, timeout=timeout)
+
+
+def send_cmd_with_sudo_password(channel, cmd, password="", timeout=30):
+    """发送 sudo 命令；如出现 sudo 密码提示，通过 stdin 输入密码。"""
+    channel.send(cmd + "\n")
+    buf = b""
+    end = time.time() + timeout
+    last_recv = time.time()
+    password_sent = False
+    while time.time() < end:
+        if channel.recv_ready():
+            chunk = channel.recv(65535)
+            buf += chunk
+            last_recv = time.time()
+            clean = strip_ansi(_decode_output(buf))
+            if _SUDO_PROMPT in clean and not password_sent:
+                if not password:
+                    channel.send("\003")
+                    return clean + "\n错误：sudo 要求输入密码，但当前连接没有可用 password"
+                channel.send(password + "\n")
+                password_sent = True
+        elif time.time() - last_recv > 1.5:
+            break
+        else:
+            time.sleep(0.2)
+    return _decode_output(buf)
+
+
+def _extract_marker_content(clean: str, marker_start: str, marker_end: str) -> str | None:
+    last_start = clean.rfind(marker_start)
+    last_end = clean.rfind(marker_end)
+    if last_start >= 0 and last_end > last_start:
+        return clean[last_start + len(marker_start):last_end].strip("\r\n")
+    if last_start >= 0:
+        return clean[last_start + len(marker_start):].strip("\r\n")
+    return None
 
 
 def make_auth_handler(password="", otp=""):
@@ -365,7 +511,7 @@ class SSHManager:
             # 跳转到目标机器
             jump_out = send_cmd(ch, f"go {ip}", timeout=15)
             jump_clean = strip_ansi(jump_out)
-            if any(k in jump_clean for k in (">>>", "权限", "没有")):
+            if any(k in jump_clean for k in ("权限", "没有")):
                 return f"跳转失败: {jump_clean.strip()}", ""
 
             # 执行 whoami 验证连接成功
@@ -396,13 +542,92 @@ class SSHManager:
     def execute_on_target(self, ip: str, command: str,
                           timeout: int = 30) -> str:
         """在目标机器上执行命令"""
+        return self._execute_on_target(
+            ip,
+            command,
+            timeout=timeout,
+            validate_allowed=True,
+            always_mark_end=False,
+        )
+
+    def execute_raw_on_target(self, ip: str, command: str,
+                              timeout: int = 30) -> str:
+        """执行已由上层工具完成安全校验的命令。不要直接暴露为 MCP 通用工具。"""
+        return self._execute_on_target(
+            ip,
+            command,
+            timeout=timeout,
+            validate_allowed=False,
+            always_mark_end=True,
+        )
+
+    def _execute_via_interactive_sudo_su(self, ch, user: str, command: str,
+                                         marker_start: str, marker_end: str,
+                                         timeout: int) -> str:
+        su_cmd = f"sudo /bin/su - {shlex.quote(user)}"
+        if self._password:
+            su_cmd = " ".join([
+                "sudo",
+                "-S",
+                "-p",
+                shlex.quote(_SUDO_PROMPT),
+                "/bin/su",
+                "-",
+                shlex.quote(user),
+            ])
+            su_out = send_cmd_with_sudo_password(
+                ch,
+                su_cmd,
+                password=self._password,
+                timeout=timeout,
+            )
+        else:
+            su_out = send_cmd(ch, su_cmd, timeout=timeout)
+
+        verify_out = send_cmd(ch, "whoami", timeout=5)
+        verify_lines = [
+            line.strip()
+            for line in strip_ansi(verify_out).splitlines()
+            if line.strip()
+        ]
+        if user not in verify_lines:
+            return (
+                su_out
+                + verify_out
+                + f"\n错误：未能通过 sudo /bin/su - {user} 进入目标用户 shell"
+            )
+
+        raw = []
+        raw.append(send_cmd(ch, f"echo {marker_start}", timeout=5))
+        raw.append(send_cmd(ch, command, timeout=timeout))
+        raw.append(send_cmd(ch, f"echo {marker_end}", timeout=5))
+        raw.append(send_cmd(ch, "exit", timeout=5))
+        return "".join(raw)
+
+    def _execute_on_target(self, ip: str, command: str, timeout: int = 30,
+                           validate_allowed: bool = True,
+                           always_mark_end: bool = False) -> str:
         if not self.is_connected():
             return "错误：未连接堡垒机"
 
-        # 命令白名单校验
-        rejected = validate_command(command)
-        if rejected:
-            return f"命令被拒绝：'{rejected}' 不在允许列表中。允许的命令: {', '.join(sorted(ALLOWED_COMMANDS))}"
+        sudo_su_command = None
+        if validate_allowed:
+            allowed_sudo_users = _get_allowed_sudo_users(self.config)
+            rejected = validate_command(
+                command,
+                allowed_sudo_users=allowed_sudo_users,
+            )
+            if rejected:
+                allowed = sorted(ALLOWED_COMMANDS)
+                sudo_users = sorted(allowed_sudo_users)
+                if sudo_users:
+                    allowed.append(
+                        "sudo /bin/su - <{}> -c '<allowed command>'".format(
+                            "|".join(sudo_users)
+                        )
+                    )
+                return f"命令被拒绝：'{rejected}' 不在允许列表中。允许的命令: {', '.join(allowed)}"
+            sudo_su_command = _parse_sudo_su_command(command, allowed_sudo_users)
 
         shell_timeout = self.config.get("shell_timeout", 10)
         ch = None
@@ -419,26 +644,46 @@ class SSHManager:
             # 跳转到目标机器
             jump_out = send_cmd(ch, f"go {ip}", timeout=15)
             jump_clean = strip_ansi(jump_out)
-            if any(k in jump_clean for k in (">>>", "权限", "没有")):
+            if any(k in jump_clean for k in ("权限", "没有")):
                 return f"跳转失败: {jump_clean.strip()}"
-
             # 用 marker 方式执行命令
             marker_start = "===MCP_START==="
             marker_end = "===MCP_END==="
-            cmd = f"echo {marker_start} && {command} && echo {marker_end}"
-            raw = send_cmd(ch, cmd, timeout=timeout)
+            if sudo_su_command:
+                raw = self._execute_via_interactive_sudo_su(
+                    ch,
+                    sudo_su_command[0],
+                    sudo_su_command[1],
+                    marker_start,
+                    marker_end,
+                    timeout,
+                )
+                clean = strip_ansi(raw)
+                content = _extract_marker_content(clean, marker_start, marker_end)
+                return content if content is not None else clean.strip()
+
+            if always_mark_end:
+                cmd = f"echo {marker_start}; {command}; echo {marker_end}"
+            else:
+                cmd = f"echo {marker_start} && {command} && echo {marker_end}"
+            if "sudo -S" in command:
+                raw = send_cmd_with_sudo_password(
+                    ch,
+                    cmd,
+                    password=self._password,
+                    timeout=timeout,
+                )
+            else:
+                raw = send_cmd(ch, cmd, timeout=timeout)
             clean = strip_ansi(raw)
 
             # 提取 marker 之间的输出
-            last_start = clean.rfind(marker_start)
-            last_end = clean.rfind(marker_end)
-            if last_start >= 0 and last_end > last_start:
-                content = clean[last_start + len(marker_start):last_end]
-                return content.strip("\r\n")
-            else:
-                # fallback: 去掉首行（命令回显）和末行（prompt）
-                lines = clean.split("\n")
-                return "\n".join(lines[1:-1]).strip() if len(lines) > 2 else clean.strip()
+            content = _extract_marker_content(clean, marker_start, marker_end)
+            if content is not None:
+                return content
+            # fallback: 去掉首行（命令回显）和末行（prompt）
+            lines = clean.split("\n")
+            return "\n".join(lines[1:-1]).strip() if len(lines) > 2 else clean.strip()
         except Exception as e:
             return f"执行失败: {e}"
         finally:

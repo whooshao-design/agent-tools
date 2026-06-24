@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+DEFAULT_TOOLSETS="context,repos,issues,pull_requests,actions,code_security,dependabot"
+TOOLSETS="${GITHUB_MCP_TOOLSETS:-$DEFAULT_TOOLSETS}"
+IMAGE="${GITHUB_MCP_IMAGE:-ghcr.io/github/github-mcp-server:latest}"
+
+if [ -z "${GITHUB_PERSONAL_ACCESS_TOKEN:-}" ] && [ -n "${GITHUB_TOKEN:-}" ]; then
+  export GITHUB_PERSONAL_ACCESS_TOKEN="$GITHUB_TOKEN"
+fi
+
+if [ -z "${GITHUB_PERSONAL_ACCESS_TOKEN:-}" ]; then
+  echo "GITHUB_PERSONAL_ACCESS_TOKEN or GITHUB_TOKEN is required for GitHub MCP." >&2
+  exit 2
+fi
+
+export GITHUB_TOOLSETS="${GITHUB_TOOLSETS:-$TOOLSETS}"
+export GITHUB_READ_ONLY="${GITHUB_READ_ONLY:-${GITHUB_MCP_READ_ONLY:-1}}"
+
+if [ -n "${GITHUB_MCP_BIN:-}" ]; then
+  exec "$GITHUB_MCP_BIN" "$@"
+fi
+
+if command -v github-mcp-server >/dev/null 2>&1; then
+  exec github-mcp-server "$@"
+fi
+
+docker_env=(-e GITHUB_PERSONAL_ACCESS_TOKEN -e GITHUB_TOOLSETS -e GITHUB_READ_ONLY)
+if [ -n "${GITHUB_HOST:-}" ]; then
+  docker_env+=(-e GITHUB_HOST)
+fi
+
+exec docker run -i --rm "${docker_env[@]}" "$IMAGE" "$@"

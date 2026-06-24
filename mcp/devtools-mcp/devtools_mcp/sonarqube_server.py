@@ -42,6 +42,39 @@ def _headers(base_url: str, profile: str = "") -> dict[str, str]:
     return headers
 
 
+def _query_params(query: dict[str, object]) -> dict[str, str]:
+    params: dict[str, str] = {}
+    for key, value in query.items():
+        if value is None or value == "":
+            continue
+        if isinstance(value, bool):
+            params[key] = "true" if value else "false"
+        else:
+            params[key] = str(value)
+    return params
+
+
+def _sonarqube_get(base_url: str, path: str, query: dict[str, object], profile: str = "", max_chars: int = 100000) -> str:
+    base = _base_url(base_url)
+    params = _query_params(query)
+    url = urljoin(base.rstrip("/") + "/", path.lstrip("/"))
+    if params:
+        url += "?" + urlencode(params)
+    try:
+        request = Request(url, headers=_headers(base, profile))
+        with urlopen(request, timeout=60) as response:
+            body = response.read().decode("utf-8", errors="replace")
+            limit = bounded_int(max_chars, 100000, 1000, 500000)
+            return body[:limit]
+    except HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        return error_text("SonarQube request failed", status=exc.code, url=url, body=body[:1000])
+    except URLError as exc:
+        return error_text("SonarQube is unreachable", url=url, reason=str(exc.reason))
+    except Exception as exc:
+        return error_text("SonarQube request failed", detail=str(exc), cookie=redact_cookie_header(env_value("SONARQUBE_COOKIE")))
+
+
 @mcp.tool()
 def parse_sonarqube_project(issue_url: str) -> str:
     """从 SonarQube issue 页面 URL 中提取 base_url 和 project key。"""
@@ -64,10 +97,11 @@ def list_sonarqube_issues(
     in_new_code_period: bool = True,
     resolved: str = "false",
     limit: int = 100,
+    branch: str = "",
+    pull_request: str = "",
     profile: str = "",
 ) -> str:
     """查询 SonarQube issue 列表，默认只查新代码周期 BLOCKER/CRITICAL。"""
-    base = _base_url(base_url)
     project = _project_key(issue_url, project_key)
     if not project:
         return error_text("project_key or issue_url with id= is required")
@@ -76,21 +110,63 @@ def list_sonarqube_issues(
         "resolved": resolved,
         "severities": severities,
         "ps": bounded_int(limit, 100, 1, 500),
+        "branch": branch,
+        "pullRequest": pull_request,
     }
     if in_new_code_period:
         query["inNewCodePeriod"] = "true"
-    url = urljoin(base.rstrip("/") + "/", "api/issues/search") + "?" + urlencode(query)
-    try:
-        request = Request(url, headers=_headers(base, profile))
-        with urlopen(request, timeout=60) as response:
-            return response.read().decode("utf-8", errors="replace")
-    except HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        return error_text("SonarQube request failed", status=exc.code, url=url, body=body[:1000])
-    except URLError as exc:
-        return error_text("SonarQube is unreachable", url=url, reason=str(exc.reason))
-    except Exception as exc:
-        return error_text("SonarQube request failed", detail=str(exc), cookie=redact_cookie_header(env_value("SONARQUBE_COOKIE")))
+    return _sonarqube_get(base_url, "api/issues/search", query, profile)
+
+
+@mcp.tool()
+def get_sonarqube_quality_gate_status(
+    issue_url: str = "",
+    project_key: str = "",
+    base_url: str = "",
+    branch: str = "",
+    pull_request: str = "",
+    profile: str = "",
+) -> str:
+    """查询项目质量门禁状态，可按 branch 或 pull_request 收窄。"""
+    project = _project_key(issue_url, project_key)
+    if not project:
+        return error_text("project_key or issue_url with id= is required")
+    return _sonarqube_get(
+        base_url,
+        "api/qualitygates/project_status",
+        {
+            "projectKey": project,
+            "branch": branch,
+            "pullRequest": pull_request,
+        },
+        profile,
+    )
+
+
+@mcp.tool()
+def show_sonarqube_rule(rule_key: str, base_url: str = "", profile: str = "") -> str:
+    """查询 SonarQube 规则详情，用于判断 issue 是否值得修复。"""
+    if not rule_key:
+        return error_text("rule_key is required")
+    return _sonarqube_get(base_url, "api/rules/show", {"key": rule_key}, profile)
+
+
+@mcp.tool()
+def list_sonarqube_branches(issue_url: str = "", project_key: str = "", base_url: str = "", profile: str = "") -> str:
+    """查询 SonarQube 项目分支列表。"""
+    project = _project_key(issue_url, project_key)
+    if not project:
+        return error_text("project_key or issue_url with id= is required")
+    return _sonarqube_get(base_url, "api/project_branches/list", {"project": project}, profile)
+
+
+@mcp.tool()
+def list_sonarqube_pull_requests(issue_url: str = "", project_key: str = "", base_url: str = "", profile: str = "") -> str:
+    """查询 SonarQube 项目 Pull Request 分析列表。"""
+    project = _project_key(issue_url, project_key)
+    if not project:
+        return error_text("project_key or issue_url with id= is required")
+    return _sonarqube_get(base_url, "api/project_pull_requests/list", {"project": project}, profile)
 
 
 def main() -> None:

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Query OA Gateway Interface"
+  short_description: "查询前端请求URL映射的后端接口、网关规则和代码链路"
+  default_prompt: "使用 $query-oa-gateway-interface 查询前端请求地址对应的后端接口和代码链路。"
+policy:
+  allow_implicit_invocation: true

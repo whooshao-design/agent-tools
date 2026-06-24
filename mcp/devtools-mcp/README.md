@@ -6,12 +6,12 @@
 
 - `gitlab`: 查询 GitLab 项目、MR、pipeline。
 - `jenkins`: 查询 Jenkins 构建状态、阶段、console 摘要、TestNG 报告。
-- `sonarqube`: 查询 SonarQube 项目 issue，默认新代码周期 BLOCKER/CRITICAL。
+- `sonarqube`: 查询 SonarQube issue、质量门禁、规则详情、分支和 PR 分析，issue 默认新代码周期 BLOCKER/CRITICAL。
 - `lexiao`: 复用乐效脚本查询、构建、打开发布单、单目标部署。
 
 **运行时观测**
 
-- `java_app_diag`: 通过既有堡垒机配置做 Java 应用服务器只读诊断，覆盖基础状态、进程、端口、JVM、线程、GC/OOM、健康检查和日志。
+- `java_app_diag`: 通过既有堡垒机配置做 Java 应用服务器只读诊断；默认用 `check_app_error_log` 只查 `error.log`，按日志线索再递进到基础状态、进程、端口、JVM、线程、GC/OOM、健康检查等诊断。
 - `k8s_readonly`: 通过 `kubectl` 执行 Kubernetes 只读查询和日志读取。
 - `observability`: Prometheus/Loki/Jaeger/SkyWalking 只读查询。
 - `healthy`: 复用 Healthy/Nightingale 脚本读取或应用固定大盘模板。
@@ -22,7 +22,7 @@
 - `redis_query`: 通过 bianque/Dubbo `queryRedis` 只读查询 Redis。
 - `dubbo_test`: 通过 bianque 服务模拟器调用 Dubbo 接口。
 - `mq_readonly`: Kafka/RocketMQ CLI 只读查询和 MQ 控制台只读 GET。
-- `browser_session`: 复用本地 Chromium profile，检查登录态、打开登录页、读取脱敏 Cookie、用 session 发起 GET。
+- `browser_session`: 复用本地 Chromium profile，检查登录态、页面快照、文本点击、读取脱敏 Cookie、用 session 发起 GET。
 
 **配置、制品与检索**
 
@@ -60,7 +60,7 @@ mcp/devtools-mcp/.env
 - `MQ_ALLOWED_HOSTS`
 - `ARTIFACT_REPO_ALLOWED_HOSTS`
 
-`java_app_diag` 通过 `BASTION_CONFIG` 指定堡垒机配置，默认查找 `/home/joney/projects/ai/agent-tools/mcp/bastion-mcp/config.json`。
+`java_app_diag` 通过 `BASTION_CONFIG` 指定堡垒机配置，默认查找 `/home/joney/projects/ai/agent-tools/mcp/bastion-mcp/config.json`。诊断工具会在首次执行时自动复用或建立堡垒机连接；如果密钥认证不可用，仍需传入 password/otp。
 `mysql_readonly` 复用 `~/.config/codex-mysql-readonly/instances.json`。
 `browser_session`、`redis_query`、`dubbo_test`、`lexiao`、`healthy` 复用已有 Playwright profile 和脚本约定。
 
@@ -68,7 +68,7 @@ mcp/devtools-mcp/.env
 
 底层通用能力：
 
-- `browser_session`: 浏览器登录态、Cookie、带 session 的只读 GET。
+- `browser_session`: 浏览器登录态、页面快照、规范化文本点击、Cookie、带 session 的只读 GET。
 - `config_registry.internal_http_get`: 公司内网 allowlist 下的通用只读 HTTP GET。
 - `bastion`: 跳板机通道和受白名单限制的远程只读命令执行。
 - `mysql_readonly`: 只读 SQL。
@@ -81,7 +81,7 @@ mcp/devtools-mcp/.env
 薄包装能力：
 
 - `redis_query`: `dubbo_test` 上的 `queryRedis` 专用入口。
-- `java_app_diag`: `bastion` 上的 Java 应用服务器诊断安全封装，不开放任意远程 shell。
+- `java_app_diag`: `bastion` 上的 Java 应用服务器诊断安全封装，不开放任意远程 shell；高频“检查有没有问题”场景优先使用 `check_app_error_log`，减少多工具调用和过度排查。
 - `gitlab`、`jenkins`、`sonarqube`: 对常用研发平台 API 的只读封装。
 - `mq_readonly`: Kafka/RocketMQ 常用只读命令封装。
 - `lexiao`、`healthy`: 对已有本地脚本的流程封装，包含少量写操作，仍需工具审批。

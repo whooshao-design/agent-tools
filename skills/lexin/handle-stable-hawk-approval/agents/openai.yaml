@@ -1,0 +1,6 @@
+interface:
+  display_name: "Handle Stable Hawk Approval"
+  short_description: "安全处理stable测试环境米霍克和流程引擎审批回调"
+  default_prompt: "使用 $handle-stable-hawk-approval 查询并处理 stable 测试环境米霍克审批。"
+policy:
+  allow_implicit_invocation: true

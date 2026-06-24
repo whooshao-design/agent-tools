@@ -35,7 +35,29 @@ cp config.json.example config.json
   "keepalive_interval": 30,
   "idle_cmd_interval": 60,
   "shell_timeout": 10,
-  "connect_timeout": 15
+  "connect_timeout": 15,
+  "allowed_sudo_users": [
+    "java_admin"
+  ],
+  "profiles": {
+    "db": {
+      "bastion_host": "dba.ssh.jumpserver.fenqile.cn",
+      "bastion_port": 39000,
+      "username": "your_username",
+      "password": "",
+      "pem_path": "D:\\your_dba_key.pem",
+      "keepalive_ip": "10.xx.xx.xx",
+      "clickhouse": {
+        "tool_ip": "10.xx.xx.xx",
+        "client": "/usr/bin/clickhouse-client",
+        "host": "10.xx.xx.xx",
+        "port": 10000,
+        "user": "readonly_user",
+        "password": "",
+        "database": "default"
+      }
+    }
+  }
 }
 ```
 
@@ -51,6 +73,9 @@ cp config.json.example config.json
 | `idle_cmd_interval` | 保活空命令发送间隔（秒） |
 | `shell_timeout` | Shell 输出等待超时（秒） |
 | `connect_timeout` | TCP 连接超时（秒） |
+| `allowed_sudo_users` | 可选，允许通过 `sudo /bin/su - <user> -c '<只读命令>'` 切换的账号，默认 `java_admin` |
+| `profiles` | 可选，多堡垒机配置。`connect_bastion(profile="db")` 会用指定 profile 覆盖基础配置 |
+| `clickhouse` | 可选，`clickhouse_query` 使用的只读 ClickHouse 客户端配置 |
 
 ## 启动
 
@@ -96,6 +121,7 @@ python -m bastion_mcp.server --transport http --port 8000
 | `password` | string | 否 | 密码（PEM 认证足够时不传） |
 | `otp` | string | 否 | 6 位动态验证码 |
 | `keepalive_ip` | string | 否 | 保活目标机器 IP，默认使用配置值 |
+| `profile` | string | 否 | 使用 `profiles` 中的指定堡垒机配置 |
 
 ### `execute_command`
 
@@ -106,6 +132,41 @@ python -m bastion_mcp.server --transport http --port 8000
 | `ip` | string | 是 | 目标机器 IP |
 | `command` | string | 是 | 要执行的命令 |
 | `timeout` | int | 否 | 超时秒数，默认 30 |
+
+支持受控切换用户执行只读命令：
+
+```bash
+sudo /bin/su - java_admin -c 'whoami; pwd; id'
+```
+
+限制：
+
+- 只允许切换到 `allowed_sudo_users` 中配置的用户。
+- `-c` 内部命令仍按白名单校验，不允许嵌套 `sudo`。
+- sudo 包装命令必须作为单条命令使用，不支持再拼接外层 `&&`、`;` 或管道。
+- 执行时会先发送 `sudo /bin/su - <user>` 进入目标用户 shell，再发送 `-c` 内部的只读命令；不会把 `-c` 透传给远端 `su`。
+- 如果目标机 sudo 需要输入密码，工具会用连接时的 `password`/`BASTION_PASSWORD`/`config.json` 密码通过 stdin 响应；不会把密码拼到远端命令文本中。
+- 该工具是单条命令执行通道，不提供持久交互式 shell；需要用 `-c` 包裹要执行的命令。
+- JVM 诊断只开放受限只读模式：`jstat -gcutil|-gccause <pid> [interval] [count]`、`jcmd <pid> VM.flags|VM.command_line|VM.version|GC.heap_info|Thread.print`；不开放 heap dump、class histogram 等高风险动作。
+
+### `clickhouse_query`
+
+通过目标机器上的 `clickhouse-client` 执行只读 SQL。此工具不会放开通用命令白名单，只在 SQL 校验通过后执行受控 ClickHouse 命令。
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `sql` | string | 是 | 仅允许 `SELECT` / `WITH` / `SHOW` / `DESCRIBE` / `DESC` / `EXPLAIN` |
+| `ip` | string | 否 | ClickHouse 工具机 IP，默认 `clickhouse.tool_ip` 或 `keepalive_ip` |
+| `database` | string | 否 | 库名，默认 `clickhouse.database` |
+| `timeout` | int | 否 | 超时秒数，默认 60 |
+| `output_format` | string | 否 | 输出格式，默认 `TabSeparatedWithNames` |
+| `max_chars` | int | 否 | 返回内容最大字符数，默认 20000 |
+
+安全限制：
+
+- 拒绝多语句 SQL。
+- 拒绝 `INSERT`、`UPDATE`、`DELETE`、`ALTER`、`DROP`、`TRUNCATE`、`CREATE`、`GRANT`、`SYSTEM`、`SET` 等写入或管理语句。
+- 默认只读取本地配置中的只读账号，不应配置 master/write 账号。
 
 ### `connection_status`
 
@@ -120,8 +181,10 @@ python -m bastion_mcp.server --transport http --port 8000
 仅允许以下命令，支持 `&&` 和 `|` 组合：
 
 ```
-awk  cat  cd  echo  find  grep  head  hostname  ll  ls  pwd  tail  whoami  zcat
+awk  cat  cd  echo  egrep  find  grep  head  hostname  id  ll  ls  ps  pwd  sort  tail  uniq  wc  whoami  zcat
 ```
+
+另有参数级白名单的 JVM 只读诊断命令：`jstat -gcutil|-gccause` 和 `jcmd VM.flags|VM.command_line|VM.version|GC.heap_info|Thread.print`。
 
 其他命令（如 `rm`、`curl`、`python` 等）会被拒绝。
 
@@ -156,6 +219,7 @@ PEM 密钥认证 ──成功──→ 进入堡垒机
 |------|------|
 | `BASTION_CONFIG` | 配置文件路径，默认 `config.json` 同目录下 |
 | `BASTION_PASSWORD` | 堡垒机密码（优先级高于 config.json） |
+| `BASTION_PROFILE` | 默认使用的 `profiles` 条目；工具参数 `profile` 优先级更高 |
 
 ## 日志级别
 

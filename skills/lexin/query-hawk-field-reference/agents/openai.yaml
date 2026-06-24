@@ -1,0 +1,6 @@
+interface:
+  display_name: "Query Hawk Field Reference"
+  short_description: "查询米霍克字段被乐包、策略节点和规则引用的关系"
+  default_prompt: "使用 $query-hawk-field-reference 查询米霍克字段引用关系，默认只输出到终端。"
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PACKAGE="${MARKITDOWN_MCP_PACKAGE:-markitdown-mcp==0.0.1a4}"
+CACHE_ROOT="${AGENT_TOOLS_MCP_CACHE:-/tmp/agent-tools-mcp-cache}"
+VENV="${MARKITDOWN_MCP_VENV:-$CACHE_ROOT/markitdown-mcp-venv}"
+PYTHON_BIN="${PYTHON:-python3}"
+export PIP_DISABLE_PIP_VERSION_CHECK="${PIP_DISABLE_PIP_VERSION_CHECK:-1}"
+
+if [ -n "${MARKITDOWN_MCP_BIN:-}" ]; then
+  exec "$MARKITDOWN_MCP_BIN" "$@"
+fi
+
+if command -v markitdown-mcp >/dev/null 2>&1; then
+  exec markitdown-mcp "$@"
+fi
+
+if [ ! -x "$VENV/bin/markitdown-mcp" ]; then
+  echo "Installing $PACKAGE into $VENV" >&2
+  "$PYTHON_BIN" -m venv "$VENV"
+  PIP_CACHE_DIR="${PIP_CACHE_DIR:-$CACHE_ROOT/pip}" "$VENV/bin/python" -m pip install "$PACKAGE" >&2
+fi
+
+exec "$VENV/bin/markitdown-mcp" "$@"

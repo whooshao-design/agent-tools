@@ -1,0 +1,6 @@
+interface:
+  display_name: "Inspect Healthy JVM Dashboard"
+  short_description: "只读查看雷神 JVM/G1 看板结构、PromQL 与应用指标摘要"
+  default_prompt: "使用 $inspect-healthy-jvm-dashboard 查看雷神 JVM/G1 看板，按需总结变量、面板、PromQL，并在指定 app/env 时输出 JVM 指标摘要。"
+policy:
+  allow_implicit_invocation: true

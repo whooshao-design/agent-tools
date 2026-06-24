@@ -59,8 +59,56 @@ def check_session(url: str, profile: str = "", success_text: str = "none", login
 
 
 @mcp.tool()
+def browser_page_snapshot(url: str, profile: str = "", success_text: str = "none", login_pattern: str = DEFAULT_LOGIN_PATTERN) -> str:
+    """读取页面标题、URL、正文摘要和按钮列表；不执行页面动作。"""
+    if not url:
+        return error_text("url is required")
+    return _run_browser(_browser_args(url, profile, success_text, login_pattern), timeout=90)
+
+
+@mcp.tool()
+def browser_click_text(
+    url: str,
+    text: str,
+    profile: str = "",
+    success_text: str = "none",
+    login_pattern: str = DEFAULT_LOGIN_PATTERN,
+    timeout_seconds: int = 120,
+) -> str:
+    """在页面中按规范化文本点击可见元素，并返回点击后的页面状态。"""
+    if not url:
+        return error_text("url is required")
+    if not text:
+        return error_text("text is required")
+    timeout = bounded_int(timeout_seconds, 120, 10, 600)
+    args = _browser_args(url, profile, success_text, login_pattern)
+    args.append(f"--click-text={text}")
+    return _run_browser(args, timeout=timeout)
+
+
+@mcp.tool()
+def browser_click_button(
+    url: str,
+    text: str,
+    profile: str = "",
+    success_text: str = "none",
+    login_pattern: str = DEFAULT_LOGIN_PATTERN,
+    timeout_seconds: int = 120,
+) -> str:
+    """在页面中按按钮文本点击可见按钮，并返回点击后的页面状态。"""
+    if not url:
+        return error_text("url is required")
+    if not text:
+        return error_text("text is required")
+    timeout = bounded_int(timeout_seconds, 120, 10, 600)
+    args = _browser_args(url, profile, success_text, login_pattern)
+    args.append(f"--click-button={text}")
+    return _run_browser(args, timeout=timeout)
+
+
+@mcp.tool()
 def ensure_session(url: str, profile: str = "", success_text: str = "none", timeout_seconds: int = 300) -> str:
-    """打开有界面 Chromium，让用户完成登录，并等待登录态可用。"""
+    """确保登录态可用：已登录则直接返回；未登录时打开 Chromium，无法显示时返回登录截图路径。"""
     if not url:
         return error_text("url is required")
     timeout_ms = bounded_int(timeout_seconds, 300, 30, 1800) * 1000

@@ -1,7 +1,7 @@
 ---
 name: skill-authoring
 description: Use when 需要在 agent-tools 仓库中创建新 skill、修改 skill 分类，或检查现有 skill 是否符合仓库约定（frontmatter、路径、分类、双端安装）。
-version: 1.0.0
+version: 1.1.0
 ---
 
 # skill-authoring
@@ -20,9 +20,8 @@ version: 1.0.0
 | `skills/common/` | 跨分类复用的底层能力与通用方法论 |
 | `skills/dev-workflow/` | 研发阶段主线与编排 |
 | `skills/dev-quality/` | 评审/验证维度增强、编码规范 |
-| `skills/env-access/` | 测试环境接口、数据、会话访问 |
-| `skills/cicd/` | 构建、质量门禁、发布 |
-| `skills/observability/` | 运行时诊断与监控 |
+| `skills/cicd/` | 通用构建、流水线与质量门禁 |
+| `skills/lexin/` | 乐信业务、内网平台、OA/Hawk/乐效/Hippo/Healthy/bianque/内网数据访问 |
 
 都不合适时再考虑新分类（`skills/` 下建目录即被 install.py 自动发现），但优先复用现有分类。
 

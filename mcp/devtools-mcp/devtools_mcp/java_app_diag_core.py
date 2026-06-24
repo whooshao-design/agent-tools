@@ -10,10 +10,14 @@ import shlex
 import sys
 from pathlib import Path, PurePosixPath
 
+MCP_DIR = Path(__file__).resolve().parents[2]
+BASTION_MCP_ROOT = MCP_DIR / "bastion-mcp"
+DEFAULT_BASTION_CONFIG = BASTION_MCP_ROOT / "config.json"
+
 try:
     import bastion_mcp.ssh_manager as bastion_ssh
 except ModuleNotFoundError:
-    sys.path.insert(0, os.environ.get("BASTION_MCP_ROOT", str(Path.home() / "ai" / "mcp" / "bastion-mcp")))
+    sys.path.insert(0, os.environ.get("BASTION_MCP_ROOT", str(BASTION_MCP_ROOT)))
     import bastion_mcp.ssh_manager as bastion_ssh
 
 from devtools_mcp.common import bounded_int
@@ -66,7 +70,7 @@ class BastionDiagSession:
         self.ssh_mgr: SSHManager | None = None
 
     def _load_config(self) -> dict:
-        config_path = os.environ.get("BASTION_CONFIG", str(Path.home() / "ai" / "mcp" / "bastion-mcp" / "config.json"))
+        config_path = os.environ.get("BASTION_CONFIG", str(DEFAULT_BASTION_CONFIG))
         with open(config_path, encoding="utf-8") as f:
             return json.load(f)
 
@@ -88,7 +92,12 @@ class BastionDiagSession:
 
     async def execute(self, ip: str, command: str, timeout: int) -> str:
         if not self.ssh_mgr or not self.ssh_mgr.is_connected():
-            return "错误：未连接堡垒机，请先调用连接工具"
+            try:
+                connect_result = await self.connect()
+            except Exception as exc:
+                return f"错误：未连接堡垒机，自动连接失败：{exc}"
+            if connect_result.startswith("错误") or not self.ssh_mgr or not self.ssh_mgr.is_connected():
+                return f"错误：未连接堡垒机，自动连接失败：{connect_result}"
         return await asyncio.to_thread(
             self.ssh_mgr.execute_on_target,
             ip,

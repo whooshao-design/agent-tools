@@ -1,0 +1,6 @@
+interface:
+  display_name: "Query MySQL Data"
+  short_description: "只读查询 MySQL 测试和受限线上元信息"
+  default_prompt: "使用 $query-mysql-data 只读查询 MySQL 数据；线上仅限 ProcesstestDB 和 HawkDecisionDB。"
+policy:
+  allow_implicit_invocation: true

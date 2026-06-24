@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PACKAGE="${SONATYPE_MCP_REMOTE_PACKAGE:-mcp-remote@0.1.38}"
+URL="${SONATYPE_MCP_URL:-https://mcp.guide.sonatype.com/mcp}"
+CACHE_ROOT="${AGENT_TOOLS_MCP_CACHE:-/tmp/agent-tools-mcp-cache}"
+export NPM_CONFIG_CACHE="${NPM_CONFIG_CACHE:-$CACHE_ROOT/npm}"
+export NPM_CONFIG_UPDATE_NOTIFIER="${NPM_CONFIG_UPDATE_NOTIFIER:-false}"
+
+if [ -z "${SONATYPE_GUIDE_MCP_TOKEN:-}" ]; then
+  echo "SONATYPE_GUIDE_MCP_TOKEN is required for Sonatype MCP." >&2
+  exit 2
+fi
+
+exec npx -y "$PACKAGE" "$URL" --header "Authorization: Bearer $SONATYPE_GUIDE_MCP_TOKEN" "$@"
