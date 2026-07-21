@@ -21,13 +21,15 @@
 | `requirements-review` | 需求评审 - 评审 PRD/需求文档完整性 |
 | `dev-design-solution` | 方案设计 - 比较实现路径、识别影响与风险 |
 | `dev-review-solution` | 技术方案评审 - 独立检查可行性、完整性与风险并给出评审结论 |
+| `dev-derive-test-cases` | 测试场景推导 - 把已评审方案转化为结构化测试场景清单 |
+| `dev-review-test-cases` | 测试场景评审 - 独立核对场景是否忠实覆盖方案 |
 | `dev-build-change` | 代码开发 - 基于现有模式实施最小必要改动 |
 | `dev-verify-change` | 验证 - 围绕变更做最小必要验证 |
 | `dev-review-change` | 代码评审 - 基于变更证据评审正确性/架构/安全 |
 | `dev-finish-branch` | 分支收尾 - 提交、推送、收尾检查 |
-| `dev-auto-loop` | 自动编排 - 串联设计评审与开发交付两段闭环持续推进 |
+| `dev-auto-loop` | 自动编排 - 串联设计评审、测试场景与开发交付三段闭环持续推进 |
 
-**主线**: dev-clarify-task → dev-design-solution → dev-review-solution → dev-build-change → dev-verify-change → dev-review-change → dev-finish-branch
+**主线**: dev-clarify-task → dev-design-solution → dev-review-solution → dev-derive-test-cases → dev-review-test-cases → dev-build-change → dev-verify-change → dev-review-change → dev-finish-branch
 
 ## skills/dev-quality — 开发质量增强
 

@@ -1,7 +1,7 @@
 interface:
   display_name: "dev-auto-loop"
-  short_description: "自动串联设计评审与开发交付两段闭环，按停止条件持续推进"
-  default_prompt: "使用 $dev-auto-loop 自动串联设计闭环（方案设计与评审）与交付闭环（开发、验证、复查、收口），直到达到停止条件。"
+  short_description: "自动串联设计评审、测试场景与开发交付三段闭环，按停止条件持续推进"
+  default_prompt: "使用 $dev-auto-loop 自动串联设计闭环（方案设计与评审）、测试场景闭环（场景推导与评审）与交付闭环（开发、验证、复查、收口），直到达到停止条件。"
 policy:
   # 能连续跨阶段自动改代码，爆炸半径比单次方案评审更大；且内部会自动串到
   # dev-review-solution，隐式触发本 skill 会绕过 dev-review-solution 自身的
