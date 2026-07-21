@@ -1,19 +1,19 @@
 ---
 name: review-middleware-reliability
-description: Use when `dev-review-change` 已启动，且变更涉及 Redis、MQ、任务调度或存在超时、重试、幂等、降级等可靠性风险，需要补查中间件与外部依赖行为时。
+description: Use when `dev-review-change` 或 `dev-review-solution` 已启动，且变更或方案涉及 Redis、MQ、任务调度或存在超时、重试、幂等、降级等可靠性风险，需要补查中间件与外部依赖行为时。
 metadata:
-  version: 1.0.0
+  version: 1.1.0
 ---
 
 # review-middleware-reliability
 
 ## 定位
 
-用于作为 `dev-review-change` 的中间件可靠性专项增强，补查缓存、消息、调度和外部依赖调用的稳定性问题。
+用于作为 `dev-review-change`（代码评审）或 `dev-review-solution`（方案评审）的中间件可靠性专项增强，补查缓存、消息、调度和外部依赖调用的稳定性问题。
 
 它关注可靠性与可恢复性，不替代主评审流程里的通用正确性判断。
 
-默认不作为通用主入口；仅在 `dev-review-change` 判断需要可靠性专项深挖，或用户明确点名中间件风险评审时使用。
+默认不作为通用主入口；仅在 `dev-review-change` 或 `dev-review-solution` 判断需要可靠性专项深挖，或用户明确点名中间件风险评审时使用。
 
 ## When to Use
 
@@ -55,5 +55,5 @@ metadata:
 
 ## 交接建议
 
-- 专项结论回交 `dev-review-change`
-- 若专项问题需要改实现，回到 `dev-build-change`
+- 专项结论回交发起方（`dev-review-change` 或 `dev-review-solution`）
+- 若专项问题需要改实现，回到 `dev-build-change`；若源于方案设计本身，回到 `dev-design-solution`

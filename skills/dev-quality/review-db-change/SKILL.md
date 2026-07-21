@@ -1,19 +1,19 @@
 ---
 name: review-db-change
-description: Use when `dev-review-change` 已启动，且评审涉及 SQL、DDL、索引、事务边界、数据兼容性或发布顺序，需要补做数据库风险专项判断时。
+description: Use when `dev-review-change` 或 `dev-review-solution` 已启动，且评审涉及 SQL、DDL、索引、事务边界、数据兼容性或发布顺序，需要补做数据库风险专项判断时。
 metadata:
-  version: 1.0.0
+  version: 1.1.0
 ---
 
 # review-db-change
 
 ## 定位
 
-用于作为 `dev-review-change` 的数据库专项增强，补做数据库相关风险审查。
+用于作为 `dev-review-change`（代码评审）或 `dev-review-solution`（方案评审）的数据库专项增强，补做数据库相关风险审查。
 
-它聚焦 SQL、DDL、索引、兼容性和发布顺序，不替代通用代码评审主流程。
+它聚焦 SQL、DDL、索引、兼容性和发布顺序，不替代通用代码评审或方案评审主流程。
 
-默认不作为通用主入口；仅在 `dev-review-change` 判断需要数据库专项深挖，或用户明确点名数据库评审时使用。
+默认不作为通用主入口；仅在 `dev-review-change` 或 `dev-review-solution` 判断需要数据库专项深挖，或用户明确点名数据库评审时使用。
 
 ## When to Use
 
@@ -55,5 +55,5 @@ metadata:
 
 ## 交接建议
 
-- 专项结论回交 `dev-review-change` 汇总最终评审结论
-- 若发现问题源于实现方式，回到 `dev-build-change`
+- 专项结论回交发起方（`dev-review-change` 或 `dev-review-solution`）汇总最终评审结论
+- 若发现问题源于实现方式，回到 `dev-build-change`；若源于方案设计本身，回到 `dev-design-solution`

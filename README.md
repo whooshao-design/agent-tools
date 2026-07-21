@@ -25,7 +25,7 @@
 | `dev-verify-change` | 验证 - 围绕变更做最小必要验证 |
 | `dev-review-change` | 代码评审 - 基于变更证据评审正确性/架构/安全 |
 | `dev-finish-branch` | 分支收尾 - 提交、推送、收尾检查 |
-| `dev-auto-loop` | 自动编排 - 串联多个开发阶段持续推进 |
+| `dev-auto-loop` | 自动编排 - 串联设计评审与开发交付两段闭环持续推进 |
 
 **主线**: dev-clarify-task → dev-design-solution → dev-review-solution → dev-build-change → dev-verify-change → dev-review-change → dev-finish-branch
 

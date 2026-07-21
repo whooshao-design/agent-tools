@@ -3,4 +3,5 @@ interface:
   short_description: "独立评审技术方案，输出分级 findings、评审结论和后续动作"
   default_prompt: "使用 $dev-review-solution 基于需求、方案和代码证据做独立技术评审，给出分级问题、明确结论与后续动作。"
 policy:
+  # 正式方案评审是能一票否决方向的关卡，要求用户显式触发，不跟随家族其余 skill 默认 true
   allow_implicit_invocation: false
