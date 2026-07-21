@@ -1,7 +1,8 @@
 ---
 name: java-server-diagnostics
 description: "通过 java_app_diag MCP 对 Java 应用所在服务器做只读排查。默认先只看 error.log 判断有没有问题；只有 error.log 暴露线索后，才递进排查 info/debug/启动日志、进程、端口、JVM、线程或 GC。"
-version: 1.1.1
+metadata:
+  version: 1.3.0
 ---
 
 # java-server-diagnostics
@@ -50,7 +51,7 @@ version: 1.1.1
 
 默认只做最小日志快检：
 
-1. 优先调用 `check_app_error_log(ip, app_name?)`。
+1. 优先调用 `check_app_error_log(ip, app_name?, env?)`。
 2. 该工具会自动复用或建立堡垒机连接；PEM 认证可用时，不要先单独调用 `app_server_connection_status` 或 `connect_app_server_bastion`。
 3. `app_name` 缺失但用户给了 `ip` 时，允许 `check_app_error_log` 自动从共享日志目录、发布目录和 Java 进程中收敛唯一应用名。
 4. 快检只读取共享 `/home/product/logs/<app_name>_logs/error.log` 的摘要和尾部，不默认查 `info.log`、`debug.log`、启动日志、进程、端口、JVM、线程、GC、磁盘或负载。
@@ -66,9 +67,10 @@ version: 1.1.1
 
 1. 当前对话刚指定过的 `app_name`、`ip`、`version_tag`、端口或 traceId。
 2. 乐效发布/部署上下文中明确选中的应用和机器。
-3. 当前仓库或模块名能唯一映射到应用名，且已有唯一目标机器上下文。
-4. 用户已提供 `ip` 但未提供 `app_name` 时，先用 `check_app_error_log(ip)` 自动收敛唯一应用名并读取 `error.log`。若返回多个候选或候选之间冲突，先让用户确认；只有需要人工判断候选来源时，才再调用 `discover_java_apps(ip)`。
-5. `targets.json`、部署页面/API 或用户给出的环境信息中能唯一确定目标。
+3. 用户给出应用名和环境但未给 `ip` 时，先使用 `query-app-instances` 查询该环境实例，再对查到的 VM/KVM 或 Pod 执行日志快检；VM/KVM 日志快检要把该环境作为 `env` 传给 `java_app_diag`。不要临时编写 Playwright、浏览器请求或乐效接口脚本。只有 `query-app-instances` 不可用或明确失败时，才考虑等价只读兜底。
+4. 当前仓库或模块名能唯一映射到应用名，且已有唯一目标机器上下文。
+5. 用户已提供 `ip` 但未提供 `app_name` 时，先用 `check_app_error_log(ip)` 自动收敛唯一应用名并读取 `error.log`。环境未明确时默认按线上/生产机器处理，不要仅根据 IP 段猜测为项目、stable、test 或 prj。若返回多个候选或候选之间冲突，先让用户确认；只有需要人工判断候选来源时，才再调用 `discover_java_apps(ip)`。
+6. `targets.json`、部署页面/API 或用户给出的环境信息中能唯一确定目标。
 
 只有 `app_name` 和 `ip` 都能唯一、可信地确定时，才继续执行日志或诊断查询。否则先问一句最小问题，例如：
 
@@ -82,14 +84,63 @@ version: 1.1.1
 
 ### 1. 最小日志快检
 
-1. 对“看看有没有问题”类请求，直接调用 `check_app_error_log(ip, app_name?)`。
+1. 对“看看有没有问题”类请求，直接调用 `check_app_error_log(ip, app_name?, env?)`。
 2. 只汇总 `error.log` 中最近的 ERROR/Exception/Caused by 线索和尾部内容。
 3. 若 `error.log` 没有明确异常，结论停在“本次只查了 error.log，未发现明显错误线索”，不要继续扩大排查。
 4. 若工具返回自动连接失败且提示需要 password/otp，再向用户要最小认证信息。
 
-如果是项目环境、stable、test 或 prj 机器，默认要求走 dev 堡垒机路径 `dev.ssh.jumpserver.fenqile.cn`。若当前工具不支持该路径，记录为服务器诊断受阻，不要反复重试同一失败连接。
+`java_app_diag` 已支持 `env` 和 `profile` 参数，调用时优先传 `env`，只有需要强制路径时才传 `profile`。如果无法从用户请求或发布上下文明确判断环境，默认按线上/生产机器处理，走线上堡垒机路径 `ssh.jumpserver.fenqile.cn`。`pre`、预发布、灰度、`prod`、线上、生产都映射到 `profile=online`；项目环境、`stable`、`test`、`prj` 映射到 `profile=dev`；DBA 类场景才使用 `profile=dba`。若工具返回自动连接失败且提示密码/OTP，要说明当前 `profile/host`，不要反复重试同一失败连接。
 
-### 2. 基于 error.log 递进定位
+### 2. 容器日志快检
+
+当目标是容器 Pod，而不是 VM/KVM 时：
+
+1. 先用 `query-app-instances` 获取 `namespace`、`pod_name`、`container`、`cluster_id/context`、`login_pod_addr`、`login_url_source` 和校验结果。WebShell URL 必须使用乐效原值，不重新生成。
+2. 优先检查并实际使用匹配的只读 kubectl context。只有 context/kubeconfig/连接不可用等已知基础设施错误才回退 WebShell；权限拒绝、Pod 不存在等业务性错误不要静默回退。
+3. WebShell Chromium 使用隔离 profile 和进程级内网直连，不修改全局 VPS 代理；ATrust/乐空间、登录页和 403 不得判为 READY。
+4. `app + env` 返回多个 Running Pod 时不随机选择，必须补精确 `--pod` 或告警中的 `--ip`：
+
+```bash
+node /home/joney/projects/ai/agent-tools/skills/lexin/java-server-diagnostics/scripts/container_log_check.js \
+  --app=<app_name> \
+  --env=pre \
+  --ip=<pod_ip> \
+  --lines=120
+```
+
+5. 快检默认 `--log-mode=quick`，只把 `error.log` 作为主要错误来源。只有启动问题或用户明确要求时才加 `--include-startup` 查询 stdout/info 启动标记。已有 `login_pod_addr` 时可直接使用 WebShell helper；`--mode=auto` 先走 Gotty WebSocket，终端 DOM 确认可用时才允许回退 DOM：
+
+```bash
+node /home/joney/projects/ai/agent-tools/skills/lexin/java-server-diagnostics/scripts/webshell_log_check.js \
+  --url=<login_pod_addr> \
+  --app=<app_name> \
+  --lines=120 \
+  --since-minutes=60 \
+  --version=<version_tag>
+```
+
+6. 已有 error/trace 线索后使用取证模式，支持当前日志、未压缩轮转和 `.gz` 轮转，并按时间戳聚合完整多行事件：
+
+```bash
+node /home/joney/projects/ai/agent-tools/skills/lexin/java-server-diagnostics/scripts/container_log_check.js \
+  --app=<app_name> \
+  --env=prod \
+  --ip=<pod_ip> \
+  --log-mode=forensics \
+  --trace-id=<trace_id> \
+  --from="2026-07-13 11:39:00" \
+  --to="2026-07-13 11:42:00" \
+  --files=error.log,info.log \
+  --context=2 \
+  --include-rotated \
+  --max-lines=500 \
+  --max-bytes=1048576
+```
+
+7. `trace-id/rule-id/keyword` 同时提供时按 AND 匹配同一日志事件；`context` 表示前后事件数，范围 0～20。日志文件只允许 `error.log/info.log/warn.log/debug.log/stdout.log`。
+8. 优先读取输出中的 `targetSource/loginUrlSource/access/accessAttempts/errorCode/warningCode`，再看 `summary` 或 `forensics`。`warningCode=RESULT_TRUNCATED` 时缩小时间窗或提高受控上限后重查。自动登录失败时使用返回的乐效 `manualUrl` 让用户在浏览器打开；不要贴完整日志，不要执行修改、重启、删除或写文件命令。
+
+### 3. 基于 error.log 递进定位
 
 只有出现以下情况，才继续查其他日志：
 
@@ -100,7 +151,7 @@ version: 1.1.1
 
 不要因为有一两条历史 `ERROR` 就直接做 JVM、线程、GC 或服务器资源排查；先判断错误时间、频率和是否仍在持续。
 
-### 3. 进程、端口和健康检查
+### 4. 进程、端口和健康检查
 
 只有日志指向应用未启动、启动卡住、服务不可用，或用户明确要求检查存活状态时再查：
 
@@ -110,7 +161,7 @@ version: 1.1.1
 
 端口未监听、health 非 UP 或请求失败时，结合版本本地 `stdout.log` 和共享 `error.log` 判断启动失败原因。
 
-### 4. JVM、线程和 GC/OOM
+### 5. JVM、线程和 GC/OOM
 
 只有日志或现象指向 JVM 层时再查：
 
@@ -135,6 +186,6 @@ version: 1.1.1
 ## 工具映射
 
 - 主 MCP：`java_app_diag`
-- 默认快检：`check_app_error_log`
-- 递进日志：`grep_app_log`、`tail_app_log`、`grep_version_log`、`tail_version_log`
+- 默认快检：`check_app_error_log(ip, app_name?, env?, profile?)`
+- 递进日志：`grep_app_log`、`tail_app_log`、`grep_version_log`、`tail_version_log`，需要跨环境时同样透传 `env` 或 `profile`
 - 底层通道 MCP：`bastion`，仅在缺少专用诊断工具且命令明确只读时才考虑使用。

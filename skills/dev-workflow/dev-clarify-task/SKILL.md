@@ -1,7 +1,8 @@
 ---
 name: dev-clarify-task
 description: Use when 需求模糊、边界未收敛、需要先别写代码并明确范围、非目标、验收标准或关键依赖，再决定进入方案设计还是编码。
-version: 1.0.0
+metadata:
+  version: 1.0.0
 ---
 
 # dev-clarify-task

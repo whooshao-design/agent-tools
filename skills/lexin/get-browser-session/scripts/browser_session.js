@@ -3,9 +3,35 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { createRequire } = require('module');
+const {
+  buildBrowserEnv,
+  chromiumArgsFor,
+  isWebShellUrl,
+  redactUrl,
+} = require('./browser_network');
 
 const DEFAULT_URL = 'https://lexiao.oa.fenqile.com/#/app-publish/51303';
 const DEFAULT_SUCCESS_TEXT = '当前环境';
+const DEFAULT_WEBSHELL_PROFILE = '~/.codex/webshell-direct-profile';
+const DEFAULT_LOGIN_PATTERN = [
+  'Work Happy',
+  'QR Code',
+  'Use MOA',
+  '\\bMOA\\b',
+  'Account Login',
+  'Password Login',
+  'Sign in',
+  '登录',
+  '扫码',
+  '账号',
+  '密码',
+  'SSO',
+  'OAuth',
+  '乐空间传送门',
+  'ATrust',
+].join('|');
+const DEFAULT_PORTAL_PATTERN = '乐空间传送门|ATrust';
+const FORBIDDEN_PATTERN = '403|Forbidden|无权限|拒绝访问';
 
 function expandHome(value) {
   if (!value) return value;
@@ -32,11 +58,12 @@ function parseArgs(argv) {
   return args;
 }
 
-function resolvePaths(args) {
+function resolvePaths(args, url = DEFAULT_URL) {
   const toolDir = expandHome(args['tool-dir'] || process.env.BROWSER_SESSION_TOOL_DIR || '~/tools/lexiao-browser');
+  const defaultProfile = isWebShellUrl(url) ? DEFAULT_WEBSHELL_PROFILE : '~/.cache/lexiao-browser-profile';
   return {
     toolDir,
-    profileDir: expandHome(args.profile || process.env.BROWSER_SESSION_PROFILE || '~/.cache/lexiao-browser-profile'),
+    profileDir: expandHome(args.profile || process.env.BROWSER_SESSION_PROFILE || defaultProfile),
     chromePath: expandHome(args.chrome || path.join(toolDir, 'browsers/chrome-linux64/chrome')),
     runtimeLibDir: expandHome(args['runtime-lib-dir'] || path.join(toolDir, 'runtime-libs/usr/lib/x86_64-linux-gnu')),
     playwrightPackage: path.join(toolDir, 'package.json'),
@@ -94,10 +121,69 @@ function redact(value, showSecrets) {
   return `${value.slice(0, 4)}...${value.slice(-4)}`;
 }
 
+function splitCsv(value) {
+  return String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function hostname(value) {
+  try {
+    return new URL(String(value || '')).hostname.toLowerCase();
+  } catch (_) {
+    return '';
+  }
+}
+
+function classifyPageStatus(snapshot, options = {}) {
+  const targetHost = hostname(options.targetUrl);
+  const currentHost = hostname(snapshot.url);
+  const webShell = isWebShellUrl(options.targetUrl);
+  const onTargetHost = Boolean(targetHost && currentHost === targetHost);
+  let sessionState = 'CONNECTING';
+  let sessionReady = false;
+
+  if (snapshot.hasForbiddenText) {
+    sessionState = 'FORBIDDEN';
+  } else if (snapshot.hasPortalText) {
+    sessionState = 'PROXY_INTERCEPTED';
+  } else if (snapshot.hasLoginText && (!webShell || !snapshot.terminalReady || snapshot.hasLoginControl)) {
+    sessionState = 'LOGIN_REQUIRED';
+  } else if (webShell) {
+    sessionReady = onTargetHost && snapshot.terminalReady;
+    sessionState = sessionReady ? 'READY' : 'CONNECTING';
+  } else {
+    sessionReady = onTargetHost && (options.successText ? snapshot.hasSuccessText : true);
+    sessionState = sessionReady ? 'READY' : 'CONNECTING';
+  }
+
+  return {
+    ...snapshot,
+    targetHost,
+    currentHost,
+    isWebShell: webShell,
+    onTargetHost,
+    sessionState,
+    sessionReady,
+  };
+}
+
 async function collectStatus(page, options = {}) {
-  const status = await page.evaluate(({ successText, loginPattern }) => {
-    const bodyText = document.body.innerText.replace(/\s+/g, ' ').trim();
+  const snapshot = await page.evaluate(({ successText, loginPattern, portalPattern, forbiddenPattern }) => {
+    const bodyText = document.body ? document.body.innerText.replace(/\s+/g, ' ').trim() : '';
     const loginRegex = new RegExp(loginPattern, 'i');
+    const portalRegex = new RegExp(portalPattern, 'i');
+    const forbiddenRegex = new RegExp(forbiddenPattern, 'i');
+    const hasPasswordInput = Boolean(document.querySelector('input[type="password"]'));
+    const hasLoginControl = hasPasswordInput || Boolean(document.querySelector(
+      'form[action*="login" i],input[name*="user" i],input[name*="account" i]'
+    ));
+    const terminalReady = Boolean(document.querySelector(
+      'textarea,.xterm,.xterm-screen,x-screen,#terminal,[class*="xterm"]'
+    ));
+    const hasPortalText = /atrust/i.test(location.hostname) || (!terminalReady && portalRegex.test(bodyText));
+    const hasForbiddenText = forbiddenRegex.test(document.title) || (!terminalReady && forbiddenRegex.test(bodyText));
     const buttons = Array.from(document.querySelectorAll('button')).map((button) => ({
       text: button.innerText.replace(/\s+/g, ' ').trim(),
       disabled: button.disabled || button.classList.contains('is-disabled'),
@@ -107,13 +193,59 @@ async function collectStatus(page, options = {}) {
       title: document.title,
       url: location.href,
       hasSuccessText: successText ? bodyText.includes(successText) : false,
-      hasLoginText: loginRegex.test(bodyText),
+      hasLoginText: loginRegex.test(bodyText) || hasPasswordInput,
+      hasLoginControl,
+      hasPortalText,
+      hasForbiddenText,
+      terminalReady,
       snippet: bodyText.slice(0, 1200),
       buttons,
     };
   }, options);
-  status.sessionReady = Boolean(status.hasSuccessText || !status.hasLoginText);
-  return status;
+  return classifyPageStatus(snapshot, options);
+}
+
+async function collectStorage(page, options = {}) {
+  const storage = await page.evaluate(({ keys, storageTypes }) => {
+    const keySet = new Set(keys || []);
+    const shouldInclude = (key) => keySet.size === 0 || keySet.has(key);
+    const readStore = (type, store) => {
+      const rows = [];
+      for (let index = 0; index < store.length; index += 1) {
+        const key = store.key(index);
+        if (!shouldInclude(key)) continue;
+        const value = store.getItem(key);
+        rows.push({
+          type,
+          key,
+          exists: value !== null,
+          length: value ? value.length : 0,
+          value,
+        });
+      }
+      return rows;
+    };
+
+    const rows = [];
+    if (storageTypes.includes('local')) rows.push(...readStore('local', localStorage));
+    if (storageTypes.includes('session')) rows.push(...readStore('session', sessionStorage));
+
+    if (keySet.size > 0) {
+      for (const type of storageTypes) {
+        for (const key of keySet) {
+          if (!rows.some((item) => item.type === type && item.key === key)) {
+            rows.push({ type, key, exists: false, length: 0, value: null });
+          }
+        }
+      }
+    }
+    return rows;
+  }, options);
+
+  return storage.map((item) => ({
+    ...item,
+    value: redact(item.value, options.showSecrets),
+  }));
 }
 
 async function clickNormalizedText(page, label) {
@@ -145,30 +277,80 @@ async function clickNormalizedText(page, label) {
   }, label);
 }
 
-async function openContext(paths, chromium, headless) {
+async function openContext(paths, chromium, headless, targetUrl) {
   const ldLibraryPath = [paths.runtimeLibDir, process.env.LD_LIBRARY_PATH].filter(Boolean).join(':');
-  const env = inferWslgEnv(process.env);
+  const network = buildBrowserEnv(targetUrl, process.env);
+  const env = inferWslgEnv(network.env);
   env.LD_LIBRARY_PATH = ldLibraryPath;
-  return chromium.launchPersistentContext(paths.profileDir, {
+  const context = await chromium.launchPersistentContext(paths.profileDir, {
     executablePath: paths.chromePath,
     headless,
     env,
-    args: ['--no-sandbox'],
+    args: chromiumArgsFor(targetUrl, ['--no-sandbox']),
   });
+  return { context, networkPolicy: network.networkPolicy };
 }
 
-async function waitForSession(page, options) {
+async function waitForStableSession(page, options) {
   const deadline = Date.now() + options.timeoutMs;
+  const requiredReadyPolls = isWebShellUrl(options.targetUrl)
+    ? Number(options.stablePolls || 3)
+    : 1;
+  const stableDwellMs = isWebShellUrl(options.targetUrl)
+    ? Number(options.stableDwellMs === undefined ? 2500 : options.stableDwellMs)
+    : 0;
+  let readyPolls = 0;
+  let firstReadyAt = 0;
+  let lastStatus = null;
   while (Date.now() < deadline) {
-    const status = await collectStatus(page, options);
-    if (status.sessionReady) return status;
+    let status;
+    try {
+      status = await collectStatus(page, options);
+    } catch (error) {
+      readyPolls = 0;
+      firstReadyAt = 0;
+      lastStatus = {
+        sessionState: 'CONNECTING',
+        sessionReady: false,
+        statusError: String(error.message || error),
+      };
+      await page.waitForTimeout(options.pollMs);
+      continue;
+    }
+    lastStatus = status;
+    if (status.sessionReady) {
+      if (readyPolls === 0) firstReadyAt = Date.now();
+      readyPolls += 1;
+    } else {
+      readyPolls = 0;
+      firstReadyAt = 0;
+    }
+    status.stableReadyPolls = readyPolls;
+    status.requiredReadyPolls = requiredReadyPolls;
+    status.stableReadyMs = firstReadyAt ? Date.now() - firstReadyAt : 0;
+    status.requiredStableMs = stableDwellMs;
+    if (readyPolls >= requiredReadyPolls && status.stableReadyMs >= stableDwellMs) return status;
+    if (!options.waitForLogin && ['LOGIN_REQUIRED', 'PROXY_INTERCEPTED', 'FORBIDDEN'].includes(status.sessionState)) {
+      return status;
+    }
     await page.waitForTimeout(options.pollMs);
   }
-  return collectStatus(page, options);
+  const status = lastStatus || await collectStatus(page, options);
+  status.stableReadyPolls = readyPolls;
+  status.requiredReadyPolls = requiredReadyPolls;
+  status.stableReadyMs = firstReadyAt ? Date.now() - firstReadyAt : 0;
+  status.requiredStableMs = stableDwellMs;
+  if (readyPolls < requiredReadyPolls || status.stableReadyMs < stableDwellMs) {
+    status.sessionReady = false;
+    if (status.sessionState === 'READY') status.sessionState = 'CONNECTING';
+    status.stabilityTimeout = true;
+  }
+  return status;
 }
 
 async function runPageFlow(paths, chromium, flow) {
-  const context = await openContext(paths, chromium, flow.headless);
+  const launched = await openContext(paths, chromium, flow.headless, flow.url);
+  const { context } = launched;
   try {
     const page = context.pages()[0] || await context.newPage();
     await page.goto(flow.url, { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -177,11 +359,23 @@ async function runPageFlow(paths, chromium, flow) {
     const options = {
       successText: flow.successText,
       loginPattern: flow.loginPattern,
-      timeoutMs: flow.timeoutMs,
+      portalPattern: flow.portalPattern,
+      forbiddenPattern: flow.forbiddenPattern,
+      targetUrl: flow.url,
+      stablePolls: flow.stablePolls,
+      stableDwellMs: flow.stableDwellMs,
+      waitForLogin: flow.waitForLogin,
+      timeoutMs: flow.waitForLogin
+        ? flow.timeoutMs
+        : (isWebShellUrl(flow.url) ? Math.min(flow.timeoutMs, flow.statusTimeoutMs) : flow.timeoutMs),
       pollMs: flow.pollMs,
     };
-    let status = flow.waitForLogin ? await waitForSession(page, options) : await collectStatus(page, options);
+    let status = (flow.waitForLogin || isWebShellUrl(flow.url))
+      ? await waitForStableSession(page, options)
+      : await collectStatus(page, options);
     status.browserMode = flow.headless ? 'headless' : 'headed';
+    status.networkPolicy = launched.networkPolicy;
+    status.profileDir = paths.profileDir;
 
     if (flow.screenshotOnLogin && !status.sessionReady) {
       const screenshot = loginScreenshotPath(flow.url);
@@ -216,6 +410,23 @@ async function runPageFlow(paths, chromium, flow) {
       status.valuesRedacted = !showSecrets;
     }
 
+    if (flow.mode === 'storage') {
+      const showSecrets = Boolean(flow.args['show-secrets']);
+      const storageType = String(flow.args['storage-type'] || 'local').toLowerCase();
+      const storageTypes = storageType === 'both'
+        ? ['local', 'session']
+        : splitCsv(storageType).filter((item) => ['local', 'session'].includes(item));
+      const keys = splitCsv(flow.args['storage-key'] || flow.args['storage-keys']);
+      status.storage = await collectStorage(page, {
+        keys,
+        storageTypes: storageTypes.length ? storageTypes : ['local'],
+        showSecrets,
+      });
+      status.valuesRedacted = !showSecrets;
+    }
+
+    status.requestedUrl = redactUrl(flow.url);
+    status.url = redactUrl(status.url);
     return status;
   } finally {
     await context.close().catch(() => {});
@@ -224,13 +435,18 @@ async function runPageFlow(paths, chromium, flow) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const paths = resolvePaths(args);
-  const mode = args.ensure ? 'ensure' : args.cookies ? 'cookies' : args.doctor ? 'doctor' : 'status';
+  const mode = args.ensure ? 'ensure' : args.cookies ? 'cookies' : args.storage ? 'storage' : args.doctor ? 'doctor' : 'status';
   const url = args.url || DEFAULT_URL;
+  const paths = resolvePaths(args, url);
   const successText = args['success-text'] === 'none' ? '' : (args['success-text'] || DEFAULT_SUCCESS_TEXT);
-  const loginPattern = args['login-pattern'] || '登录|扫码|账号|密码|SSO|OAuth';
+  const loginPattern = args['login-pattern'] || DEFAULT_LOGIN_PATTERN;
+  const portalPattern = args['portal-pattern'] || DEFAULT_PORTAL_PATTERN;
+  const forbiddenPattern = args['forbidden-pattern'] || FORBIDDEN_PATTERN;
   const timeoutMs = Number(args.timeout || 300000);
   const pollMs = Number(args.poll || 2000);
+  const stablePolls = Number(args['stable-polls'] || 3);
+  const stableDwellMs = Number(args['stable-dwell-ms'] || 2500);
+  const statusTimeoutMs = Number(args['status-timeout'] || 10000);
   const headless = mode !== 'ensure' && !args.headed;
 
   if (mode === 'doctor') {
@@ -254,7 +470,20 @@ async function main() {
 
   const chromium = loadPlaywright(paths);
 
-  const baseFlow = { args, mode, url, successText, loginPattern, timeoutMs, pollMs };
+  const baseFlow = {
+    args,
+    mode,
+    url,
+    successText,
+    loginPattern,
+    portalPattern,
+    forbiddenPattern,
+    timeoutMs,
+    pollMs,
+    stablePolls,
+    stableDwellMs,
+    statusTimeoutMs,
+  };
   if (mode === 'ensure') {
     const status = await runPageFlow(paths, chromium, {
       ...baseFlow,
@@ -304,7 +533,19 @@ async function main() {
   console.log(JSON.stringify(status, null, 2));
 }
 
-main().catch((error) => {
-  console.error(error.stack || error.message);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error.stack || error.message);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  DEFAULT_LOGIN_PATTERN,
+  DEFAULT_PORTAL_PATTERN,
+  classifyPageStatus,
+  collectStatus,
+  parseArgs,
+  resolvePaths,
+  waitForStableSession,
+};

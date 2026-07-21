@@ -1,7 +1,8 @@
 ---
 name: skill-authoring
 description: Use when 需要在 agent-tools 仓库中创建新 skill、修改 skill 分类，或检查现有 skill 是否符合仓库约定（frontmatter、路径、分类、双端安装）。
-version: 1.1.0
+metadata:
+  version: 1.1.0
 ---
 
 # skill-authoring
@@ -33,13 +34,14 @@ version: 1.1.0
 
 ### 3. 写 SKILL.md
 
-frontmatter 三字段缺一不可：
+frontmatter 至少包含 `name` 和 `description`；需要版本追踪时使用 `metadata.version`，不要使用顶层 `version`，以兼容系统自带 `quick_validate.py`：
 
 ```yaml
 ---
 name: <与目录名一致>
 description: Use when <触发场景，让模型能判断何时加载>
-version: 1.0.0
+metadata:
+  version: 1.0.0
 ---
 ```
 
@@ -67,6 +69,14 @@ policy:
 
 ### 5. 安装与验证
 
+先用系统校验器检查新 skill 的基础 frontmatter：
+
+```bash
+python3 /home/joney/.codex/skills/.system/skill-creator/scripts/quick_validate.py <path/to/skill-folder>
+```
+
+再安装到双端：
+
 ```bash
 cd /home/joney/projects/ai/agent-tools && python3 install.py
 ```
@@ -80,5 +90,5 @@ cd /home/joney/projects/ai/agent-tools && python3 install.py
 ## 修改与下线
 
 - 改既有 skill：直接在仓库改，符号链接即时生效（新会话）。
-- 版本号规则：内容实质变化必须升 `version`（修文案 patch、加能力 minor、重写 major）——不升版本号会导致两端无法判断新旧。
+- 版本号规则：需要追踪内容变化时升 `metadata.version`（修文案 patch、加能力 minor、重写 major）；不要为了版本号破坏系统校验兼容性。
 - 下线 skill：从仓库删除目录、删两端符号链接、在 README 移除条目；若有替代者，在提交信息中注明由谁承接。

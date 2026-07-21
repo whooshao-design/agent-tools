@@ -1,7 +1,8 @@
 ---
 name: query-hippo-config
 description: 通过 Hippo 配置中心只读查看应用配置和实际生效 release。Use when 用户要求查看 Hippo 配置、线上/预发/灰度/OA 配置、代码分支依赖的配置 key、应用默认配置、namespace 配置项，或需要根据代码里的 ConfigService/getAppConfig/@HippoConfigProperty 判断真实配置走向；默认环境为 prod/fql_prod，最终必须输出查询接口路径和配置结果。
-version: 1.1.1
+metadata:
+  version: 1.1.1
 ---
 
 # query-hippo-config

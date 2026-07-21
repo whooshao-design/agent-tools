@@ -1,7 +1,8 @@
 ---
 name: review-middleware-reliability
 description: Use when `dev-review-change` 已启动，且变更涉及 Redis、MQ、任务调度或存在超时、重试、幂等、降级等可靠性风险，需要补查中间件与外部依赖行为时。
-version: 1.0.0
+metadata:
+  version: 1.0.0
 ---
 
 # review-middleware-reliability

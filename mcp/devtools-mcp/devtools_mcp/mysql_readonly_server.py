@@ -67,7 +67,7 @@ def mysql_lxcloud_query(
     timeout_seconds: int = 120,
     max_chars: int = 20000,
 ) -> str:
-    """通过 lxcloud 只读查询线上元信息。db_type 仅允许 ProcesstestDB 或 HawkDecisionDB。"""
+    """通过 lxcloud 只读查询线上数据。db_type 接受代码确认且当前账号有权访问的任意实例。"""
     if not query:
         return error_text("query is required")
     if not db_type:

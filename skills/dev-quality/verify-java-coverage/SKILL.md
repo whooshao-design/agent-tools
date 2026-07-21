@@ -1,7 +1,8 @@
 ---
 name: verify-java-coverage
 description: Use when Java 服务改动完成后，需要基于 Maven 与 JaCoCo 深挖覆盖率，尤其是跨模块覆盖、覆盖率门控、未覆盖行定位或补测建议不能靠基础验证快速判断时。
-version: 1.0.0
+metadata:
+  version: 1.0.0
 ---
 
 # verify-java-coverage

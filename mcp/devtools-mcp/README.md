@@ -61,7 +61,7 @@ mcp/devtools-mcp/.env
 - `ARTIFACT_REPO_ALLOWED_HOSTS`
 
 `java_app_diag` 通过 `BASTION_CONFIG` 指定堡垒机配置，默认查找 `/home/joney/projects/ai/agent-tools/mcp/bastion-mcp/config.json`。诊断工具会在首次执行时自动复用或建立堡垒机连接；如果密钥认证不可用，仍需传入 password/otp。
-`mysql_readonly` 复用 `~/.config/codex-mysql-readonly/instances.json`。
+`mysql_readonly` 复用 `~/.config/codex-mysql-readonly/instances.json`；lxcloud 查询接受任意经授权的 `db_type`，不维护客户端实例白名单，实例应由上层 skill 从用户输入或目标项目运行时数据源代码确认。
 `browser_session`、`redis_query`、`dubbo_test`、`lexiao`、`healthy` 复用已有 Playwright profile 和脚本约定。
 
 ## 分层

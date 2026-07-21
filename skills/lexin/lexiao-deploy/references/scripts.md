@@ -58,13 +58,21 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/lexiao-deploy/scripts/lexi
 
 For gray deployment, add `--env=gray`; gray skips branch integration and build, but still uses `list-apps`, `open-order`, `deploy-one`, and log verification.
 
-For container instance logs, use the fixed webshell helper instead of writing a new script:
+For container instance logs during deployment verification, call the diagnostics-owned helper instead of writing a new script:
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/lexiao-deploy/scripts/webshell_log_check.js \
-  --url=<login_pod_addr> \
-  --app=<log-app-name>
+node /home/joney/projects/ai/agent-tools/skills/lexin/java-server-diagnostics/scripts/container_log_check.js \
+  --app=<log-app-name> \
+  --env=pre \
+  --lines=120
 ```
 
-`lexiao_pre_release.js --action=deploy-one` deploys one target only. It chooses VM/KVM first when `--target-type=auto`; use `--target-ip=<ip>` to pin a VM or `--target-type=container --deployment-id=<id>` for a container target.
+If a deployment flow already has a `login_pod_addr`, use `/home/joney/projects/ai/agent-tools/skills/lexin/java-server-diagnostics/scripts/webshell_log_check.js` directly. The old `lexiao-deploy/scripts/webshell_log_check.js` path is only a compatibility wrapper.
 
+`lexiao_pre_release.js --action=deploy-one` deploys one target only. It chooses VM/KVM first when `--target-type=auto`; use `--target-ip=<ip>` to pin a VM or `--target-type=container --deployment-id=<id>` for one container target.
+
+For all-target gray deployment orchestration:
+
+- Run one app-owned deployment lane per target application. Apps with the same `发布顺序` may run in parallel, preferably one subagent per app when the active tool policy allows subagent delegation.
+- In each app-owned lane, call `deploy-one` for VM/KVM targets one `--target-ip` at a time and wait for publish/log verification before the next VM/KVM.
+- Container targets for the same app may be triggered together or in parallel after exact `order_detail_id` / `deployment_id` values are captured. Prefer the Lexiao API `publish_by_order_detail_id.json` with exact `order_detail_ids` when deploying multiple containers; do not click the generic UI `批量部署` button.

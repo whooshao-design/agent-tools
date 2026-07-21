@@ -85,3 +85,19 @@ Pre-release outcome rules:
 - Ambiguous: page/API is still running but logs show progress; report the latest page status and log evidence, then continue only if requested.
 - Do not classify a publish as failed only because the publish log contains an old-stop message such as `ERROR: The <app> does not started!`; if the same publish log later shows `项目启动成功`, `Dubbo run OK!`, final `<version> has publish`, and the machine is `RUNNING/已发布`, treat the deploy itself as successful and report the old-stop line as non-blocking publish noise.
 
+## Gray / All-Target Scheduling
+
+Use this flow when the user explicitly asks for `灰度` deployment or asks to deploy all gray machines/targets. Gray skips branch integration and build unless the user says otherwise.
+
+1. List target applications and record `发布顺序`.
+2. Process publish-order batches from smallest to largest.
+3. For applications in the same `发布顺序` batch, concurrent deployment is allowed:
+   - Prefer one subagent per application when subagent delegation is allowed by the active tool policy.
+   - Each subagent or local worker owns exactly one app/order. Do not let two workers operate the same app's VM/KVM list.
+   - Independent status and log checks for different apps in the same batch may run in parallel.
+4. Within one application, split targets into lanes after opening the publish order:
+   - VM/KVM lane: deploy one `machine_ip` at a time. Wait for that machine's publish status and log-first verification/classification before starting the next VM/KVM machine for the same app.
+   - Container lane: deploy exact container `order_detail_id` / `deployment_id` targets together or in parallel. Prefer a scoped API call with all exact `order_detail_ids` over repeated UI clicks. Do not click a generic UI `批量部署` button.
+   - VM/KVM lane and container lane may run concurrently for the same app, but the app is healthy only after both lanes finish and logs are verified or residual errors are classified.
+5. Do not start a later publish-order batch until every app in the current batch has completed all requested VM/KVM and container lanes and passed the sequential publish gate.
+6. If any VM/KVM machine or container target fails, becomes ambiguous, or shows new deployment-window ERROR/Exception logs, pause that app's remaining undeployed targets until the error is classified as blocking, non-blocking, or unrelated. Continue later targets only when the classification supports it or the user accepts the risk.

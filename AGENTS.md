@@ -40,17 +40,19 @@ python3 install.py --uninstall
 
 ## SKILL.md 约定
 
-frontmatter 必须包含三个字段，缺一可能导致 skill 不被发现：
+frontmatter 必须包含 `name` 和 `description`，缺一可能导致 skill 不被发现。需要记录版本时，放在系统校验器兼容的 `metadata.version` 中：
 
 ```yaml
 ---
 name: skill-name
 description: 何时触发此 skill 的描述
-version: 1.0.0
+metadata:
+  version: 1.0.0
 ---
 ```
 
 - `agents/openai.yaml` 是 Codex 附加配置，Claude 忽略它，随 skill 目录一起维护。
+- 不再使用顶层 `version` 字段；系统自带 `quick_validate.py` 不接受该字段。
 - SKILL.md 中引用脚本一律使用仓库绝对路径
   （如 `/home/joney/projects/ai/agent-tools/skills/lexin/test-dubbo-api/scripts/dubbo_request.py`），
   不要写 `~/.claude/skills` 或 `~/.codex/skills`——两端符号链接共用同一份文件。

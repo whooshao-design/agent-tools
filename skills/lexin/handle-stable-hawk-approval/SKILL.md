@@ -1,7 +1,8 @@
 ---
 name: handle-stable-hawk-approval
 description: 安全查询和处理 stable/测试环境米霍克与流程引擎审批。Use when 用户要求查看 stable 待审批、自动通过测试审批、处理米霍克 t_hawk_approval、处理流程引擎 t_approval、按业务字段或序号选择审批记录并调用回调、优化 /home/joney/tools/hawk 下旧审批脚本流程；只适用于 stable/测试环境，线上/生产审批不使用。
-version: 1.1.1
+metadata:
+  version: 1.1.1
 ---
 
 # handle-stable-hawk-approval

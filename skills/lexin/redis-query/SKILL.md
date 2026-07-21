@@ -1,7 +1,8 @@
 ---
 name: redis-query
 description: "通过 bianque 服务模拟器调用 DevService.queryRedis 进行 Redis 只读查询。适用于用户要求查询 Redis key 是否存在、类型、TTL、数量、STRING/SET/HASH/LIST/ZSET 值、Hash 指定 field 或批量排查 Redis key 来源和值时使用。"
-version: 1.2.1
+metadata:
+  version: 1.2.1
 ---
 
 # redis-query

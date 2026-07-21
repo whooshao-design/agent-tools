@@ -1,0 +1,6 @@
+interface:
+  display_name: "Register Healthy Metrics"
+  short_description: "批量注册并复查雷神 Healthy 指标"
+  default_prompt: "使用 $register-healthy-metrics 查询、注册并复查雷神指标。"
+policy:
+  allow_implicit_invocation: true

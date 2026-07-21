@@ -1,7 +1,8 @@
 ---
 name: query-oa-gateway-interface
 description: 查询 OA 网关 URL 与后端接口映射，并回代码仓库追踪实现链路。Use when 用户给出前端请求地址、rc_oa_gateway 路径、mihawk/gateway OA 页面请求，要求查询对应的 FSOF/Dubbo interface、method、version、真实后端应用、实现类、VO 参数、DAO 或 SQL；适用于“页面请求对应后端接口”“前端地址映射后端”“query_page_list 网关规则查询”“当前仓库搜不到接口时定位应用”等只读排查。
-version: 1.1.1
+metadata:
+  version: 1.1.1
 ---
 
 # query-oa-gateway-interface

@@ -1,7 +1,8 @@
 ---
 name: build-codeagent
 description: Use when `dev-build-change` 或 `dev-auto-loop` 已确认任务边界，且需要借助多后端 codeagent 处理大改动、独立并行子任务或长耗时实现。
-version: 1.0.0
+metadata:
+  version: 1.0.0
 ---
 
 # build-codeagent

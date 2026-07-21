@@ -1,7 +1,8 @@
 ---
 name: verify-browser-qa
 description: Use when 需要对页面、浏览器交互或部署结果做专项验收，并收集可视化证据，但这类检查不是本次验证的日常主入口。
-version: 1.0.0
+metadata:
+  version: 1.0.0
 ---
 
 # verify-browser-qa

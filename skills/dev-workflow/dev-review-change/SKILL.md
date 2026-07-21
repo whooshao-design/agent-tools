@@ -1,7 +1,8 @@
 ---
 name: dev-review-change
 description: Use when 代码改动已形成可评审结果，需要基于变更证据做代码评审，确认是否存在正确性、架构、安全或稳定性问题，并给出可执行后续动作。
-version: 1.0.0
+metadata:
+  version: 1.0.0
 ---
 
 # dev-review-change

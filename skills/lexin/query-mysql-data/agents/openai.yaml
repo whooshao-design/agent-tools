@@ -1,6 +1,6 @@
 interface:
   display_name: "Query MySQL Data"
-  short_description: "只读查询 MySQL 测试和受限线上元信息"
-  default_prompt: "使用 $query-mysql-data 只读查询 MySQL 数据；线上仅限 ProcesstestDB 和 HawkDecisionDB。"
+  short_description: "代码优先定位实例并只读查询 MySQL"
+  default_prompt: "使用 $query-mysql-data 只读查询 MySQL 数据；未明确实例时先从目标项目运行时数据源配置反查 db_type 和逻辑库，线上实例不使用静态白名单。"
 policy:
   allow_implicit_invocation: true

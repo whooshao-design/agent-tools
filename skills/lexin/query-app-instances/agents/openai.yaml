@@ -1,0 +1,6 @@
+interface:
+  display_name: "Query App Instances"
+  short_description: "查询乐效应用各环境 VM 与容器实例地址"
+  default_prompt: "使用 $query-app-instances 查询当前应用预发布机器和容器实例。"
+policy:
+  allow_implicit_invocation: true

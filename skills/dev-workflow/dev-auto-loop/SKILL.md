@@ -1,7 +1,8 @@
 ---
 name: dev-auto-loop
 description: Use when 任务目标、边界、停止条件与循环上限已明确，且需要自动跨多个开发阶段持续推进直到完成或停止。
-version: 1.0.0
+metadata:
+  version: 1.0.0
 ---
 
 # dev-auto-loop

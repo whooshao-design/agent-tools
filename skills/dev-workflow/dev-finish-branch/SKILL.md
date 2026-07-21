@@ -1,7 +1,8 @@
 ---
 name: dev-finish-branch
 description: Use when 改动范围已基本稳定，且已有可引用的验证结果与评审结论，准备在提交或交付前做最终收口。
-version: 1.0.0
+metadata:
+  version: 1.0.0
 ---
 
 # dev-finish-branch

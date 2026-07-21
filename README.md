@@ -20,14 +20,14 @@
 | `dev-clarify-task` | 需求澄清 - 收敛范围、非目标、验收标准 |
 | `requirements-review` | 需求评审 - 评审 PRD/需求文档完整性 |
 | `dev-design-solution` | 方案设计 - 比较实现路径、识别影响与风险 |
-| `design-tech-review` | 方案评审 - 边界/异常/一致性检查 |
+| `dev-review-solution` | 技术方案评审 - 独立检查可行性、完整性与风险并给出评审结论 |
 | `dev-build-change` | 代码开发 - 基于现有模式实施最小必要改动 |
 | `dev-verify-change` | 验证 - 围绕变更做最小必要验证 |
 | `dev-review-change` | 代码评审 - 基于变更证据评审正确性/架构/安全 |
 | `dev-finish-branch` | 分支收尾 - 提交、推送、收尾检查 |
 | `dev-auto-loop` | 自动编排 - 串联多个开发阶段持续推进 |
 
-**主线**: dev-clarify-task → dev-design-solution → design-tech-review → dev-build-change → dev-verify-change → dev-review-change → dev-finish-branch
+**主线**: dev-clarify-task → dev-design-solution → dev-review-solution → dev-build-change → dev-verify-change → dev-review-change → dev-finish-branch
 
 ## skills/dev-quality — 开发质量增强
 
@@ -54,6 +54,7 @@
 | Skill | 说明 | 配套 MCP |
 |---|---|---|
 | `lexiao-deploy` | 乐效构建、发布和验收流程 | `lexiao` |
+| `query-app-instances` | 通过乐效只读查询应用各环境 VM 和容器实例地址 | `browser_session` |
 
 ### 米霍克 / OA
 
@@ -74,9 +75,10 @@
 | Skill | 说明 | 配套 MCP |
 |---|---|---|
 | `redis-query` | 通过 DevService.queryRedis 只读查询 Redis | `redis_query` |
-| `query-mysql-data` | 只读查询 MySQL 测试/stable 数据和受限线上元信息 | `mysql_readonly` |
+| `query-mysql-data` | 从代码定位实例并只读查询 MySQL 测试/stable 与经授权线上数据 | `mysql_readonly` |
 | `query-clickhouse-water` | 查询 ClickHouse 流水并输出 SQL 与结果 | `bastion_dba` |
 | `query-hippo-config` | 查看 Hippo 配置中心实际生效配置 | `browser_session` |
+| `configure-hippo` | 新增或修改 Hippo 草稿配置，默认预发布且不发布 | `browser_session` |
 
 ### 监控与诊断
 
@@ -84,7 +86,9 @@
 |---|---|---|
 | `java-server-diagnostics` | Java 应用服务器只读诊断：默认先查 `error.log`，再按线索递进排查 | `java_app_diag` |
 | `healthy-dashboard-config` | Healthy/Nightingale 大盘配置 | `healthy` |
+| `inspect-healthy-metrics` | 只读查看雷神指标上报状态、最后样本和注册辅助信息 | `browser_session` |
 | `inspect-healthy-jvm-dashboard` | 只读查看雷神 JVM/G1 看板，整理变量、面板、PromQL 和页面快照 | `healthy`, `browser_session` |
+| `register-healthy-metrics` | 查询、注册和复查 Healthy/雷神指标 | `browser_session` |
 
 ## skills/cicd — 构建与发布
 
@@ -136,6 +140,6 @@ cd ~/projects/ai/agent-tools && git pull
 
 ## 添加新内容
 
-- 新 skill：在 `skills/<分类>/<skill-name>/SKILL.md` 创建（frontmatter 必须含 `name`、`description`、`version`），跑 `python3 install.py`。
+- 新 skill：在 `skills/<分类>/<skill-name>/SKILL.md` 创建（frontmatter 必须含 `name`、`description`；版本放在 `metadata.version`），跑 `python3 install.py`。
 - 新分类：在 `skills/` 下建子目录即可被自动发现。
 - 新 MCP server：在 `mcp/devtools-mcp/devtools_mcp/` 加 `<xxx>_server.py`，然后在两端各注册一条。

@@ -1,7 +1,8 @@
 ---
 name: requirements-review
 description: "评审已有产品或技术需求文档（PRD/需求单/接口需求），检查边界、异常、验收标准、风险和依赖是否完整。触发：评审需求文档、PRD 评审、规格评审、补齐验收标准等显式请求。"
-version: 1.0.0
+metadata:
+  version: 1.0.0
 ---
 
 # 需求评审（Requirements Review）

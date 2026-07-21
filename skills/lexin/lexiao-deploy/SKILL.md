@@ -1,7 +1,8 @@
 ---
 name: lexiao-deploy
 description: 乐效中部署和验收应用的流程技能。Use when 需要 open a Lexiao demand/version page, integrate branches, build an application, create or reuse a pre-release/gray publish order, deploy a project-environment artifact, or deploy exactly one pre-release/gray target with VM/KVM priority, then verify publish status, pipeline/artifact health, publish logs, target-server logs, and triage errors with next-step choices. Supports 项目环境/prj、预发布单机、显式灰度单目标 deployment; reserve OA、线上 rollout paths for future extension.
-version: 1.1.1
+metadata:
+  version: 1.2.3
 ---
 
 # Lexiao Deploy
@@ -18,13 +19,23 @@ Use this skill to deploy applications from Lexiao demand/version pages and verif
 - `项目环境` / `PROJECT` / `prj` deployment.
 - `预发布` single-machine deployment when the user asks to deploy one machine or specifically mentions pre-release machines. Prefer virtual-machine/KVM targets; only deploy a container target when no VM/KVM target exists or the user explicitly asks for container.
 - Full pre-release redeploy after code changes: branch integration, build, wait for artifact, create the correct publish order, deploy one VM/KVM, verify page/API and server logs, then triage errors and offer next-step choices.
-- `灰度` deployment when explicitly requested by the user: skip branch integration and build, then otherwise follow the same publish-order, one-target-per-app, log-first verification, and sequential error gate used for pre-release.
+- `灰度` deployment when explicitly requested by the user: skip branch integration and build, then follow publish-order batching, log-first verification, and the sequential error gate. Default to one target per app unless the user explicitly asks for all gray machines/targets.
 
-When the user names multiple applications, build all target applications together after branch integration; build does not need to follow the Lexiao `发布顺序`. After triggering builds, check every target application's build and artifact result before opening any publish order. Only the publish/deploy/log-verification phase is sorted by `发布顺序` and operated in publish-order batches from the smallest value to the largest. Applications with the same `发布顺序` may be deployed and verified in parallel, for example by assigning one application per subagent or running independent status/log checks concurrently. For each application, deploy exactly one target by default, verify logs, and report the result. Do not deploy all machines of one app unless the user explicitly asks for all machines.
+When the user names multiple applications, build all target applications together after branch integration; build does not need to follow the Lexiao `发布顺序`. After triggering builds, check every target application's build and artifact result before opening any publish order. Only the publish/deploy/log-verification phase is sorted by `发布顺序` and operated in publish-order batches from the smallest value to the largest. Applications with the same `发布顺序` may be deployed and verified in parallel; when subagent delegation is allowed by the active tool policy, prefer one subagent per application so each subagent owns exactly one app/order and no two subagents operate the same app. For each application, deploy exactly one target by default, verify logs, and report the result. Do not deploy all machines of one app unless the user explicitly asks for all machines.
+
+All-target gray scheduling:
+
+- If the user explicitly asks to deploy all gray machines/targets, treat VM/KVM and container targets as separate lanes within each application.
+- VM/KVM lane: deploy exactly one VM/KVM machine at a time for that application. Wait for publish status and log-first verification/classification before starting the next VM/KVM machine for the same application.
+- Container lane: after capturing exact `order_detail_id` / `deployment_id` values, container targets for the same application may be triggered together or in parallel. Do not use a generic UI `批量部署` button; use scoped API/tool calls with exact container target IDs.
+- The VM/KVM lane and container lane of the same application may run concurrently, but the application is not considered complete until both lanes have reached published status and log verification has passed or residual risk is classified.
+- Applications in the same `发布顺序` batch may run these per-application lanes concurrently. Do not start a later `发布顺序` batch until every application in the current batch has completed all requested lanes and passed the sequential gate.
 
 Sequential publish gate: do not start a later publish-order batch until every application in the current publish-order batch has completed log-first verification. If any application in the current batch fails, becomes ambiguous, or produces new deployment-window ERROR/Exception logs, first evaluate the error evidence and classify it as blocking, non-blocking, or unrelated. Continue to later publish-order apps only when the entire current batch is healthy or the user explicitly accepts the assessed risk.
 
 Do not apply the project-environment or pre-release single-machine flow to `OA` or `线上`. For those environments, read the page and stop before deploy, then ask for the environment-specific publish procedure, approval constraints, rollout strategy, log targets, and rollback criteria.
+
+For standalone VM or container log checks, prefer `java-server-diagnostics` as the direct entry point. When log checks are part of deployment or rollout verification, this skill may orchestrate them through `java-server-diagnostics`.
 
 ## Inputs
 
@@ -34,6 +45,7 @@ Extract and report these fields before deployment:
 - Target app name and project name. Match exact row text; do not rely on button order alone.
 - Environment IP, `GROUP`/SET, branch, developer, branch status, pipeline status, artifact status, deploy status, CR status.
 - For pre-release: publish order ID, app ID, version tag, deployment type, selected machine IP, machine publish status, machine run status, and whether VM/KVM or container was selected.
+- For gray/all-target deploys: publish order ID, app ID, version tag, every VM/KVM `machine_ip`, every container `order_detail_id` / `deployment_id`, and the planned VM serial lane plus container parallel lane.
 
 If multiple app rows match or the target app is not explicit, ask for the app name before clicking anything.
 
@@ -73,14 +85,14 @@ For multiple apps, split the work into two phases: branch integration and build 
    - If a dialog says `存在新制品，是否要创建新的发布单?`, choose `创建新发布单` after a fresh build unless the user explicitly asks to use the old order.
    - After creating a new order, re-query deployment details and use the new `publish_order_id`; do not keep polling or deploying a stale failed order.
    - Verify the publish order's `version_tag` matches the current target app row before clicking any machine deploy button.
-5. Deploy exactly one pre-release target:
+5. Deploy exactly one pre-release target. For explicit gray/all-target deploys, use the All-target gray scheduling rules above instead of stopping after one target:
    - Prefer one VM/KVM row. Only choose a container target when no VM/KVM exists or the user explicitly asks for container.
    - Click only the selected machine row's `部署` button. Do not click `批量部署`.
    - After this one target is verified, stop and ask whether to continue to the next app or next machine. Do not continue automatically across apps.
 6. Verification:
    - Poll Lexiao page/API for the selected machine while checking target-server diagnostics through `java-server-diagnostics`.
    - Treat Lexiao page/API publish status as auxiliary progress only. The deployment health conclusion must come primarily from target-server or container-instance logs observed during the deployment window.
-   - Run version-local `stdout.log` checks and shared `error.log` checks in parallel.
+   - Run version-local `stdout.log` checks and shared `error.log` checks through `java-server-diagnostics`. For container targets, that skill owns the `k8s_readonly` first, WebShell helper fallback path.
 7. Error triage and next choices:
    - If deployment or logs show blocking errors, identify the shortest causal chain and propose a concrete fix.
    - If deployment succeeds but deployment-time ERROR/Exception entries remain, classify them as blocking, non-blocking residual, or unrelated based on startup markers, machine run state, and log timing.
@@ -97,8 +109,7 @@ Use `get-browser-session` as the session layer. Prefer the existing Lexiao brows
 ```bash
 node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js \
   --url=<lexiao-url> \
-  --success-text=<target-app-name> \
-  --login-pattern='Work Happy|QR Code|Use MOA|Account|登录|扫码|账号|密码|SSO|OAuth'
+  --success-text=<target-app-name>
 ```
 
 If the default profile under `~/.cache` cannot be locked or written, use a writable profile such as `/home/joney/.codex/lexiao-browser-profile`. If login is required, open a headed browser and ask the user to complete SSO/MOA in the browser; never ask for passwords, OTPs, cookies, or private keys in chat.
@@ -107,7 +118,7 @@ If the default profile under `~/.cache` cannot be locked or written, use a writa
 
 Read these only when the corresponding phase is reached (progressive disclosure):
 
-- `references/scripts.md`: full reusable script catalog (`lexiao_pre_release.js`, `lexiao_project_env.js`, `webshell_log_check.js`) with all actions and flags.
+- `references/scripts.md`: full reusable script catalog (`lexiao_pre_release.js`, `lexiao_project_env.js`) with deploy-related actions and flags. Container log helper ownership lives in `java-server-diagnostics`.
 - `references/flows.md`: step-by-step Project Environment Deploy and Pre-Release Single-Machine Deploy flows, Lexiao API endpoints, and outcome rules.
 - `references/verification.md`: publish-log markers, startup-time reporting, unit-test/artifact acceptance redlines, and target-server log verification commands.
 
@@ -117,6 +128,7 @@ Keep the final report short and evidence-based:
 
 - What was deployed: app, branch, environment IP/GROUP, publish order.
 - Single-machine scope when applicable: state that only one machine was deployed, and whether it was VM/KVM or container.
+- All-target scope when applicable: state VM/KVM count and container count per app, and whether VM/KVM was deployed one-by-one while container targets were deployed concurrently.
 - Deployment result: page status, publish log markers, PID/port/health check if available.
 - Startup time: mandatory for every successful deployment; include publish health-check elapsed time and app initialization duration when available.
 - Unit-test result: latest pipeline ID/job URL, pass rate, key coverage metrics, whether it达标.

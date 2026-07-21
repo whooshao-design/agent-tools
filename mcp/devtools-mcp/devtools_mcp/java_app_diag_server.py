@@ -13,6 +13,7 @@ from devtools_mcp.java_app_diag_core import (
     app_log_path,
     ensure_success,
     q,
+    resolve_bastion_profile,
     validate_app,
     validate_health_path,
     validate_keyword,
@@ -28,11 +29,18 @@ mcp = FastMCP("Java App Diagnostics")
 session = BastionDiagSession()
 
 
-async def _execute(ip: str, command: str, timeout: int = 30) -> str:
-    return await session.execute(ip, command, bounded_int(timeout, 30, 5, 180))
+async def _execute(ip: str, command: str, timeout: int = 30, env: str = "", profile: str = "") -> str:
+    return await session.execute(ip, command, bounded_int(timeout, 30, 5, 180), env=env, profile=profile)
 
 
-async def _resolve_pid(ip: str, app_name: str = "", pid: str = "", timeout: int = 30) -> str:
+async def _resolve_pid(
+    ip: str,
+    app_name: str = "",
+    pid: str = "",
+    timeout: int = 30,
+    env: str = "",
+    profile: str = "",
+) -> str:
     if pid:
         return validate_pid(pid)
     if not app_name:
@@ -41,7 +49,7 @@ async def _resolve_pid(ip: str, app_name: str = "", pid: str = "", timeout: int 
     command = ensure_success(
         f"ps -eo pid,args | grep -F -- {q(app)} | grep -F java | grep -v grep | head -1"
     )
-    output = await _execute(ip, command, timeout)
+    output = await _execute(ip, command, timeout, env=env, profile=profile)
     for line in output.splitlines():
         stripped = line.strip()
         if not stripped or stripped == "__java_app_diag_done__":
@@ -83,7 +91,17 @@ def _is_command_error(output: str) -> bool:
     return output.startswith(("错误：", "跳转失败", "命令被拒绝", "执行失败"))
 
 
-async def _resolve_app_for_error_check(ip: str, app_name: str, timeout: int) -> tuple[str, dict[str, object]]:
+def _report_profile(env: str = "", profile: str = "") -> str:
+    return resolve_bastion_profile(env=env, profile=profile) or session._desired_profile(env=env, profile=profile)
+
+
+async def _resolve_app_for_error_check(
+    ip: str,
+    app_name: str,
+    timeout: int,
+    env: str = "",
+    profile: str = "",
+) -> tuple[str, dict[str, object]]:
     if app_name:
         return validate_app(app_name), {"source": "input", "candidates": {"input": [app_name]}}
 
@@ -98,7 +116,7 @@ async def _resolve_app_for_error_check(ip: str, app_name: str, timeout: int) -> 
         "ps -eo args | grep -F java | grep -F '/server_java/' | grep -v grep | "
         "awk -F'/server_java/' '{print $2}' | awk -F/ '{print $1}' | sort | uniq | head -100"
     )
-    output = await _execute(ip, command, timeout)
+    output = await _execute(ip, command, timeout, env=env, profile=profile)
     if _is_command_error(output):
         return "", {"error": output}
 
@@ -130,9 +148,15 @@ async def _resolve_app_for_error_check(ip: str, app_name: str, timeout: int) -> 
 
 
 @mcp.tool()
-async def connect_app_server_bastion(password: str = "", otp: str = "", keepalive_ip: str = "") -> str:
+async def connect_app_server_bastion(
+    password: str = "",
+    otp: str = "",
+    keepalive_ip: str = "",
+    env: str = "",
+    profile: str = "",
+) -> str:
     """连接堡垒机，供 Java 应用服务器只读诊断使用。PEM 认证足够时可不传密码。"""
-    return await session.connect(password=password, otp=otp, keepalive_ip=keepalive_ip)
+    return await session.connect(password=password, otp=otp, keepalive_ip=keepalive_ip, env=env, profile=profile)
 
 
 @mcp.tool()
@@ -142,7 +166,7 @@ async def app_server_connection_status() -> str:
 
 
 @mcp.tool()
-async def server_basic_status(ip: str, timeout: int = 30) -> str:
+async def server_basic_status(ip: str, timeout: int = 30, env: str = "", profile: str = "") -> str:
     """查看服务器基础状态：时间、主机名、负载、内存、磁盘和 vmstat。"""
     command = ensure_success(
         "echo '== date ==' ; date ; "
@@ -152,11 +176,11 @@ async def server_basic_status(ip: str, timeout: int = 30) -> str:
         "echo '== disk ==' ; df -h / /home /home/product ; "
         "echo '== vmstat ==' ; vmstat 1 3"
     )
-    return await _execute(ip, command, timeout)
+    return await _execute(ip, command, timeout, env=env, profile=profile)
 
 
 @mcp.tool()
-async def discover_java_apps(ip: str, timeout: int = 30) -> str:
+async def discover_java_apps(ip: str, timeout: int = 30, env: str = "", profile: str = "") -> str:
     """从目标机标准路径和 Java 进程中发现候选应用名。用于已知 IP、未给 app_name 的场景。"""
     command = ensure_success(
         "echo '== shared_log_apps ==' ; "
@@ -168,7 +192,7 @@ async def discover_java_apps(ip: str, timeout: int = 30) -> str:
         "echo '== java_processes ==' ; "
         "ps -eo pid,etime,pcpu,pmem,args | grep -F java | grep -v grep | head -50"
     )
-    return await _execute(ip, command, timeout)
+    return await _execute(ip, command, timeout, env=env, profile=profile)
 
 
 @mcp.tool()
@@ -178,15 +202,18 @@ async def check_app_error_log(
     lines: int = 120,
     timeout: int = 30,
     max_chars: int = 24000,
+    env: str = "",
+    profile: str = "",
 ) -> str:
     """默认日志快检：自动连接堡垒机，可自动收敛唯一应用名，只读取共享 error.log 摘要和尾部。"""
     try:
         line_count = bounded_int(lines, 120, 1, 500)
         char_limit = bounded_int(max_chars, 24000, 1000, 50000)
-        app, resolution = await _resolve_app_for_error_check(ip, app_name, timeout)
+        app, resolution = await _resolve_app_for_error_check(ip, app_name, timeout, env=env, profile=profile)
         if not app:
             return json_text({
                 "ip": ip,
+                "bastion_profile": _report_profile(env=env, profile=profile),
                 "checked_files": [],
                 "error": resolution.get("error", "unable to resolve app_name"),
                 "resolution": resolution,
@@ -202,7 +229,7 @@ async def check_app_error_log(
         f"echo '== error_summary ==' ; grep -E -i {pattern} {q(path)} | tail -80 ; "
         f"echo '== error_tail ==' ; tail -{line_count} {q(path)}"
     )
-    output = await _execute(ip, command, timeout)
+    output = await _execute(ip, command, timeout, env=env, profile=profile)
     if _is_command_error(output):
         return error_text(output)
 
@@ -212,6 +239,7 @@ async def check_app_error_log(
     return json_text({
         "ip": ip,
         "app_name": app,
+        "bastion_profile": _report_profile(env=env, profile=profile),
         "resolution": resolution,
         "checked_files": [path],
         "error_summary_line_count": len([line for line in summary.splitlines() if line.strip()]),
@@ -222,7 +250,7 @@ async def check_app_error_log(
 
 
 @mcp.tool()
-async def find_java_process(ip: str, app_name: str, timeout: int = 30) -> str:
+async def find_java_process(ip: str, app_name: str, timeout: int = 30, env: str = "", profile: str = "") -> str:
     """按应用名查 Java 进程，返回 PID、启动时间、CPU、内存、线程数和启动命令摘要。"""
     try:
         app = validate_app(app_name)
@@ -232,14 +260,21 @@ async def find_java_process(ip: str, app_name: str, timeout: int = 30) -> str:
         f"ps -eo pid,ppid,lstart,etime,pcpu,pmem,rss,vsz,nlwp,args | "
         f"grep -F -- {q(app)} | grep -F java | grep -v grep | head -20"
     )
-    return await _execute(ip, command, timeout)
+    return await _execute(ip, command, timeout, env=env, profile=profile)
 
 
 @mcp.tool()
-async def java_process_status(ip: str, app_name: str = "", pid: str = "", timeout: int = 30) -> str:
+async def java_process_status(
+    ip: str,
+    app_name: str = "",
+    pid: str = "",
+    timeout: int = 30,
+    env: str = "",
+    profile: str = "",
+) -> str:
     """查看 Java 进程资源状态。可传 pid，或传 app_name 自动取首个匹配 Java 进程。"""
     try:
-        target_pid = await _resolve_pid(ip, app_name=app_name, pid=pid, timeout=timeout)
+        target_pid = await _resolve_pid(ip, app_name=app_name, pid=pid, timeout=timeout, env=env, profile=profile)
     except (RuntimeError, ValueError) as exc:
         return error_text(str(exc))
     command = ensure_success(
@@ -248,11 +283,11 @@ async def java_process_status(ip: str, app_name: str = "", pid: str = "", timeou
         f"echo '== limits ==' ; cat /proc/{target_pid}/limits ; "
         f"echo '== fd_count ==' ; ls /proc/{target_pid}/fd | wc -l"
     )
-    return await _execute(ip, command, timeout)
+    return await _execute(ip, command, timeout, env=env, profile=profile)
 
 
 @mcp.tool()
-async def network_port_status(ip: str, port: str = "", timeout: int = 30) -> str:
+async def network_port_status(ip: str, port: str = "", timeout: int = 30, env: str = "", profile: str = "") -> str:
     """查看监听端口和 TCP 状态分布；传 port 时聚焦该端口连接。"""
     state_awk = q("NR>1 {count[$1]++} END {for (s in count) print s, count[s]}")
     if port:
@@ -271,14 +306,21 @@ async def network_port_status(ip: str, port: str = "", timeout: int = 30) -> str
             f"echo '== listen ==' ; ss -lntp | head -120 ; "
             f"echo '== tcp_states ==' ; ss -ant | awk {state_awk}"
         )
-    return await _execute(ip, command, timeout)
+    return await _execute(ip, command, timeout, env=env, profile=profile)
 
 
 @mcp.tool()
-async def java_jvm_summary(ip: str, app_name: str = "", pid: str = "", timeout: int = 60) -> str:
+async def java_jvm_summary(
+    ip: str,
+    app_name: str = "",
+    pid: str = "",
+    timeout: int = 60,
+    env: str = "",
+    profile: str = "",
+) -> str:
     """查看 JVM 轻量信息：VM.version、VM.flags 和 jstat GC 概览。"""
     try:
-        target_pid = await _resolve_pid(ip, app_name=app_name, pid=pid, timeout=timeout)
+        target_pid = await _resolve_pid(ip, app_name=app_name, pid=pid, timeout=timeout, env=env, profile=profile)
     except (RuntimeError, ValueError) as exc:
         return error_text(str(exc))
     command = ensure_success(
@@ -286,14 +328,23 @@ async def java_jvm_summary(ip: str, app_name: str = "", pid: str = "", timeout: 
         f"echo '== jcmd VM.flags ==' ; jcmd {target_pid} VM.flags ; "
         f"echo '== jstat gcutil ==' ; jstat -gcutil {target_pid} 1000 3"
     )
-    return await _execute(ip, command, timeout)
+    return await _execute(ip, command, timeout, env=env, profile=profile)
 
 
 @mcp.tool()
-async def java_thread_summary(ip: str, app_name: str = "", pid: str = "", keyword: str = "", lines: int = 200, timeout: int = 60) -> str:
+async def java_thread_summary(
+    ip: str,
+    app_name: str = "",
+    pid: str = "",
+    keyword: str = "",
+    lines: int = 200,
+    timeout: int = 60,
+    env: str = "",
+    profile: str = "",
+) -> str:
     """查看 Java 线程摘要。默认过滤线程名、线程状态和 deadlock 线索；keyword 可进一步过滤。"""
     try:
-        target_pid = await _resolve_pid(ip, app_name=app_name, pid=pid, timeout=timeout)
+        target_pid = await _resolve_pid(ip, app_name=app_name, pid=pid, timeout=timeout, env=env, profile=profile)
         line_count = bounded_int(lines, 200, 20, 1000)
         if keyword:
             grep = f"grep -i -- {q(validate_keyword(keyword))}"
@@ -305,11 +356,11 @@ async def java_thread_summary(ip: str, app_name: str = "", pid: str = "", keywor
         f"echo '== thread_summary pid={target_pid} ==' ; "
         f"jcmd {target_pid} Thread.print | {grep} | head -{line_count}"
     )
-    return await _execute(ip, command, timeout)
+    return await _execute(ip, command, timeout, env=env, profile=profile)
 
 
 @mcp.tool()
-async def java_gc_log_summary(ip: str, app_name: str, timeout: int = 30) -> str:
+async def java_gc_log_summary(ip: str, app_name: str, timeout: int = 30, env: str = "", profile: str = "") -> str:
     """汇总共享日志目录中的 GC/OOM 线索和 GC 日志文件。"""
     try:
         log_dir = app_log_dir(app_name)
@@ -321,11 +372,19 @@ async def java_gc_log_summary(ip: str, app_name: str, timeout: int = 30) -> str:
         f"echo '== oom_in_error_log ==' ; grep -E -i {gc_pattern} {q(log_dir)}/error.log | tail -80 ; "
         f"echo '== gc_keywords ==' ; grep -E -i {gc_pattern} {q(log_dir)}/*gc*.log* | tail -80"
     )
-    return await _execute(ip, command, timeout)
+    return await _execute(ip, command, timeout, env=env, profile=profile)
 
 
 @mcp.tool()
-async def local_health_get(ip: str, port: str, path: str = "/actuator/health", timeout: int = 15, max_chars: int = 12000) -> str:
+async def local_health_get(
+    ip: str,
+    port: str,
+    path: str = "/actuator/health",
+    timeout: int = 15,
+    max_chars: int = 12000,
+    env: str = "",
+    profile: str = "",
+) -> str:
     """在目标机本机回环地址上执行只读 HTTP GET，默认查询 /actuator/health。"""
     try:
         target_port = validate_port(port)
@@ -337,21 +396,29 @@ async def local_health_get(ip: str, port: str, path: str = "/actuator/health", t
     command = ensure_success(
         f"curl -sS --max-time {curl_timeout} {q(f'http://127.0.0.1:{target_port}{safe_path}')} | head -c {limit}"
     )
-    return await _execute(ip, command, curl_timeout + 10)
+    return await _execute(ip, command, curl_timeout + 10, env=env, profile=profile)
 
 
 @mcp.tool()
-async def list_log_files(ip: str, app_name: str, timeout: int = 30) -> str:
+async def list_log_files(ip: str, app_name: str, timeout: int = 30, env: str = "", profile: str = "") -> str:
     """列出 /home/product/logs/{app_name}_logs/ 下的共享应用日志文件。"""
     try:
         command = f"ls {q(app_log_dir(app_name))}/"
     except ValueError as exc:
         return error_text(str(exc))
-    return await _execute(ip, command, timeout)
+    return await _execute(ip, command, timeout, env=env, profile=profile)
 
 
 @mcp.tool()
-async def tail_app_log(ip: str, app_name: str, file_name: str = "error.log", lines: int = 200, timeout: int = 30) -> str:
+async def tail_app_log(
+    ip: str,
+    app_name: str,
+    file_name: str = "error.log",
+    lines: int = 200,
+    timeout: int = 30,
+    env: str = "",
+    profile: str = "",
+) -> str:
     """查看共享应用日志尾部内容。支持 debug/error/info/stdout 日志及其轮转文件。"""
     try:
         path = app_log_path(app_name, file_name)
@@ -362,7 +429,7 @@ async def tail_app_log(ip: str, app_name: str, file_name: str = "error.log", lin
     command = reader if path.endswith(".gz") else reader
     if path.endswith(".gz"):
         command = f"{reader} | tail -{line_count}"
-    return await _execute(ip, command, timeout)
+    return await _execute(ip, command, timeout, env=env, profile=profile)
 
 
 @mcp.tool()
@@ -374,6 +441,8 @@ async def grep_app_log(
     ignore_case: bool = True,
     lines: int = 50,
     timeout: int = 30,
+    env: str = "",
+    profile: str = "",
 ) -> str:
     """按关键字查询共享应用日志。仅执行只读 grep/zcat/tail。"""
     try:
@@ -387,33 +456,49 @@ async def grep_app_log(
         command = f"zcat {q(path)} | grep {grep_flag}{q(safe_keyword)} | tail -{line_count}"
     else:
         command = f"grep {grep_flag}{q(safe_keyword)} {q(path)} | tail -{line_count}"
-    return await _execute(ip, command, timeout)
+    return await _execute(ip, command, timeout, env=env, profile=profile)
 
 
 @mcp.tool()
-async def recent_error_summary(ip: str, app_name: str, timeout: int = 30) -> str:
+async def recent_error_summary(ip: str, app_name: str, timeout: int = 30, env: str = "", profile: str = "") -> str:
     """提取共享 error.log 里最近的 ERROR/Exception/Caused by 关键行。"""
     try:
         path = app_log_path(app_name, "error.log")
     except ValueError as exc:
         return error_text(str(exc))
     command = f"grep -i 'ERROR\\|Exception\\|Throwable\\|Caused by' {q(path)} | tail -80"
-    return await _execute(ip, command, timeout)
+    return await _execute(ip, command, timeout, env=env, profile=profile)
 
 
 @mcp.tool()
-async def list_version_log_files(ip: str, app_name: str, version_tag: str, timeout: int = 30) -> str:
+async def list_version_log_files(
+    ip: str,
+    app_name: str,
+    version_tag: str,
+    timeout: int = 30,
+    env: str = "",
+    profile: str = "",
+) -> str:
     """列出 /home/publish_product/server_java/{app_name}/{version_tag}/logs/ 下的版本本地日志。"""
     try:
         validate_version(version_tag)
         command = f"ls {q(version_log_dir(app_name, version_tag))}/"
     except ValueError as exc:
         return error_text(str(exc))
-    return await _execute(ip, command, timeout)
+    return await _execute(ip, command, timeout, env=env, profile=profile)
 
 
 @mcp.tool()
-async def tail_version_log(ip: str, app_name: str, version_tag: str, file_name: str = "stdout.log", lines: int = 240, timeout: int = 30) -> str:
+async def tail_version_log(
+    ip: str,
+    app_name: str,
+    version_tag: str,
+    file_name: str = "stdout.log",
+    lines: int = 240,
+    timeout: int = 30,
+    env: str = "",
+    profile: str = "",
+) -> str:
     """查看版本本地日志尾部内容，常用于发布后启动诊断。"""
     try:
         path = version_log_path(app_name, version_tag, validate_log_file(file_name, "stdout.log"))
@@ -424,7 +509,7 @@ async def tail_version_log(ip: str, app_name: str, version_tag: str, file_name: 
         command = f"zcat {q(path)} | tail -{line_count}"
     else:
         command = f"tail -{line_count} {q(path)}"
-    return await _execute(ip, command, timeout)
+    return await _execute(ip, command, timeout, env=env, profile=profile)
 
 
 @mcp.tool()
@@ -437,6 +522,8 @@ async def grep_version_log(
     ignore_case: bool = True,
     lines: int = 120,
     timeout: int = 30,
+    env: str = "",
+    profile: str = "",
 ) -> str:
     """按关键字查询版本本地日志，常用于发布后启动诊断。"""
     try:
@@ -450,7 +537,7 @@ async def grep_version_log(
         command = f"zcat {q(path)} | grep {grep_flag}{q(safe_keyword)} | tail -{line_count}"
     else:
         command = f"grep {grep_flag}{q(safe_keyword)} {q(path)} | tail -{line_count}"
-    return await _execute(ip, command, timeout)
+    return await _execute(ip, command, timeout, env=env, profile=profile)
 
 
 def main() -> None:

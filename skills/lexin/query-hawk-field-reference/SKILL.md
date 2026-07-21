@@ -1,7 +1,8 @@
 ---
 name: query-hawk-field-reference
 description: 查询米霍克字段引用关系。Use when 用户要求查询字段被哪些乐包、策略节点、执行节点或规则引用，梳理 Hawk 字段影响面，从 /home/joney/tools/hawk/HawkFieldRefUtil.java 旧脚本迁移字段引用查询流程，或要求结果默认只输出到终端、不落结果文件。
-version: 1.0.0
+metadata:
+  version: 1.0.0
 ---
 
 # query-hawk-field-reference

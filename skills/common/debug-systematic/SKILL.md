@@ -1,7 +1,8 @@
 ---
 name: debug-systematic
 description: Use when 遇到不明原因的 bug、偶现问题、行为与预期不符且直觉修复无效时，按"复现→定位→根因→验证"四阶段系统化调试，避免盲改代码和无效试错。
-version: 1.0.0
+metadata:
+  version: 1.0.0
 ---
 
 # debug-systematic

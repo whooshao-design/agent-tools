@@ -13,6 +13,38 @@ from pathlib import Path, PurePosixPath
 MCP_DIR = Path(__file__).resolve().parents[2]
 BASTION_MCP_ROOT = MCP_DIR / "bastion-mcp"
 DEFAULT_BASTION_CONFIG = BASTION_MCP_ROOT / "config.json"
+ENV_PROFILE_ALIASES = {
+    "online": "online",
+    "prod": "online",
+    "production": "online",
+    "gray": "online",
+    "grey": "online",
+    "pre": "online",
+    "pre-release": "online",
+    "prerelease": "online",
+    "线上": "online",
+    "生产": "online",
+    "灰度": "online",
+    "预发": "online",
+    "预发布": "online",
+    "stable": "dev",
+    "test": "dev",
+    "testing": "dev",
+    "prj": "dev",
+    "project": "dev",
+    "dev": "dev",
+    "项目": "dev",
+    "项目环境": "dev",
+    "dba": "dba",
+}
+AUTH_HINT_MARKERS = (
+    "要求输入密码",
+    "要求输入安全码",
+    "未提供 password",
+    "密钥认证失败",
+    "认证失败",
+    "验证失败",
+)
 
 try:
     import bastion_mcp.ssh_manager as bastion_ssh
@@ -68,32 +100,115 @@ class BastionDiagSession:
 
     def __init__(self) -> None:
         self.ssh_mgr: SSHManager | None = None
+        self.active_profile = ""
+        self.active_bastion_host = ""
 
-    def _load_config(self) -> dict:
+    def _read_config(self) -> dict:
         config_path = os.environ.get("BASTION_CONFIG", str(DEFAULT_BASTION_CONFIG))
         with open(config_path, encoding="utf-8") as f:
             return json.load(f)
 
-    async def connect(self, password: str = "", otp: str = "", keepalive_ip: str = "") -> str:
-        config = self._load_config()
-        self.ssh_mgr = SSHManager(config)
-        final_password = password or os.environ.get("BASTION_PASSWORD", "") or config.get("password", "")
-        return await asyncio.to_thread(
-            self.ssh_mgr.connect,
-            password=final_password,
-            otp=otp,
-            keepalive_ip=keepalive_ip or config.get("keepalive_ip", "10.11.86.153"),
+    def _select_profile(self, config: dict, profile: str = "") -> str:
+        candidate = (
+            profile
+            or os.environ.get("JAVA_APP_DIAG_BASTION_PROFILE", "")
+            or os.environ.get("BASTION_PROFILE", "")
+            or config.get("default_profile", "")
         )
+        return resolve_bastion_profile(profile=candidate)
+
+    def _load_config(self, profile: str = "") -> tuple[dict, str]:
+        config = self._read_config()
+        selected_profile = self._select_profile(config, profile)
+        if not selected_profile:
+            return config, ""
+
+        profiles = config.get("profiles", {})
+        if not isinstance(profiles, dict) or selected_profile not in profiles:
+            raise ValueError(f"未知堡垒机配置 profile: {selected_profile}")
+
+        profile_config = profiles[selected_profile]
+        if not isinstance(profile_config, dict):
+            raise ValueError(f"堡垒机配置 profile 必须是对象: {selected_profile}")
+
+        base_config = {
+            key: value
+            for key, value in config.items()
+            if key not in ("profiles", "default_profile")
+        }
+        base_config.update(profile_config)
+        return base_config, selected_profile
+
+    def _desired_profile(self, env: str = "", profile: str = "") -> str:
+        explicit_profile = resolve_bastion_profile(env=env, profile=profile)
+        if explicit_profile:
+            return explicit_profile
+        try:
+            config = self._read_config()
+        except Exception:
+            return ""
+        return self._select_profile(config)
+
+    def _format_connect_result(self, result: str, profile: str, config: dict) -> str:
+        if not result.startswith("错误"):
+            return result
+        profile_label = profile or "default"
+        host = config.get("bastion_host", "")
+        detail = f"当前堡垒机 profile={profile_label}"
+        if host:
+            detail += f", host={host}"
+        if any(marker in result for marker in AUTH_HINT_MARKERS):
+            detail += "；MCP 不能复用 Xshell 的交互输入，请传入 password/otp，或确认该 profile 的 PEM/免密认证与 JumpServer 登录态可用"
+        return f"{result}（{detail}）"
+
+    async def connect(
+        self,
+        password: str = "",
+        otp: str = "",
+        keepalive_ip: str = "",
+        env: str = "",
+        profile: str = "",
+    ) -> str:
+        requested_profile = resolve_bastion_profile(env=env, profile=profile)
+        try:
+            config, loaded_profile = self._load_config(requested_profile)
+        except ValueError as exc:
+            return f"错误：{exc}"
+        if self.ssh_mgr:
+            try:
+                self.ssh_mgr.disconnect()
+            except Exception:
+                pass
+        self.ssh_mgr = SSHManager(config)
+        self.active_profile = loaded_profile
+        self.active_bastion_host = config.get("bastion_host", "")
+        final_password = password or os.environ.get("BASTION_PASSWORD", "") or config.get("password", "")
+        try:
+            result = await asyncio.to_thread(
+                self.ssh_mgr.connect,
+                password=final_password,
+                otp=otp,
+                keepalive_ip=keepalive_ip or config.get("keepalive_ip", "10.11.86.153"),
+            )
+        except Exception as exc:
+            result = f"错误：连接堡垒机失败：{exc}"
+        return self._format_connect_result(result, loaded_profile, config)
 
     async def status(self) -> str:
         if not self.ssh_mgr:
             return "未初始化"
-        return "已连接" if self.ssh_mgr.is_connected() else "已断开"
+        state = "已连接" if self.ssh_mgr.is_connected() else "已断开"
+        profile = self.active_profile or "default"
+        if self.active_bastion_host:
+            return f"{state}（profile={profile}, host={self.active_bastion_host}）"
+        return f"{state}（profile={profile}）"
 
-    async def execute(self, ip: str, command: str, timeout: int) -> str:
-        if not self.ssh_mgr or not self.ssh_mgr.is_connected():
+    async def execute(self, ip: str, command: str, timeout: int, env: str = "", profile: str = "") -> str:
+        desired_profile = self._desired_profile(env=env, profile=profile)
+        profile_changed = desired_profile and desired_profile != self.active_profile
+        if not self.ssh_mgr or not self.ssh_mgr.is_connected() or profile_changed:
             try:
-                connect_result = await self.connect()
+                connect_result = await self.connect(env=env, profile=profile)
             except Exception as exc:
                 return f"错误：未连接堡垒机，自动连接失败：{exc}"
             if connect_result.startswith("错误") or not self.ssh_mgr or not self.ssh_mgr.is_connected():
@@ -104,6 +219,14 @@ class BastionDiagSession:
             command,
             bounded_int(timeout, 30, 5, 180),
         )
+
+
+def resolve_bastion_profile(env: str = "", profile: str = "") -> str:
+    value = str(profile or env or "").strip()
+    if not value:
+        return ""
+    key = value.lower().replace("_", "-")
+    return ENV_PROFILE_ALIASES.get(key, key)
 
 
 def validate_app(app_name: str) -> str:

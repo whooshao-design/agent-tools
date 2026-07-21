@@ -17,7 +17,7 @@ DEFAULT_TARGETS_FILE = os.environ.get("DUBBO_TARGETS_FILE", str(SKILL_DIR / "tar
 DEFAULT_NO_PROXY = ".fenqile.com,.lexinfintech.com,.lexincloud.com,10.0.0.0/8,localhost,127.0.0.1"
 BROWSER_SESSION_SCRIPT = os.environ.get(
     "BROWSER_SESSION_SCRIPT",
-    str(SKILLS_ROOT / "common" / "get-browser-session" / "scripts" / "browser_session.js"),
+    str(SKILLS_ROOT / "lexin" / "get-browser-session" / "scripts" / "browser_session.js"),
 )
 BROWSER_REQUEST_SCRIPT = os.environ.get(
     "BIANQUE_BROWSER_REQUEST_SCRIPT",
@@ -167,7 +167,6 @@ def get_cookie(base_url, domain, profile):
         "--show-secrets",
         f"--domain={domain}",
         "--success-text=none",
-        "--login-pattern=Work Happy|QR Code|Use MOA|Account|登录|扫码|账号|密码|SSO|OAuth",
         f"--profile={profile}",
     ]
     data = json.loads(subprocess.check_output(cmd, text=True))

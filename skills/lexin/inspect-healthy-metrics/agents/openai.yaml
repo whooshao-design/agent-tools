@@ -1,0 +1,6 @@
+interface:
+  display_name: "Inspect Healthy Metrics"
+  short_description: "只读检查雷神指标上报状态和最后样本"
+  default_prompt: "使用 $inspect-healthy-metrics 查看指定雷神指标是否正常上报。"
+policy:
+  allow_implicit_invocation: true

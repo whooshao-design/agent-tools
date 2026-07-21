@@ -1,7 +1,8 @@
 ---
 name: dev-build-change
 description: Use when 需求边界与实现路径已基本明确，准备基于现有代码模式实施最小必要改动。
-version: 1.0.0
+metadata:
+  version: 1.0.0
 ---
 
 # dev-build-change

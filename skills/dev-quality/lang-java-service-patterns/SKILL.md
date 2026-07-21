@@ -1,7 +1,8 @@
 ---
 name: lang-java-service-patterns
 description: Use when 开发或评审 Java 服务代码时，需要快速对齐幂等、异常处理、事务边界、分层写法与测试模式等高频服务实现习惯，而主入口不宜展开语言专项细节时。
-version: 1.0.0
+metadata:
+  version: 1.0.0
 ---
 
 # lang-java-service-patterns

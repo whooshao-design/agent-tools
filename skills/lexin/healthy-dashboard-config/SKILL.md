@@ -1,7 +1,8 @@
 ---
 name: healthy-dashboard-config
 description: "配置 Healthy/雷神/Nightingale 监控大盘时使用：读取和更新 /api/n9e/board/{id}/configs，配置大盘变量、Prometheus 面板、穿透加载监控指标，并复用本地浏览器登录态完成回读校验。"
-version: 1.0.1
+metadata:
+  version: 1.0.1
 ---
 
 # healthy-dashboard-config

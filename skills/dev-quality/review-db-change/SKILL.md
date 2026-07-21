@@ -1,7 +1,8 @@
 ---
 name: review-db-change
 description: Use when `dev-review-change` 已启动，且评审涉及 SQL、DDL、索引、事务边界、数据兼容性或发布顺序，需要补做数据库风险专项判断时。
-version: 1.0.0
+metadata:
+  version: 1.0.0
 ---
 
 # review-db-change

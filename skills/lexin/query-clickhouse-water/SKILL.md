@@ -1,7 +1,8 @@
 ---
 name: query-clickhouse-water
 description: 通过 DB 堡垒机只读查询 ClickHouse 流水并整理结果。Use when 用户要求查询 ClickHouse 流水、线上/测试流水、决策流水、规则流水、trace cost 流水，验证流水口径，或优化已有 ClickHouse 查询 SQL；最终必须同时输出执行 SQL 和查询结果。
-version: 1.0.1
+metadata:
+  version: 1.0.1
 ---
 
 # query-clickhouse-water

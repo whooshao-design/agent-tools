@@ -18,14 +18,13 @@ from devtools_mcp.common import (
 mcp = FastMCP("Browser Session")
 
 BROWSER_SCRIPT = DEFAULT_BROWSER_SCRIPT
-DEFAULT_LOGIN_PATTERN = "Work Happy|QR Code|Use MOA|Account|登录|扫码|账号|密码|SSO|OAuth"
 
 
 def _browser_args(
     url: str = "",
     profile: str = "",
     success_text: str = "none",
-    login_pattern: str = DEFAULT_LOGIN_PATTERN,
+    login_pattern: str = "",
 ) -> list[str]:
     args = []
     if url:
@@ -51,7 +50,7 @@ def browser_doctor() -> str:
 
 
 @mcp.tool()
-def check_session(url: str, profile: str = "", success_text: str = "none", login_pattern: str = DEFAULT_LOGIN_PATTERN) -> str:
+def check_session(url: str, profile: str = "", success_text: str = "none", login_pattern: str = "") -> str:
     """检查指定 URL 的浏览器登录态。默认不要求固定成功文案。"""
     if not url:
         return error_text("url is required")
@@ -59,7 +58,7 @@ def check_session(url: str, profile: str = "", success_text: str = "none", login
 
 
 @mcp.tool()
-def browser_page_snapshot(url: str, profile: str = "", success_text: str = "none", login_pattern: str = DEFAULT_LOGIN_PATTERN) -> str:
+def browser_page_snapshot(url: str, profile: str = "", success_text: str = "none", login_pattern: str = "") -> str:
     """读取页面标题、URL、正文摘要和按钮列表；不执行页面动作。"""
     if not url:
         return error_text("url is required")
@@ -72,7 +71,7 @@ def browser_click_text(
     text: str,
     profile: str = "",
     success_text: str = "none",
-    login_pattern: str = DEFAULT_LOGIN_PATTERN,
+    login_pattern: str = "",
     timeout_seconds: int = 120,
 ) -> str:
     """在页面中按规范化文本点击可见元素，并返回点击后的页面状态。"""
@@ -92,7 +91,7 @@ def browser_click_button(
     text: str,
     profile: str = "",
     success_text: str = "none",
-    login_pattern: str = DEFAULT_LOGIN_PATTERN,
+    login_pattern: str = "",
     timeout_seconds: int = 120,
 ) -> str:
     """在页面中按按钮文本点击可见按钮，并返回点击后的页面状态。"""
@@ -112,7 +111,7 @@ def ensure_session(url: str, profile: str = "", success_text: str = "none", time
     if not url:
         return error_text("url is required")
     timeout_ms = bounded_int(timeout_seconds, 300, 30, 1800) * 1000
-    args = _browser_args(url, profile, success_text, DEFAULT_LOGIN_PATTERN)
+    args = _browser_args(url, profile, success_text)
     args.extend(["--ensure", f"--timeout={timeout_ms}"])
     return _run_browser(args, timeout=bounded_int(timeout_seconds, 300, 30, 1800) + 30)
 

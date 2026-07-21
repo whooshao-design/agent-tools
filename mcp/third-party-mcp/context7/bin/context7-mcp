@@ -2,13 +2,35 @@
 set -euo pipefail
 
 PACKAGE="${CONTEXT7_MCP_PACKAGE:-@upstash/context7-mcp@3.1.0}"
-CACHE_ROOT="${AGENT_TOOLS_MCP_CACHE:-/tmp/agent-tools-mcp-cache}"
+CACHE_ROOT="${AGENT_TOOLS_MCP_CACHE:-$HOME/.local/share/agent-tools/mcp-cache}"
+INSTALL_ROOT="${CONTEXT7_MCP_HOME:-$CACHE_ROOT/context7}"
+PACKAGE_SPEC_FILE="$INSTALL_ROOT/.package-spec"
+BIN="$INSTALL_ROOT/node_modules/.bin/context7-mcp"
+
 export NPM_CONFIG_CACHE="${NPM_CONFIG_CACHE:-$CACHE_ROOT/npm}"
 export NPM_CONFIG_UPDATE_NOTIFIER="${NPM_CONFIG_UPDATE_NOTIFIER:-false}"
+export NPM_CONFIG_AUDIT="${NPM_CONFIG_AUDIT:-false}"
+export NPM_CONFIG_FUND="${NPM_CONFIG_FUND:-false}"
 
-args=(-y "$PACKAGE")
+if [ -n "${CONTEXT7_MCP_BIN:-}" ]; then
+  exec "$CONTEXT7_MCP_BIN" "$@"
+fi
+
+needs_install=1
+if [ -x "$BIN" ] && [ -f "$PACKAGE_SPEC_FILE" ] && [ "$(cat "$PACKAGE_SPEC_FILE")" = "$PACKAGE" ]; then
+  needs_install=0
+fi
+
+if [ "$needs_install" -eq 1 ]; then
+  mkdir -p "$INSTALL_ROOT"
+  echo "Installing $PACKAGE into $INSTALL_ROOT" >&2
+  npm --prefix "$INSTALL_ROOT" install --save-exact --omit=dev --no-audit --no-fund "$PACKAGE" >&2
+  printf '%s\n' "$PACKAGE" > "$PACKAGE_SPEC_FILE"
+fi
+
+args=()
 if [ -n "${CONTEXT7_API_KEY:-}" ]; then
   args+=(--api-key "$CONTEXT7_API_KEY")
 fi
 
-exec npx "${args[@]}" "$@"
+exec "$BIN" "${args[@]}" "$@"

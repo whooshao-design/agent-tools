@@ -10,7 +10,9 @@ const CONFIG_FILE = path.join(CONFIG_DIR, 'instances.json');
 const DEFAULT_INSTANCE = 'default';
 const MYSQL_BIN = process.env.MYSQL_BIN || path.join(os.homedir(), 'tools', 'mysql-client', 'root', 'usr', 'bin', 'mysql');
 const LXCLOUD_SQL_ENDPOINT = 'https://lxcloud.oa.fenqile.com/v1/mysql/sql-query/exec-query/';
-const LXCLOUD_ALLOWED_DB_TYPES = new Set(['ProcesstestDB', 'HawkDecisionDB']);
+const LXCLOUD_DB_TYPE_MAX_LENGTH = 128;
+const LXCLOUD_URL = 'https://lxcloud.oa.fenqile.com/';
+const BROWSER_SESSION_SCRIPT = path.join(__dirname, '..', '..', 'get-browser-session', 'scripts', 'browser_session.js');
 
 function parseArgs(argv) {
   const args = { _: [] };
@@ -191,37 +193,177 @@ function runMysql(instance, args) {
 function normalizeLxcloudDbType(raw) {
   const value = String(raw || '').trim();
   const lowered = value.toLowerCase();
-  if (['process', 'process-engine', 'process_engine', 'processtestdb'].includes(lowered)) {
+  if (['process-test', 'process_test', 'processtestdb'].includes(lowered)) {
     return 'ProcesstestDB';
+  }
+  if (['process-manage', 'process_manage', 'processmanage', 'processmanagedb'].includes(lowered)) {
+    return 'ProcessmanageDB';
   }
   if (['hawk', 'mihawk', 'mihuo', 'hawkdecisiondb'].includes(lowered)) {
     return 'HawkDecisionDB';
   }
+  if (['credit', 'creditm', 'creditmdb', 'rc_credit_ms_db'].includes(lowered)) {
+    return 'CreditmDB';
+  }
   return value;
 }
 
-function lxcloudAuthorization(args) {
-  const raw = valueFrom(args, 'authorization', 'LXCLOUD_AUTHORIZATION')
-    || valueFrom(args, 'bearer-token', 'LXCLOUD_BEARER_TOKEN');
+function validateLxcloudDbType(raw) {
   if (!raw || raw === true) {
-    throw new Error('缺少 lxcloud 授权。请通过环境变量 LXCLOUD_BEARER_TOKEN 或 LXCLOUD_AUTHORIZATION 提供，不要写入仓库。');
+    throw new Error('缺少线上实例 db_type。用户未明确提供时，应先从目标项目的运行时数据源配置中确认。');
+  }
+  const dbType = normalizeLxcloudDbType(raw);
+  if (!dbType) {
+    throw new Error('缺少线上实例 db_type。用户未明确提供时，应先从目标项目的运行时数据源配置中确认。');
+  }
+  if (dbType.length > LXCLOUD_DB_TYPE_MAX_LENGTH || /[\x00-\x1f\x7f]/.test(dbType)) {
+    throw new Error(`非法线上实例 db_type：仅允许不超过 ${LXCLOUD_DB_TYPE_MAX_LENGTH} 个字符且不含控制字符。`);
+  }
+  return dbType;
+}
+
+function normalizeAuthorization(raw) {
+  if (!raw || raw === true) {
+    return '';
   }
   const text = String(raw).trim();
+  if (!text) return '';
   return text.toLowerCase().startsWith('bearer ') ? text : `Bearer ${text}`;
 }
 
-function buildLxcloudPayload(args) {
-  const dbType = normalizeLxcloudDbType(valueFrom(args, 'db-type', 'LXCLOUD_DB_TYPE'));
-  if (!LXCLOUD_ALLOWED_DB_TYPES.has(dbType)) {
-    throw new Error(`拒绝查询未允许的线上实例：${dbType || '<empty>'}。仅允许 ProcesstestDB 和 HawkDecisionDB。`);
+function normalizeLxcloudUserName(raw) {
+  const value = String(raw || '').trim();
+  if (!value || value.length > 128 || !/^[a-z0-9][a-z0-9._@-]*$/i.test(value)) {
+    return '';
   }
+  return value;
+}
+
+function userNameFromJwt(authorization) {
+  const token = String(authorization || '').replace(/^bearer\s+/i, '');
+  const parts = token.split('.');
+  if (parts.length < 2) return '';
+
+  try {
+    const encoded = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padding = '='.repeat((4 - (encoded.length % 4)) % 4);
+    const payload = JSON.parse(Buffer.from(`${encoded}${padding}`, 'base64').toString('utf8'));
+    const containers = [payload, payload.user, payload.userInfo, payload.data].filter(Boolean);
+    const keys = ['user_name', 'username', 'userName', 'preferred_username', 'account'];
+    for (const container of containers) {
+      for (const key of keys) {
+        const userName = normalizeLxcloudUserName(container[key]);
+        if (userName) return userName;
+      }
+    }
+  } catch (_) {
+    // The lxcloud token may be opaque rather than JWT; fall back to page identity.
+  }
+  return '';
+}
+
+function inferLxcloudUserName(session, authorization) {
+  const jwtUserName = userNameFromJwt(authorization);
+  if (jwtUserName) return jwtUserName;
+
+  const snippet = String((session && session.snippet) || '');
+  const versionMatch = snippet.match(/版本说明\s+([a-z0-9][a-z0-9._@-]*)\s*[（(]/i);
+  if (versionMatch) return normalizeLxcloudUserName(versionMatch[1]);
+
+  const accountMatch = snippet.match(/\b([a-z][a-z0-9._@-]*)\s*[（(][^()（）]{1,64}[)）]/i);
+  return normalizeLxcloudUserName(accountMatch && accountMatch[1]);
+}
+
+function lxcloudAuthContextFromBrowserSession(args) {
+  if (args['no-browser-session'] || process.env.LXCLOUD_DISABLE_BROWSER_SESSION) {
+    return { authorization: '', userName: '' };
+  }
+
+  const browserSessionScript = valueFrom(args, 'browser-session-script', 'LXCLOUD_BROWSER_SESSION_SCRIPT') || BROWSER_SESSION_SCRIPT;
+  if (!fs.existsSync(browserSessionScript)) {
+    return { authorization: '', userName: '' };
+  }
+
+  const storageKey = String(valueFrom(args, 'browser-storage-key', 'LXCLOUD_TOKEN_STORAGE_KEY') || 'token');
+  const browserUrl = String(valueFrom(args, 'browser-url', 'LXCLOUD_URL') || LXCLOUD_URL);
+  const timeoutMs = Number(valueFrom(args, 'browser-timeout-ms', 'LXCLOUD_BROWSER_TIMEOUT_MS') || 60000);
+  const childArgs = [
+    browserSessionScript,
+    '--storage',
+    `--url=${browserUrl}`,
+    '--success-text=none',
+    `--storage-key=${storageKey}`,
+    '--storage-type=local',
+    '--show-secrets',
+  ];
+
+  const browserProfile = valueFrom(args, 'browser-profile', 'LXCLOUD_BROWSER_PROFILE');
+  if (browserProfile && browserProfile !== true) childArgs.push(`--profile=${browserProfile}`);
+  const browserToolDir = valueFrom(args, 'browser-tool-dir', 'BROWSER_SESSION_TOOL_DIR');
+  if (browserToolDir && browserToolDir !== true) childArgs.push(`--tool-dir=${browserToolDir}`);
+  const browserChrome = valueFrom(args, 'browser-chrome', 'BROWSER_SESSION_CHROME');
+  if (browserChrome && browserChrome !== true) childArgs.push(`--chrome=${browserChrome}`);
+  const runtimeLibDir = valueFrom(args, 'browser-runtime-lib-dir', 'BROWSER_SESSION_RUNTIME_LIB_DIR');
+  if (runtimeLibDir && runtimeLibDir !== true) childArgs.push(`--runtime-lib-dir=${runtimeLibDir}`);
+
+  const result = childProcess.spawnSync('node', childArgs, {
+    encoding: 'utf8',
+    timeout: timeoutMs,
+    maxBuffer: 1024 * 1024 * 8,
+  });
+  if (result.error) {
+    throw new Error(`缺少 lxcloud 授权，且浏览器 session token 获取失败：${sanitize(result.error.message)}`);
+  }
+  if (result.status !== 0) {
+    const detail = sanitize(result.stderr || `browser_session exited with code ${result.status}`);
+    throw new Error(`缺少 lxcloud 授权，且浏览器 session token 获取失败：${detail}`);
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(result.stdout);
+  } catch (_) {
+    throw new Error('缺少 lxcloud 授权，且浏览器 session token 输出不是合法 JSON。');
+  }
+  if (!parsed.sessionReady) {
+    throw new Error('缺少 lxcloud 授权，且 lxcloud 浏览器登录态不可用。请先刷新 lxcloud 登录态。');
+  }
+  const tokenRow = (parsed.storage || []).find((item) => item.type === 'local' && item.key === storageKey && item.exists && item.value);
+  const authorization = normalizeAuthorization(tokenRow && tokenRow.value);
+  return {
+    authorization,
+    userName: inferLxcloudUserName(parsed, authorization),
+  };
+}
+
+function resolveLxcloudAuthContext(args) {
+  const raw = valueFrom(args, 'authorization', 'LXCLOUD_AUTHORIZATION')
+    || valueFrom(args, 'bearer-token', 'LXCLOUD_BEARER_TOKEN');
+  const directAuth = normalizeAuthorization(raw);
+  if (directAuth) {
+    return {
+      authorization: directAuth,
+      userName: userNameFromJwt(directAuth),
+    };
+  }
+
+  const browserAuthContext = lxcloudAuthContextFromBrowserSession(args);
+  if (browserAuthContext.authorization) {
+    return browserAuthContext;
+  }
+
+  throw new Error('缺少 lxcloud 授权。可配置环境变量 LXCLOUD_BEARER_TOKEN/LXCLOUD_AUTHORIZATION，或先用浏览器登录 https://lxcloud.oa.fenqile.com/ 后自动复用 localStorage token。');
+}
+
+function buildLxcloudPayload(args, inferredUserName = '') {
+  const dbType = validateLxcloudDbType(valueFrom(args, 'db-type', 'LXCLOUD_DB_TYPE'));
   if (!args.query) {
     throw new Error('缺少 --query');
   }
   assertReadOnlySql(args.query);
   return {
     db_type: dbType,
-    user_name: String(valueFrom(args, 'user-name', 'LXCLOUD_USER_NAME') || os.userInfo().username),
+    user_name: String(valueFrom(args, 'user-name', 'LXCLOUD_USER_NAME') || inferredUserName || os.userInfo().username),
     sql: String(args.query),
     query_type: String(args['query-type'] || 'single'),
     query_role: String(args['query-role'] || 'masterbackup'),
@@ -269,11 +411,12 @@ function postJson(url, headers, payload, timeoutMs) {
 }
 
 async function runLxcloudQuery(args) {
-  const payload = buildLxcloudPayload(args);
+  const authContext = resolveLxcloudAuthContext(args);
+  const payload = buildLxcloudPayload(args, authContext.userName);
   const cookie = valueFrom(args, 'cookie', 'LXCLOUD_COOKIE');
   const mid = valueFrom(args, 'mid', 'LXCLOUD_MID');
   const headers = {
-    authorization: lxcloudAuthorization(args),
+    authorization: authContext.authorization,
   };
   if (cookie && cookie !== true) headers.cookie = String(cookie);
   if (mid && mid !== true) headers.mid = String(mid);
@@ -303,8 +446,11 @@ async function main() {
       defaultInstance: config.defaultInstance || DEFAULT_INSTANCE,
       configuredInstances: Object.keys(config.instances || {}),
       lxcloudEndpoint: LXCLOUD_SQL_ENDPOINT,
-      lxcloudAllowedDbTypes: Array.from(LXCLOUD_ALLOWED_DB_TYPES),
+      lxcloudDbTypePolicy: 'no static allowlist; non-empty values up to 128 characters without control characters',
+      lxcloudKnownDbTypes: ['ProcesstestDB', 'ProcessmanageDB', 'HawkDecisionDB', 'CreditmDB'],
       lxcloudAuthConfigured: Boolean(process.env.LXCLOUD_AUTHORIZATION || process.env.LXCLOUD_BEARER_TOKEN),
+      lxcloudBrowserSessionScript: BROWSER_SESSION_SCRIPT,
+      lxcloudBrowserSessionScriptExists: fs.existsSync(BROWSER_SESSION_SCRIPT),
     }, null, 2));
     return;
   }
@@ -358,7 +504,20 @@ async function main() {
   runMysql(instance, args);
 }
 
-main().catch((error) => {
-  console.error(sanitize(error.stack || error.message));
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(sanitize(error.stack || error.message));
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  assertReadOnlySql,
+  buildLxcloudPayload,
+  inferLxcloudUserName,
+  normalizeLxcloudDbType,
+  normalizeLxcloudUserName,
+  parseArgs,
+  userNameFromJwt,
+  validateLxcloudDbType,
+};
