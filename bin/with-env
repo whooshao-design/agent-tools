@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# 载入公共凭证后执行任意命令。
+#
+#   bin/with-env <命令> [参数...]
+#
+# 例：
+#   bin/with-env node skills/lexin/inspect-healthy-metrics/scripts/inspect_metrics.js ...
+#   bin/with-env python3 skills/lexin/handle-stable-hawk-approval/scripts/stable_approval_cli.py ...
+#   bin/with-env env | grep LARK        # 确认哪些变量真正生效
+#
+# 凭证文件缺失时不报错，命令照常执行（各 skill 本就会回退到浏览器登录态）。
+set -euo pipefail
+
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=./_load_env.sh
+source "$REPO_DIR/bin/_load_env.sh"
+
+if [[ $# -eq 0 ]]; then
+    echo "用法：bin/with-env <命令> [参数...]" >&2
+    exit 2
+fi
+
+load_agent_tools_env "$REPO_DIR"
+exec "$@"

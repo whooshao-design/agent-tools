@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# 飞书 MCP / OAuth 包装脚本。
+#
+# 从公共凭证文件 env/credentials.env 读取凭证并注入，避免 App Secret 出现在
+# ~/.claude.json、shell 历史或进程命令行里。
+#
+#   bin/lark login          一次性 OAuth 授权，换取 user_access_token
+#   bin/lark mcp            以 MCP 服务方式启动（Claude Code 调用的就是这个）
+#   bin/lark <其它子命令>    透传给 lark-mcp
+#
+# 追加参数会原样透传，例如：bin/lark mcp -t preset.doc.default,preset.im.default
+set -euo pipefail
+
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
+# shellcheck source=./_load_env.sh
+source "$REPO_DIR/bin/_load_env.sh"
+
+# 飞书必须有凭证，所以这里要求凭证文件存在
+load_agent_tools_env "$REPO_DIR" --required
+
+ENV_FILE="$(agent_tools_env_file "$REPO_DIR")"
+for key in LARK_APP_ID LARK_APP_SECRET; do
+    if [[ -z "${!key:-}" ]]; then
+        echo "$ENV_FILE 中 $key 未填写" >&2
+        exit 1
+    fi
+done
+
+# 按 third-party-mcp 惯例：固定版本 + 装到缓存目录 + 直接 exec 二进制。
+# 不用 npx：每次冷启动解析包要 30s 以上，会让 MCP 握手超时。
+PACKAGE="${LARK_MCP_PACKAGE:-@larksuiteoapi/lark-mcp@0.5.1}"
+CACHE_ROOT="${AGENT_TOOLS_MCP_CACHE:-$HOME/.local/share/agent-tools/mcp-cache}"
+INSTALL_ROOT="${LARK_MCP_HOME:-$CACHE_ROOT/lark}"
+PACKAGE_SPEC_FILE="$INSTALL_ROOT/.package-spec"
+BIN="${LARK_MCP_BIN:-$INSTALL_ROOT/node_modules/.bin/lark-mcp}"
+
+export NPM_CONFIG_CACHE="${NPM_CONFIG_CACHE:-$CACHE_ROOT/npm}"
+export NPM_CONFIG_UPDATE_NOTIFIER="${NPM_CONFIG_UPDATE_NOTIFIER:-false}"
+export NPM_CONFIG_AUDIT="${NPM_CONFIG_AUDIT:-false}"
+export NPM_CONFIG_FUND="${NPM_CONFIG_FUND:-false}"
+
+if [[ -z "${LARK_MCP_BIN:-}" ]]; then
+    needs_install=1
+    if [[ -x "$BIN" && -f "$PACKAGE_SPEC_FILE" && "$(cat "$PACKAGE_SPEC_FILE")" == "$PACKAGE" ]]; then
+        needs_install=0
+    fi
+    if [[ "$needs_install" -eq 1 ]]; then
+        mkdir -p "$INSTALL_ROOT"
+        echo "Installing $PACKAGE into $INSTALL_ROOT" >&2
+        npm --prefix "$INSTALL_ROOT" install --save-exact --omit=dev --no-audit --no-fund "$PACKAGE" >&2
+        printf '%s\n' "$PACKAGE" > "$PACKAGE_SPEC_FILE"
+    fi
+fi
+
+DOMAIN="${LARK_DOMAIN:-https://open.feishu.cn}"
+PORT="${LARK_OAUTH_PORT:-3000}"
+
+subcommand="${1:-mcp}"
+shift || true
+
+common_args=(-a "$LARK_APP_ID" -s "$LARK_APP_SECRET" -d "$DOMAIN")
+
+case "$subcommand" in
+    whoami)
+        # whoami 不接受任何凭证参数
+        exec "$BIN" whoami "$@"
+        ;;
+    logout)
+        # logout 只认 -a，传 -s 会报未知参数
+        exec "$BIN" logout -a "$LARK_APP_ID" "$@"
+        ;;
+    login)
+        # 实测 lark-mcp 不显式传 --scope 时，飞书只会授予 auth:user.id:read，
+        # 所以这里把 LARK_SCOPE 显式带上。命令行传的 --scope 优先级更高。
+        login_args=("${common_args[@]}" -p "$PORT")
+        if [[ -n "${LARK_SCOPE:-}" && "$*" != *"--scope"* ]]; then
+            login_args+=(--scope "$LARK_SCOPE")
+        fi
+        exec "$BIN" login "${login_args[@]}" "$@"
+        ;;
+    mcp)
+        # 默认只加载文档相关工具，并以本人身份访问（无需逐篇把文档授权给应用）
+        exec "$BIN" mcp "${common_args[@]}" \
+            -t "${LARK_TOOLS:-preset.doc.default}" \
+            --token-mode "${LARK_TOKEN_MODE:-user_access_token}" \
+            -l "${LARK_LANGUAGE:-zh}" \
+            "$@"
+        ;;
+    *)
+        exec "$BIN" "$subcommand" "${common_args[@]}" "$@"
+        ;;
+esac

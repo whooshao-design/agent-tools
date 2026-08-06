@@ -7,6 +7,7 @@
 |---|---|---|
 | `context7` | `context7/bin/context7-mcp` | 查询最新、版本相关的库/API 文档 |
 | `github` | `github/bin/github-mcp` | 只读读取 GitHub 仓库、Issue、PR、Actions 和安全告警上下文 |
+| `lark` | `lark/bin/lark-mcp` | 读写飞书云文档与知识库；需 App 凭证与一次性 OAuth 授权 |
 | `markitdown` | `markitdown/bin/markitdown-mcp` | 将 PDF、Office、HTML、图片、CSV/JSON/XML 等转换为 Markdown |
 | `sonatype` | `sonatype/bin/sonatype-mcp` | 查询依赖版本、安全漏洞、许可证与升级建议；Codex 优先用 remote 配置 |
 
@@ -28,6 +29,12 @@ codex mcp add github -- /home/joney/projects/ai/agent-tools/mcp/third-party-mcp/
 
 export SONATYPE_GUIDE_MCP_TOKEN=...
 codex mcp add sonatype --url https://mcp.guide.sonatype.com/mcp --bearer-token-env-var SONATYPE_GUIDE_MCP_TOKEN
+```
+
+飞书需要 App 凭证与一次性 OAuth 授权，配置见 `lark/README.md`：
+
+```bash
+codex mcp add lark -- /home/joney/projects/ai/agent-tools/mcp/third-party-mcp/lark/bin/lark-mcp mcp
 ```
 
 不要把 token 写入 Codex 配置。Context7 API key 是可选项，需要更高限流时在启动 Codex 前导出：

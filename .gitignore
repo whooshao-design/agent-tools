@@ -23,3 +23,8 @@ skills/lexin/test-dubbo-api/targets.json
 # bastion 本地凭据/机器配置
 mcp/bastion-mcp/config.json
 mcp/bastion-mcp/config.dba.json
+
+# 本地凭证目录：整目录忽略，只放行模板与占位文件
+env/*
+!env/.gitkeep
+!env/*.example
