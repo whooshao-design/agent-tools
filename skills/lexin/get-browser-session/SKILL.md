@@ -1,8 +1,8 @@
 ---
 name: get-browser-session
-description: 获取、检查和复用 WSL Playwright/Chromium 浏览器登录态与网页 session（底层会话层，供其他 skill 复用）。Use when 需要访问要求登录的内网页面、检查浏览器 profile 登录态是否有效、打开浏览器让用户完成 SSO/OTP 登录、复用已保存 profile 做页面自动化，或按默认脱敏方式查看 session Cookie/localStorage token。
+description: 获取、检查、续期和复用 WSL Playwright/Chromium 浏览器登录态与网页 session（底层会话层，供其他 skill 复用）。Use when 需要访问要求登录的内网页面、检查或定时续期浏览器 profile 登录态、打开浏览器让用户完成 SSO/OTP 登录、复用已保存 profile 做页面自动化，或按默认脱敏方式查看 session Cookie/localStorage token。
 metadata:
-  version: 1.2.0
+  version: 1.5.0
 ---
 
 # Get Browser Session
@@ -19,7 +19,7 @@ Use the existing WSL browser tool at `~/tools/lexiao-browser` by default. Overri
 
 When another skill needs a logged-in browser session, use this skill as the session layer. The calling skill should pass only the target `url`, the intended `profile`, and an optional `success-text`; do not duplicate login instructions in the calling skill.
 
-MCP 优先：能用 `browser_session` MCP 时，优先使用 `check_session` / `browser_page_snapshot` / `browser_click_text` / `browser_click_button` / `get_cookies` / `fetch_with_session`；脚本作为兜底入口。
+MCP 优先：能用 `browser_session` MCP 时，优先使用 `check_session` / `renew_session` / `browser_page_snapshot` / `browser_click_text` / `browser_click_button` / `get_cookies` / `fetch_with_session`；脚本作为兜底入口。
 
 ## Check Existing Session
 
@@ -31,7 +31,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/script
   --success-text=当前环境
 ```
 
-Treat `sessionReady: true` as a usable login state. Also inspect `sessionState`: `LOGIN_REQUIRED` means the profile is missing or expired, `PROXY_INTERCEPTED` means the child browser reached ATrust/乐空间 instead of the target, and `FORBIDDEN` means the current user lacks access.
+Treat `sessionReady: true` as a usable login state. Also inspect `sessionState`: `LOGIN_REQUIRED` means the profile is missing or expired, `PROXY_INTERCEPTED` means the child browser reached ATrust/乐空间 instead of the target, `FORBIDDEN` means the current user lacks access, and `UPSTREAM_ERROR` means the target returned an HTTP error and must not be treated as a valid session.
 
 For non-Lexiao pages, always pass a page-specific `--url` and `--profile`. If there is no stable success marker on the target page, use `--success-text=none` and rely on the default login detection, which covers Chinese login words, the English OA page markers `Work Happy`, `QR Code`, `Use MOA` / `MOA`, `Account Login`, `Password Login`, and `Sign in`, plus password input fields; if there is a stable marker, pass it explicitly.
 
@@ -40,6 +40,8 @@ For environment diagnostics:
 ```bash
 node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js --doctor
 ```
+
+Inspect `wslgHealth` in the result before interactive login. `copyMode: true` means WSLg failed to allocate its shared-memory transport; save current WSL work, run `wsl.exe --shutdown` from Windows PowerShell, then reopen WSL before retrying.
 
 ## WebShell / Gotty Pages
 
@@ -56,12 +58,24 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/script
 WebShell uses stricter readiness semantics than a generic OA page:
 
 - The default profile is `~/.codex/webshell-direct-profile` unless `--profile` is explicit.
-- The Chromium child process clears proxy variables only for approved internal hosts and adds `--no-proxy-server`; global proxy settings are untouched.
+- The Chromium child process runs direct by default; see "Network Policy". Global proxy settings outside the browser are untouched.
 - `READY` requires the browser to stay on `webshell.oa.fenqile.com` and expose an xterm/terminal DOM for three consecutive polls.
 - `乐空间传送门`、`ATrust`、登录页和 403 markers override transient Gotty titles and terminal elements.
 - `snippet` may be empty because xterm uses canvas; use `sessionState/terminalReady/stableReadyPolls` instead of body text alone.
 
 Do not use this skill to execute server commands or read logs; container log reads belong to `java-server-diagnostics`, using `/home/joney/projects/ai/agent-tools/skills/lexin/java-server-diagnostics/scripts/webshell_log_check.js` when a Gotty WebSocket or terminal interaction is needed.
+
+## Network Policy
+
+**This browser is direct-only. It must never talk through a proxy — for any host, in any mode.** There is deliberately no flag, option, or environment variable that turns the proxy back on.
+
+The reason is the exit IP. On this workstation `HTTP(S)_PROXY`/`ALL_PROXY` point at a local HTTP→SOCKS bridge whose exit lands in another country, so a proxied login looks like it came from a foreign cloud host. That trips risk control on Feishu/OA-class accounts, raises security alerts, and can invalidate a session immediately after it is issued.
+
+Every launch therefore strips `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` (both cases) from the Chromium child environment, extends `NO_PROXY`, and passes `--no-proxy-server`. Results report `networkPolicy: "direct-only"`; treat any other value as a bug in this skill, not as a configuration choice.
+
+Direct reachability was verified for both internal OA hosts and external SaaS such as `lexin.feishu.cn`, where it is also roughly 12x faster than the proxied path. If some future target is genuinely unreachable direct, fix routing or DNS for that target — do not reintroduce a proxy opt-in here.
+
+Only the Chromium child process is affected; the shell's own proxy settings are left untouched.
 
 ## Obtain Or Refresh Session
 
@@ -74,7 +88,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/script
   --success-text=当前环境
 ```
 
-If a headed browser still cannot be opened, `--ensure` returns JSON with `ensureStrategy: "headless-screenshot"` and `loginScreenshot`, instead of failing with raw Chromium/XServer errors. Scan that screenshot, then rerun the status check or `--ensure`.
+Before opening a headed browser, `--ensure` checks WSLg health. If WSLg is in COPY MODE, or a headed browser otherwise cannot be opened, it returns JSON with `ensureStrategy: "headless-screenshot"` and `loginScreenshot` instead of opening an unusable window or failing with raw Chromium/XServer errors. For COPY MODE, follow `wslgHealth.recoveryCommand`; otherwise scan the screenshot, then rerun the status check or `--ensure`.
 
 Do not ask the user for passwords, OTP codes, private keys, or cookies in chat. Ask only for the user to finish login in the opened browser window. After the script exits, rerun the headless status check before continuing automation.
 
@@ -84,9 +98,36 @@ The default profile is:
 ~/.cache/lexiao-browser-profile
 ```
 
-WebShell defaults to the isolated profile `~/.codex/webshell-direct-profile`. To refresh it, run `--ensure --url=<login_pod_addr> --success-text=none` and complete SSO in the opened browser. Do not reuse a profile that is concurrently open in another Chromium process.
+Profile selection is shared across the skill and MCP tools: explicit `--profile` first, then `BROWSER_SESSION_PROFILE`, then `DEVTOOLS_BROWSER_PROFILE`, and finally the default above. Keep other skills on the same profile instead of creating a second implicit profile.
 
-If Chrome reports the profile is already in use, ask the user to close the WSL Chromium window or rerun with a different `--profile`.
+WebShell defaults to the isolated profile `~/.codex/webshell-direct-profile`. To refresh it, run `--ensure --url=<login_pod_addr> --success-text=none` and complete SSO in the opened browser.
+
+`browser_session` script and MCP calls using the same profile are serialized with a cross-process lock. Other scripts and independently opened Chromium instances are outside this lock; if Chrome still reports the profile is already in use, close the competing WSL Chromium process or rerun the whole flow with a different explicit `--profile`.
+
+## Session Lifecycle And Renewal
+
+Use `renew_session` for an explicit one-shot renewal. The equivalent script command is headless even if `--headed` is also passed, visits the target page in the shared persistent profile, and saves response `Set-Cookie` changes without returning page text, Cookie values, or storage values:
+
+```bash
+node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js \
+  --renew \
+  --url=https://lexiao.oa.fenqile.com/ \
+  --success-text=当前环境
+```
+
+Treat `renewalState: "SESSION_ACTIVE"` as evidence that the session was still usable during the visit, not proof that every authentication Cookie changed. If it returns `LOGIN_REQUIRED` or `PROXY_INTERCEPTED`, run `ensure_session` interactively; background renewal never opens a headed browser and never retries indefinitely.
+
+To install the default Lexiao renewal as a systemd user timer, run:
+
+```bash
+python /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/install_session_renewal.py
+```
+
+The installer performs one renewal immediately, then schedules the same headless check every 6 hours with up to 10 minutes of randomized delay. The timer runs while the WSL systemd user manager is active; `OnBootSec` schedules it again after WSL starts. Remove only these units with `--uninstall`. Do not describe this as a permanent or guaranteed login: fixed server-side expiry, account policy, SSO revocation, network interruption, or a stopped WSL instance can still let the session expire.
+
+Status checks and `--ensure` also visit the target page on demand, so a server-side sliding session can refresh its Cookie naturally. `fetch_with_session` runs inside the same BrowserContext rather than copying a Cookie header into a separate HTTP client; response `Set-Cookie` values are therefore persisted back to the profile.
+
+Every page or authenticated-request result includes `sessionHealth` with Cookie counts and the earliest persistent-Cookie expiry. `persistentCookieExpiringSoon` uses a 15-minute default threshold and is advisory: not every Cookie is an authentication Cookie. If an authenticated request returns `LOGIN_REQUIRED` or `PROXY_INTERCEPTED`, run `ensure_session` and retry once after login; do not add an unconditional retry loop.
 
 ## Reuse Session For Page Automation
 
@@ -99,7 +140,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/script
   --click-button=批量集成分支
 ```
 
-The script will not force-click disabled buttons. If a button is disabled, inspect the returned `clickText`, `clickButton`, `buttons`, and `snippet` fields to explain the current page state.
+The script will not force-click disabled buttons. It recollects the page state after an action. If a button is disabled, inspect the returned `clickText`, `clickButton`, `buttons`, and `snippet` fields to explain the current page state.
 
 ## Cookies And Sensitive Values
 
@@ -112,7 +153,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/script
   --url=https://lexiao.oa.fenqile.com/#/app-publish/51303
 ```
 
-Cookie and storage values are redacted by default. Use `--show-secrets` only when absolutely necessary for a local command. Do not paste full session tokens in the final response unless the user explicitly requested the raw value and the security implications are clear.
+Cookie and storage values are redacted by default. Cookie filtering uses hostname suffix boundaries; do not pass broad public suffixes such as `com`. Use `--show-secrets` only when absolutely necessary for a local command. Do not paste full session tokens in the final response unless the user explicitly requested the raw value and the security implications are clear.
 
 For applications that store auth in localStorage rather than cookies, read only the needed key:
 

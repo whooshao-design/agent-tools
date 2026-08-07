@@ -22,7 +22,7 @@
 - `redis_query`: 通过 bianque/Dubbo `queryRedis` 只读查询 Redis。
 - `dubbo_test`: 通过 bianque 服务模拟器调用 Dubbo 接口。
 - `mq_readonly`: Kafka/RocketMQ CLI 只读查询和 MQ 控制台只读 GET。
-- `browser_session`: 复用本地 Chromium profile，检查登录态、页面快照、文本点击、读取脱敏 Cookie、用 session 发起 GET。
+- `browser_session`: 复用本地 Chromium profile，检查或无头续期登录态、查看 Cookie 到期信息、读取页面快照、点击文本、读取脱敏 Cookie，并用 BrowserContext session 发起 GET、持久化服务端续期 Cookie。
 
 **配置、制品与检索**
 
@@ -62,13 +62,13 @@ mcp/devtools-mcp/.env
 
 `java_app_diag` 通过 `BASTION_CONFIG` 指定堡垒机配置，默认查找 `/home/joney/projects/ai/agent-tools/mcp/bastion-mcp/config.json`。诊断工具会在首次执行时自动复用或建立堡垒机连接；如果密钥认证不可用，仍需传入 password/otp。
 `mysql_readonly` 复用 `~/.config/codex-mysql-readonly/instances.json`；lxcloud 查询接受任意经授权的 `db_type`，不维护客户端实例白名单，实例应由上层 skill 从用户输入或目标项目运行时数据源代码确认。
-`browser_session`、`redis_query`、`dubbo_test`、`lexiao`、`healthy` 复用已有 Playwright profile 和脚本约定。
+`browser_session`、`redis_query`、`dubbo_test`、`lexiao`、`healthy` 统一复用 `BROWSER_SESSION_PROFILE` / `DEVTOOLS_BROWSER_PROFILE` 指定的 Playwright profile，默认使用 `~/.cache/lexiao-browser-profile`。
 
 ## 分层
 
 底层通用能力：
 
-- `browser_session`: 浏览器登录态、页面快照、规范化文本点击、Cookie、带 session 的只读 GET。
+- `browser_session`: 浏览器登录态检查与无头续期、页面快照、规范化文本点击、Cookie、带 session 的只读 GET。
 - `config_registry.internal_http_get`: 公司内网 allowlist 下的通用只读 HTTP GET。
 - `bastion`: 跳板机通道和受白名单限制的远程只读命令执行。
 - `mysql_readonly`: 只读 SQL。

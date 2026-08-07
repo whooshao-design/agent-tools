@@ -3,6 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
+  PROXY_ENV_KEYS,
   buildBrowserEnv,
   chromiumArgsFor,
   redactUrl,
@@ -19,7 +20,7 @@ test('internal browser environment removes proxy variables without mutating call
   };
   const result = buildBrowserEnv(VALID_URL, original);
 
-  assert.equal(result.networkPolicy, 'direct-internal');
+  assert.equal(result.networkPolicy, 'direct-only');
   assert.equal(result.env.HTTP_PROXY, undefined);
   assert.equal(result.env.https_proxy, undefined);
   assert.match(result.env.NO_PROXY, /\.oa\.fenqile\.com/);
@@ -27,15 +28,41 @@ test('internal browser environment removes proxy variables without mutating call
   assert.equal(original.HTTP_PROXY, 'http://127.0.0.1:18181');
 });
 
-test('external browser environment keeps proxy variables', () => {
-  const result = buildBrowserEnv('https://example.com/', { HTTPS_PROXY: 'http://proxy' });
-  assert.equal(result.networkPolicy, 'default-proxy');
-  assert.equal(result.env.HTTPS_PROXY, 'http://proxy');
+test('external hosts are direct too, with every proxy variable dropped', () => {
+  const result = buildBrowserEnv('https://lexin.feishu.cn/', {
+    HTTP_PROXY: 'http://proxy',
+    HTTPS_PROXY: 'http://proxy',
+    ALL_PROXY: 'socks5://proxy',
+    all_proxy: 'socks5://proxy',
+  });
+  assert.equal(result.networkPolicy, 'direct-only');
+  for (const key of PROXY_ENV_KEYS) assert.equal(result.env[key], undefined);
 });
 
-test('internal Chromium receives an isolated no-proxy flag', () => {
+test('no option, flag, or env value can opt a browser back into the proxy', () => {
+  const attempts = [
+    undefined,
+    { allowProxy: true },
+    { allow_proxy: true, proxy: 'http://proxy' },
+  ];
+  for (const options of attempts) {
+    const result = buildBrowserEnv('https://example.com/', { HTTPS_PROXY: 'http://proxy' }, options);
+    assert.equal(result.networkPolicy, 'direct-only', `opt-in leaked via ${JSON.stringify(options)}`);
+    assert.equal(result.env.HTTPS_PROXY, undefined);
+    assert.ok(
+      chromiumArgsFor('https://example.com/', ['--no-sandbox'], options).includes('--no-proxy-server'),
+      `--no-proxy-server missing for ${JSON.stringify(options)}`,
+    );
+  }
+});
+
+test('Chromium always receives the no-proxy flag exactly once', () => {
   assert.deepEqual(chromiumArgsFor(VALID_URL, ['--no-sandbox']), ['--no-sandbox', '--no-proxy-server']);
-  assert.deepEqual(chromiumArgsFor('https://example.com/', ['--no-sandbox']), ['--no-sandbox']);
+  assert.deepEqual(chromiumArgsFor('https://example.com/', ['--no-sandbox']), ['--no-sandbox', '--no-proxy-server']);
+  assert.deepEqual(
+    chromiumArgsFor('https://example.com/', ['--no-sandbox', '--no-proxy-server']),
+    ['--no-sandbox', '--no-proxy-server'],
+  );
 });
 
 test('canonical Lexiao WebShell URL is validated against Pod metadata', () => {

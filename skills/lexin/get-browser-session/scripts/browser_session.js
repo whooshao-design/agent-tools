@@ -32,6 +32,8 @@ const DEFAULT_LOGIN_PATTERN = [
 ].join('|');
 const DEFAULT_PORTAL_PATTERN = '乐空间传送门|ATrust';
 const FORBIDDEN_PATTERN = '403|Forbidden|无权限|拒绝访问';
+const PROFILE_LOCK_STALE_MS = 60 * 60 * 1000;
+const DEFAULT_WSLG_LOG_PATH = '/mnt/wslg/weston.log';
 
 function expandHome(value) {
   if (!value) return value;
@@ -63,7 +65,12 @@ function resolvePaths(args, url = DEFAULT_URL) {
   const defaultProfile = isWebShellUrl(url) ? DEFAULT_WEBSHELL_PROFILE : '~/.cache/lexiao-browser-profile';
   return {
     toolDir,
-    profileDir: expandHome(args.profile || process.env.BROWSER_SESSION_PROFILE || defaultProfile),
+    profileDir: expandHome(
+      args.profile
+      || process.env.BROWSER_SESSION_PROFILE
+      || process.env.DEVTOOLS_BROWSER_PROFILE
+      || defaultProfile
+    ),
     chromePath: expandHome(args.chrome || path.join(toolDir, 'browsers/chrome-linux64/chrome')),
     runtimeLibDir: expandHome(args['runtime-lib-dir'] || path.join(toolDir, 'runtime-libs/usr/lib/x86_64-linux-gnu')),
     playwrightPackage: path.join(toolDir, 'package.json'),
@@ -98,6 +105,37 @@ function inferWslgEnv(baseEnv) {
   return env;
 }
 
+function inspectWslgHealth(logPath = DEFAULT_WSLG_LOG_PATH) {
+  if (!fs.existsSync(logPath)) {
+    return {
+      available: false,
+      copyMode: false,
+      sharedMemoryFailure: false,
+      logPath,
+    };
+  }
+  try {
+    const log = fs.readFileSync(logPath, 'utf8');
+    const sharedMemoryFailure = /rdp_allocate_shared_memory:[^\r\n]*Failed/i.test(log);
+    const health = {
+      available: true,
+      copyMode: sharedMemoryFailure,
+      sharedMemoryFailure,
+      logPath,
+    };
+    if (sharedMemoryFailure) health.recoveryCommand = 'wsl.exe --shutdown';
+    return health;
+  } catch (error) {
+    return {
+      available: true,
+      copyMode: false,
+      sharedMemoryFailure: false,
+      logPath,
+      inspectionError: String(error.message || error),
+    };
+  }
+}
+
 function looksLikeDisplayLaunchError(error) {
   const message = String(error?.stack || error?.message || error);
   return /Missing X server|DISPLAY|ozone_platform_x11|platform failed to initialize/i.test(message);
@@ -128,12 +166,58 @@ function splitCsv(value) {
     .filter(Boolean);
 }
 
+function boundedNumber(value, fallback, minimum, maximum) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(minimum, Math.min(parsed, maximum));
+}
+
 function hostname(value) {
   try {
     return new URL(String(value || '')).hostname.toLowerCase();
   } catch (_) {
     return '';
   }
+}
+
+function normalizeDomain(value) {
+  return String(value || '').trim().toLowerCase().replace(/^\.+/, '').replace(/\.+$/, '');
+}
+
+function cookieMatchesDomain(cookieDomain, requestDomain) {
+  const cookieHost = normalizeDomain(cookieDomain);
+  const requestHost = normalizeDomain(requestDomain);
+  return Boolean(cookieHost && requestHost)
+    && (requestHost === cookieHost || requestHost.endsWith(`.${cookieHost}`));
+}
+
+function classifyRequestSession(response, options = {}) {
+  const targetHost = hostname(options.targetUrl);
+  const responseHost = hostname(response.url);
+  const body = String(response.body || '');
+  const contentType = String(response.contentType || '').toLowerCase();
+  const isHtml = contentType.includes('text/html');
+  const hasPortalMarker = /atrust/i.test(responseHost)
+    || (isHtml && new RegExp(options.portalPattern || DEFAULT_PORTAL_PATTERN, 'i').test(body));
+  const hasLoginMarker = isHtml
+    && new RegExp(options.loginPattern || DEFAULT_LOGIN_PATTERN, 'i').test(body);
+
+  if (Number(response.status) === 403) {
+    return { sessionState: 'FORBIDDEN', sessionReady: false };
+  }
+  if (Number(response.status) === 401) {
+    return { sessionState: 'LOGIN_REQUIRED', sessionReady: false };
+  }
+  if (Number(response.status) >= 400) {
+    return { sessionState: 'UPSTREAM_ERROR', sessionReady: false };
+  }
+  if (hasPortalMarker) {
+    return { sessionState: 'PROXY_INTERCEPTED', sessionReady: false };
+  }
+  if (!targetHost || responseHost !== targetHost || hasLoginMarker) {
+    return { sessionState: 'LOGIN_REQUIRED', sessionReady: false };
+  }
+  return { sessionState: 'READY', sessionReady: true };
 }
 
 function classifyPageStatus(snapshot, options = {}) {
@@ -144,10 +228,14 @@ function classifyPageStatus(snapshot, options = {}) {
   let sessionState = 'CONNECTING';
   let sessionReady = false;
 
-  if (snapshot.hasForbiddenText) {
+  if (snapshot.hasForbiddenText || Number(options.httpStatus) === 403) {
     sessionState = 'FORBIDDEN';
   } else if (snapshot.hasPortalText) {
     sessionState = 'PROXY_INTERCEPTED';
+  } else if (Number(options.httpStatus) === 401) {
+    sessionState = 'LOGIN_REQUIRED';
+  } else if (Number(options.httpStatus) >= 400) {
+    sessionState = 'UPSTREAM_ERROR';
   } else if (snapshot.hasLoginText && (!webShell || !snapshot.terminalReady || snapshot.hasLoginControl)) {
     sessionState = 'LOGIN_REQUIRED';
   } else if (webShell) {
@@ -164,6 +252,7 @@ function classifyPageStatus(snapshot, options = {}) {
     currentHost,
     isWebShell: webShell,
     onTargetHost,
+    httpStatus: options.httpStatus || null,
     sessionState,
     sessionReady,
   };
@@ -277,9 +366,118 @@ async function clickNormalizedText(page, label) {
   }, label);
 }
 
+function isProcessAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code !== 'ESRCH';
+  }
+}
+
+function removeStaleProfileLock(lockPath) {
+  let ageMs;
+  try {
+    ageMs = Date.now() - fs.statSync(lockPath).mtimeMs;
+  } catch (error) {
+    if (error.code === 'ENOENT') return true;
+    throw error;
+  }
+  let owner;
+  try {
+    owner = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
+  } catch (_) {
+    if (ageMs < 60000) return false;
+  }
+  if (ageMs < PROFILE_LOCK_STALE_MS && owner && isProcessAlive(Number(owner.pid))) return false;
+  try {
+    fs.unlinkSync(lockPath);
+    return true;
+  } catch (error) {
+    return error.code === 'ENOENT';
+  }
+}
+
+async function acquireProfileLock(profileDir, options = {}) {
+  const timeoutMs = boundedNumber(options.timeoutMs, 30000, 0, 1800000);
+  const pollMs = boundedNumber(options.pollMs, 100, 5, 5000);
+  const lockPath = `${profileDir}.agent-tools.lock`;
+  const token = `${process.pid}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+  const deadline = Date.now() + timeoutMs;
+  fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+
+  while (true) {
+    try {
+      fs.writeFileSync(
+        lockPath,
+        JSON.stringify({ pid: process.pid, token, acquiredAt: new Date().toISOString() }),
+        { flag: 'wx', mode: 0o600 },
+      );
+      return () => {
+        try {
+          const owner = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
+          if (owner.token === token) fs.unlinkSync(lockPath);
+        } catch (error) {
+          if (error.code !== 'ENOENT') throw error;
+        }
+      };
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      if (removeStaleProfileLock(lockPath)) continue;
+      if (Date.now() >= deadline) {
+        throw new Error(`profile is busy: ${profileDir}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, pollMs));
+    }
+  }
+}
+
+async function collectSessionHealth(context, targetUrl, expiryThresholdSeconds = 900) {
+  const cookies = await context.cookies([targetUrl]);
+  const persistentExpiries = cookies
+    .map((cookie) => Number(cookie.expires))
+    .filter((expires) => Number.isFinite(expires) && expires > 0)
+    .sort((left, right) => left - right);
+  const earliestExpiry = persistentExpiries[0] || null;
+  const expiresInSeconds = earliestExpiry === null
+    ? null
+    : Math.floor(earliestExpiry - (Date.now() / 1000));
+  return {
+    checkedAt: new Date().toISOString(),
+    cookieCount: cookies.length,
+    persistentCookieCount: persistentExpiries.length,
+    sessionCookieCount: cookies.length - persistentExpiries.length,
+    earliestPersistentCookieExpiresAt: earliestExpiry === null ? null : new Date(earliestExpiry * 1000).toISOString(),
+    earliestPersistentCookieExpiresInSeconds: expiresInSeconds,
+    persistentCookieExpiringSoon: expiresInSeconds !== null && expiresInSeconds <= Number(expiryThresholdSeconds),
+  };
+}
+
+function summarizeRenewalResult(status) {
+  const sessionReady = Boolean(status.sessionReady);
+  return {
+    renewalAttempted: true,
+    renewalState: sessionReady ? 'SESSION_ACTIVE' : (status.sessionState || 'UNKNOWN'),
+    sessionState: status.sessionState || 'UNKNOWN',
+    sessionReady,
+    requestedUrl: status.requestedUrl,
+    profileDir: status.profileDir,
+    browserMode: status.browserMode,
+    networkPolicy: status.networkPolicy,
+    sessionHealth: status.sessionHealth,
+    actionRequired: sessionReady ? null : 'run ensure_session interactively',
+  };
+}
+
+// Direct-only by construction: buildBrowserEnv strips every proxy variable and
+// chromiumArgsFor always passes --no-proxy-server. There is no caller-facing
+// switch here on purpose -- see the note in browser_network.js.
 async function openContext(paths, chromium, headless, targetUrl) {
   const ldLibraryPath = [paths.runtimeLibDir, process.env.LD_LIBRARY_PATH].filter(Boolean).join(':');
-  const network = buildBrowserEnv(targetUrl, process.env);
+  const browserBaseEnv = { ...process.env };
+  delete browserBaseEnv.BROWSER_SESSION_REQUEST_JSON;
+  const network = buildBrowserEnv(targetUrl, browserBaseEnv);
   const env = inferWslgEnv(network.env);
   env.LD_LIBRARY_PATH = ldLibraryPath;
   const context = await chromium.launchPersistentContext(paths.profileDir, {
@@ -289,6 +487,50 @@ async function openContext(paths, chromium, headless, targetUrl) {
     args: chromiumArgsFor(targetUrl, ['--no-sandbox']),
   });
   return { context, networkPolicy: network.networkPolicy };
+}
+
+async function runRequestFlow(paths, chromium, flow) {
+  const launched = await openContext(paths, chromium, true, flow.url);
+  const { context } = launched;
+  try {
+    const requestOptions = {
+      method: flow.request.method,
+      headers: flow.request.headers,
+      timeout: flow.request.timeoutMs,
+      failOnStatusCode: false,
+    };
+    if (flow.request.bodyBase64) {
+      requestOptions.data = Buffer.from(flow.request.bodyBase64, 'base64');
+    }
+    const response = await context.request.fetch(flow.url, requestOptions);
+    const responseBody = await response.text();
+    const status = response.status();
+    const requestSession = classifyRequestSession({
+      status,
+      url: response.url(),
+      body: responseBody,
+      contentType: response.headers()['content-type'] || '',
+    }, {
+      targetUrl: flow.url,
+      loginPattern: flow.loginPattern,
+      portalPattern: flow.portalPattern,
+    });
+    const result = {
+      status,
+      url: redactUrl(response.url()),
+      body: responseBody.slice(0, status >= 400 ? 1000 : flow.request.maxChars),
+      truncated: responseBody.length > (status >= 400 ? 1000 : flow.request.maxChars),
+      profileDir: paths.profileDir,
+      networkPolicy: launched.networkPolicy,
+      ...requestSession,
+      sessionHealth: await collectSessionHealth(context, flow.url, flow.request.expiryThresholdSeconds),
+    };
+    if (status >= 400) result.error = 'HTTP request failed';
+    else if (!requestSession.sessionReady) result.error = 'browser session is not ready';
+    return result;
+  } finally {
+    await context.close().catch(() => {});
+  }
 }
 
 async function waitForStableSession(page, options) {
@@ -330,7 +572,8 @@ async function waitForStableSession(page, options) {
     status.stableReadyMs = firstReadyAt ? Date.now() - firstReadyAt : 0;
     status.requiredStableMs = stableDwellMs;
     if (readyPolls >= requiredReadyPolls && status.stableReadyMs >= stableDwellMs) return status;
-    if (!options.waitForLogin && ['LOGIN_REQUIRED', 'PROXY_INTERCEPTED', 'FORBIDDEN'].includes(status.sessionState)) {
+    if (['FORBIDDEN', 'UPSTREAM_ERROR'].includes(status.sessionState)) return status;
+    if (!options.waitForLogin && ['LOGIN_REQUIRED', 'PROXY_INTERCEPTED'].includes(status.sessionState)) {
       return status;
     }
     await page.waitForTimeout(options.pollMs);
@@ -353,7 +596,7 @@ async function runPageFlow(paths, chromium, flow) {
   const { context } = launched;
   try {
     const page = context.pages()[0] || await context.newPage();
-    await page.goto(flow.url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    const response = await page.goto(flow.url, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
 
     const options = {
@@ -362,6 +605,7 @@ async function runPageFlow(paths, chromium, flow) {
       portalPattern: flow.portalPattern,
       forbiddenPattern: flow.forbiddenPattern,
       targetUrl: flow.url,
+      httpStatus: response?.status() || null,
       stablePolls: flow.stablePolls,
       stableDwellMs: flow.stableDwellMs,
       waitForLogin: flow.waitForLogin,
@@ -384,19 +628,32 @@ async function runPageFlow(paths, chromium, flow) {
       status.loginRequired = true;
     }
 
+    const actions = {};
+    const pageUrlBeforeActions = page.url();
     if (flow.args['click-text']) {
-      status.clickText = await clickNormalizedText(page, flow.args['click-text']);
+      actions.clickText = await clickNormalizedText(page, flow.args['click-text']);
       await page.waitForTimeout(1000);
     }
     if (flow.args['click-button']) {
-      status.clickButton = await clickNormalizedText(page, flow.args['click-button']);
+      actions.clickButton = await clickNormalizedText(page, flow.args['click-button']);
       await page.waitForTimeout(1000);
+    }
+    if (Object.keys(actions).length > 0) {
+      await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
+      const postClickOptions = page.url() === pageUrlBeforeActions
+        ? options
+        : { ...options, httpStatus: null };
+      status = await collectStatus(page, postClickOptions);
+      status.browserMode = flow.headless ? 'headless' : 'headed';
+      status.networkPolicy = launched.networkPolicy;
+      status.profileDir = paths.profileDir;
+      Object.assign(status, actions);
     }
 
     if (flow.mode === 'cookies') {
       const domain = flow.args.domain || new URL(status.url).hostname;
       const showSecrets = Boolean(flow.args['show-secrets']);
-      const cookies = (await context.cookies()).filter((cookie) => cookie.domain.includes(domain)).map((cookie) => ({
+      const cookies = (await context.cookies()).filter((cookie) => cookieMatchesDomain(cookie.domain, domain)).map((cookie) => ({
         name: cookie.name,
         domain: cookie.domain,
         path: cookie.path,
@@ -425,6 +682,12 @@ async function runPageFlow(paths, chromium, flow) {
       status.valuesRedacted = !showSecrets;
     }
 
+    status.sessionHealth = await collectSessionHealth(
+      context,
+      flow.url,
+      flow.expiryThresholdSeconds,
+    );
+
     status.requestedUrl = redactUrl(flow.url);
     status.url = redactUrl(status.url);
     return status;
@@ -433,9 +696,84 @@ async function runPageFlow(paths, chromium, flow) {
   }
 }
 
+function requestConfigFromEnvironment(expiryThresholdSeconds) {
+  const rawRequest = process.env.BROWSER_SESSION_REQUEST_JSON;
+  if (!rawRequest) throw new Error('BROWSER_SESSION_REQUEST_JSON is required');
+  const request = JSON.parse(rawRequest);
+  request.method = String(request.method || 'GET').toUpperCase();
+  if (!['GET', 'POST'].includes(request.method)) throw new Error('only GET/POST are supported');
+  request.headers = request.headers && typeof request.headers === 'object' ? request.headers : {};
+  request.timeoutMs = boundedNumber(request.timeoutMs, 60000, 5000, 300000);
+  request.maxChars = boundedNumber(request.maxChars, 12000, 100, 100000);
+  request.expiryThresholdSeconds = expiryThresholdSeconds;
+  return request;
+}
+
+async function runHeadlessScreenshotFallback(paths, chromium, baseFlow, headedLaunchError, diagnostics = {}) {
+  const fallback = await runPageFlow(paths, chromium, {
+    ...baseFlow,
+    headless: true,
+    waitForLogin: false,
+    screenshotOnLogin: true,
+  });
+  fallback.ensureStrategy = 'headless-screenshot';
+  fallback.headedLaunchError = headedLaunchError;
+  Object.assign(fallback, diagnostics);
+  return fallback;
+}
+
+async function runEnsureFlow(paths, chromium, baseFlow) {
+  // ensure_session exists to establish a login. Every leg of it -- including the
+  // headless pre-check that writes into the same profile -- stays direct.
+  const status = await runPageFlow(paths, chromium, {
+    ...baseFlow,
+    headless: true,
+    waitForLogin: false,
+    screenshotOnLogin: false,
+  });
+  if (status.sessionReady) {
+    status.ensureStrategy = 'headless-fast-path';
+    return status;
+  }
+  if (['FORBIDDEN', 'UPSTREAM_ERROR'].includes(status.sessionState)) {
+    status.ensureStrategy = 'headless-terminal-state';
+    return status;
+  }
+
+  const wslgHealth = baseFlow.wslgHealth || inspectWslgHealth();
+  if (wslgHealth.copyMode) {
+    return runHeadlessScreenshotFallback(
+      paths,
+      chromium,
+      baseFlow,
+      'WSLg COPY MODE detected; run "wsl.exe --shutdown" from Windows PowerShell after saving work, then reopen WSL',
+      { wslgHealth },
+    );
+  }
+
+  try {
+    const ensured = await runPageFlow(paths, chromium, {
+      ...baseFlow,
+      headless: false,
+      waitForLogin: true,
+      screenshotOnLogin: false,
+    });
+    ensured.ensureStrategy = 'headed-login';
+    return ensured;
+  } catch (error) {
+    if (!looksLikeDisplayLaunchError(error)) throw error;
+    return runHeadlessScreenshotFallback(
+      paths,
+      chromium,
+      baseFlow,
+      'headed Chromium unavailable; saved login screenshot for manual scan',
+    );
+  }
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const mode = args.ensure ? 'ensure' : args.cookies ? 'cookies' : args.storage ? 'storage' : args.doctor ? 'doctor' : 'status';
+  const mode = args.request ? 'request' : args.ensure ? 'ensure' : args.renew ? 'renew' : args.cookies ? 'cookies' : args.storage ? 'storage' : args.doctor ? 'doctor' : 'status';
   const url = args.url || DEFAULT_URL;
   const paths = resolvePaths(args, url);
   const successText = args['success-text'] === 'none' ? '' : (args['success-text'] || DEFAULT_SUCCESS_TEXT);
@@ -447,7 +785,8 @@ async function main() {
   const stablePolls = Number(args['stable-polls'] || 3);
   const stableDwellMs = Number(args['stable-dwell-ms'] || 2500);
   const statusTimeoutMs = Number(args['status-timeout'] || 10000);
-  const headless = mode !== 'ensure' && !args.headed;
+  const expiryThresholdSeconds = boundedNumber(args['expiry-threshold-seconds'], 900, 0, 86400);
+  const headless = mode === 'renew' || (mode !== 'ensure' && !args.headed);
 
   if (mode === 'doctor') {
     const inferredEnv = inferWslgEnv(process.env);
@@ -464,73 +803,52 @@ async function main() {
         XDG_RUNTIME_DIR: inferredEnv.XDG_RUNTIME_DIR || '',
         PULSE_SERVER: inferredEnv.PULSE_SERVER || '',
       },
+      wslgHealth: inspectWslgHealth(),
     }, null, 2));
     return;
   }
 
-  const chromium = loadPlaywright(paths);
+  const releaseProfileLock = await acquireProfileLock(paths.profileDir, {
+    timeoutMs: boundedNumber(args['lock-timeout'], 30000, 0, 1800000),
+    pollMs: boundedNumber(args['lock-poll'], 100, 5, 5000),
+  });
+  try {
+    const chromium = loadPlaywright(paths);
 
-  const baseFlow = {
-    args,
-    mode,
-    url,
-    successText,
-    loginPattern,
-    portalPattern,
-    forbiddenPattern,
-    timeoutMs,
-    pollMs,
-    stablePolls,
-    stableDwellMs,
-    statusTimeoutMs,
-  };
-  if (mode === 'ensure') {
-    const status = await runPageFlow(paths, chromium, {
-      ...baseFlow,
-      headless: true,
-      waitForLogin: false,
-      screenshotOnLogin: false,
-    });
-    if (status.sessionReady) {
-      status.ensureStrategy = 'headless-fast-path';
-      console.log(JSON.stringify(status, null, 2));
-      return;
-    }
-
-    try {
-      const ensured = await runPageFlow(paths, chromium, {
+    const baseFlow = {
+      args,
+      mode,
+      url,
+      successText,
+      loginPattern,
+      portalPattern,
+      forbiddenPattern,
+      timeoutMs,
+      pollMs,
+      stablePolls,
+      stableDwellMs,
+      statusTimeoutMs,
+      expiryThresholdSeconds,
+    };
+    let result;
+    if (mode === 'request') {
+      const request = requestConfigFromEnvironment(expiryThresholdSeconds);
+      result = await runRequestFlow(paths, chromium, { ...baseFlow, request });
+    } else if (mode === 'ensure') {
+      result = await runEnsureFlow(paths, chromium, baseFlow);
+    } else {
+      const pageResult = await runPageFlow(paths, chromium, {
         ...baseFlow,
-        headless: false,
-        waitForLogin: true,
+        headless,
+        waitForLogin: false,
         screenshotOnLogin: false,
       });
-      ensured.ensureStrategy = 'headed-login';
-      console.log(JSON.stringify(ensured, null, 2));
-      return;
-    } catch (error) {
-      if (!looksLikeDisplayLaunchError(error)) {
-        throw error;
-      }
-      const fallback = await runPageFlow(paths, chromium, {
-        ...baseFlow,
-        headless: true,
-        waitForLogin: false,
-        screenshotOnLogin: true,
-      });
-      fallback.ensureStrategy = 'headless-screenshot';
-      fallback.headedLaunchError = 'headed Chromium unavailable; saved login screenshot for manual scan';
-      console.log(JSON.stringify(fallback, null, 2));
-      return;
+      result = mode === 'renew' ? summarizeRenewalResult(pageResult) : pageResult;
     }
+    console.log(JSON.stringify(result, null, 2));
+  } finally {
+    releaseProfileLock();
   }
-
-  const status = await runPageFlow(paths, chromium, {
-    ...baseFlow,
-    headless,
-    waitForLogin: false,
-    screenshotOnLogin: false,
-  });
-  console.log(JSON.stringify(status, null, 2));
 }
 
 if (require.main === module) {
@@ -543,9 +861,19 @@ if (require.main === module) {
 module.exports = {
   DEFAULT_LOGIN_PATTERN,
   DEFAULT_PORTAL_PATTERN,
+  acquireProfileLock,
   classifyPageStatus,
+  classifyRequestSession,
   collectStatus,
+  collectSessionHealth,
+  cookieMatchesDomain,
+  inspectWslgHealth,
+  main,
   parseArgs,
   resolvePaths,
+  runPageFlow,
+  runEnsureFlow,
+  runRequestFlow,
+  summarizeRenewalResult,
   waitForStableSession,
 };

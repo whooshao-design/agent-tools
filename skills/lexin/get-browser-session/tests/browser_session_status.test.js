@@ -70,6 +70,29 @@ test('generic pages still require the target host and configured success text', 
   assert.equal(result.sessionReady, true);
 });
 
+test('generic pages with an HTTP error are never treated as ready', () => {
+  const target = 'https://lexiao.oa.fenqile.com/#/home';
+  const result = classifyPageStatus(snapshot({
+    url: target,
+  }), { targetUrl: target, successText: '', httpStatus: 500 });
+  assert.equal(result.sessionState, 'UPSTREAM_ERROR');
+  assert.equal(result.sessionReady, false);
+
+  const unauthorized = classifyPageStatus(snapshot({ url: target }), {
+    targetUrl: target,
+    successText: '',
+    httpStatus: 401,
+  });
+  assert.equal(unauthorized.sessionState, 'LOGIN_REQUIRED');
+
+  const forbidden = classifyPageStatus(snapshot({ url: target }), {
+    targetUrl: target,
+    successText: '',
+    httpStatus: 403,
+  });
+  assert.equal(forbidden.sessionState, 'FORBIDDEN');
+});
+
 test('a transient terminal followed by delayed portal redirect never becomes stable READY', async () => {
   const snapshots = [
     snapshot({ terminalReady: true }),

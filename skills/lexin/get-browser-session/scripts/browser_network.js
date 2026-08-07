@@ -59,23 +59,25 @@ function mergeNoProxy(current, additions = INTERNAL_NO_PROXY) {
   return values.join(',');
 }
 
+// This browser is direct-only, unconditionally. There is deliberately no
+// option, flag, or environment override to route it through a proxy: a proxied
+// exit IP does not match the operator's real location, which trips login risk
+// control, raises security alerts, and can invalidate a freshly issued session.
+// Do not reintroduce an opt-in.
+const NETWORK_POLICY = 'direct-only';
+
 function buildBrowserEnv(targetUrl, baseEnv = process.env) {
   const env = { ...baseEnv };
-  if (!isInternalUrl(targetUrl)) {
-    return { env, networkPolicy: 'default-proxy' };
-  }
   for (const key of PROXY_ENV_KEYS) delete env[key];
   const noProxy = mergeNoProxy(env.NO_PROXY || env.no_proxy);
   env.NO_PROXY = noProxy;
   env.no_proxy = noProxy;
-  return { env, networkPolicy: 'direct-internal' };
+  return { env, networkPolicy: NETWORK_POLICY };
 }
 
 function chromiumArgsFor(targetUrl, baseArgs = []) {
   const args = [...baseArgs];
-  if (isInternalUrl(targetUrl) && !args.includes('--no-proxy-server')) {
-    args.push('--no-proxy-server');
-  }
+  if (!args.includes('--no-proxy-server')) args.push('--no-proxy-server');
   return args;
 }
 
@@ -164,6 +166,7 @@ function validateWebShellUrl(value, target = {}) {
 
 module.exports = {
   INTERNAL_NO_PROXY,
+  NETWORK_POLICY,
   PROXY_ENV_KEYS,
   WEBSHELL_HOSTS,
   buildBrowserEnv,

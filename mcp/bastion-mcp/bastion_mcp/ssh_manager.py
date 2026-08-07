@@ -35,6 +35,17 @@ _AUTH_FAIL_KEYWORDS = ("验证失败", "认证失败", "失败", "invalid", "Inv
 # 输入提示符：确认 shell 确实在等待用户输入，而非普通输出中碰巧包含关键词
 _INPUT_PROMPT_INDICATORS = ("请输入", "enter", "Enter", "input", "Input")
 _SUDO_PROMPT = "[sudo-password]:"
+_OPENSSH_VERSION = re.compile(r"OpenSSH_(\d+)\.(\d+)")
+_RSA_SHA2_MIN_OPENSSH_VERSION = (7, 2)
+_RSA_SHA2_ALGORITHMS = ["rsa-sha2-256", "rsa-sha2-512"]
+
+
+def _requires_legacy_ssh_rsa(remote_version: str) -> bool:
+    match = _OPENSSH_VERSION.search(remote_version)
+    return bool(
+        match
+        and (int(match.group(1)), int(match.group(2))) < _RSA_SHA2_MIN_OPENSSH_VERSION
+    )
 
 
 def _is_auth_prompt(text: str, keywords: tuple[str, ...]) -> bool:
@@ -342,12 +353,6 @@ class SSHManager:
         sock = socket.create_connection((host, port), timeout=connect_timeout)
         self.transport = paramiko.Transport(sock)
 
-        # OpenSSH 5.3 不支持 rsa-sha2-256/512，强制使用 ssh-rsa (SHA-1)
-        # 同时启用旧版服务器密钥类型
-        self.transport.disabled_algorithms = {
-            'pubkeys': ['rsa-sha2-256', 'rsa-sha2-512'],
-        }
-
         # 在 start_client 之前设置服务器密钥类型
         sec_opts = self.transport.get_security_options()
         sec_opts.kex = [
@@ -364,6 +369,12 @@ class SSHManager:
         ]
 
         self.transport.start_client()
+
+        # OpenSSH 7.2 起支持 RSA-SHA2；仅对旧版服务端回退到 ssh-rsa (SHA-1)。
+        if _requires_legacy_ssh_rsa(self.transport.remote_version):
+            self.transport.disabled_algorithms = {
+                "pubkeys": _RSA_SHA2_ALGORITHMS,
+            }
 
         # 优先尝试密钥认证
         authed = False

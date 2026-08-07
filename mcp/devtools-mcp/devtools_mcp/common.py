@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
@@ -18,7 +19,11 @@ MCP_ROOT = PACKAGE_DIR.parent
 REPO_ROOT = MCP_ROOT.parents[1]
 # skills 按分类组织（skills/<category>/<skill>）；DEVTOOLS_SKILLS_DIR 可覆盖为单一扁平目录
 SKILLS_ROOT = REPO_ROOT / "skills"
-DEFAULT_BROWSER_PROFILE = os.environ.get("DEVTOOLS_BROWSER_PROFILE", str(Path.home() / ".codex" / "lexiao-browser-profile"))
+DEFAULT_BROWSER_PROFILE = (
+    os.environ.get("BROWSER_SESSION_PROFILE")
+    or os.environ.get("DEVTOOLS_BROWSER_PROFILE")
+    or str(Path.home() / ".cache" / "lexiao-browser-profile")
+)
 DEFAULT_INTERNAL_ALLOWED_HOSTS = ".fenqile.com,.lexinfintech.com,.lexincloud.com,localhost,127.0.0.1"
 
 
@@ -155,6 +160,45 @@ def browser_cookie_header(url: str, domain: str = "", profile: str = "", timeout
     return "; ".join(pairs)
 
 
+def browser_session_request(
+    method: str,
+    url: str,
+    headers: dict[str, str],
+    body: str | bytes | None = None,
+    profile: str = "",
+    timeout: int = 60,
+    max_chars: int = 12000,
+) -> dict[str, Any]:
+    payload = body.encode("utf-8") if isinstance(body, str) else body
+    request_config = {
+        "method": method,
+        "headers": {str(key): str(value) for key, value in headers.items() if key.lower() != "cookie"},
+        "bodyBase64": base64.b64encode(payload).decode("ascii") if payload is not None else "",
+        "timeoutMs": bounded_int(timeout, 60, 5, 300) * 1000,
+        "maxChars": bounded_int(max_chars, 12000, 100, 100000),
+    }
+    command = ["node", DEFAULT_BROWSER_SCRIPT, "--request", f"--url={url}"]
+    if profile:
+        command.append(f"--profile={profile}")
+    command_env = os.environ.copy()
+    command_env["BROWSER_SESSION_REQUEST_JSON"] = json.dumps(request_config, ensure_ascii=False)
+    result = run_command(
+        command,
+        timeout=bounded_int(timeout, 60, 5, 300) + 30,
+        env=command_env,
+    )
+    if result["exit_code"] != 0:
+        return {
+            "error": "browser session request failed",
+            "url": url,
+            "detail": str(result.get("stderr") or result.get("stdout") or "unknown error")[:1000],
+        }
+    try:
+        return json.loads(result["stdout"])
+    except json.JSONDecodeError as exc:
+        return {"error": "invalid browser session response", "url": url, "detail": str(exc)}
+
+
 def split_allowed_hosts(value: str) -> list[str]:
     return [item.strip() for item in str(value or "").split(",") if item.strip()]
 
@@ -211,10 +255,18 @@ def internal_http_request(
     request_headers = {"Accept": "application/json,text/plain,*/*"}
     request_headers.update(headers or {})
     if use_browser_session:
-        try:
-            request_headers["Cookie"] = browser_cookie_header(url, domain or parsed.hostname, profile)
-        except Exception as exc:
-            return {"error": "unable to get browser session cookie", "detail": str(exc)}
+        cookie_domain = str(domain or parsed.hostname).lower().lstrip(".")
+        if parsed.hostname != cookie_domain and not parsed.hostname.endswith(f".{cookie_domain}"):
+            return {"error": "cookie domain does not match request host", "host": parsed.hostname, "domain": domain}
+        return browser_session_request(
+            method,
+            url,
+            request_headers,
+            body=body,
+            profile=profile,
+            timeout=timeout,
+            max_chars=max_chars,
+        )
 
     try:
         payload = body.encode("utf-8") if isinstance(body, str) else body

@@ -117,6 +117,16 @@ def ensure_session(url: str, profile: str = "", success_text: str = "none", time
 
 
 @mcp.tool()
+def renew_session(url: str, profile: str = "", success_text: str = "none") -> str:
+    """无头访问目标页面以续期可滑动的浏览器 Session；登录失效时仅返回状态，不弹出浏览器。"""
+    if not url:
+        return error_text("url is required")
+    args = _browser_args(url, profile, success_text)
+    args.append("--renew")
+    return _run_browser(args, timeout=90)
+
+
+@mcp.tool()
 def get_cookies(url: str, domain: str = "", profile: str = "", show_secrets: bool = False) -> str:
     """读取指定域名 Cookie。默认脱敏；只有显式 show_secrets=true 才返回原始值。"""
     cookie_domain = domain or safe_domain_from_url(url)
@@ -131,7 +141,7 @@ def get_cookies(url: str, domain: str = "", profile: str = "", show_secrets: boo
 
 @mcp.tool()
 def fetch_with_session(url: str, domain: str = "", profile: str = "", max_chars: int = 8000) -> str:
-    """使用浏览器 Cookie 对允许的内网域名发起只读 GET 请求。不会输出 Cookie。"""
+    """在 BrowserContext 中对允许的内网域名发起只读 GET，持久化续期 Cookie，不主动输出请求 Cookie。"""
     if not url:
         return error_text("url is required")
     return json_text(internal_http_get(
