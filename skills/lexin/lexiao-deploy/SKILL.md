@@ -2,7 +2,7 @@
 name: lexiao-deploy
 description: 乐效中部署和验收应用的流程技能。Use when 需要 open a Lexiao demand/version page, integrate branches, build an application, create or reuse a pre-release/gray publish order, deploy a project-environment artifact, or deploy exactly one pre-release/gray target with VM/KVM priority, then verify publish status, pipeline/artifact health, publish logs, target-server logs, and triage errors with next-step choices. Supports 项目环境/prj、预发布单机、显式灰度单目标 deployment; reserve OA、线上 rollout paths for future extension.
 metadata:
-  version: 1.2.3
+  version: 1.2.4
 ---
 
 # Lexiao Deploy
@@ -112,7 +112,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/script
   --success-text=<target-app-name>
 ```
 
-If the default profile under `~/.cache` cannot be locked or written, use a writable profile such as `/home/joney/.codex/lexiao-browser-profile`. If login is required, open a headed browser and ask the user to complete SSO/MOA in the browser; never ask for passwords, OTPs, cookies, or private keys in chat.
+Profile selection follows `get-browser-session`: explicit `--profile`, then `BROWSER_SESSION_PROFILE`, then `DEVTOOLS_BROWSER_PROFILE`, and finally `~/.cache/lexiao-browser-profile`. If an isolated writable profile is required, choose it explicitly and reuse it for the whole deployment flow. If login is required, open a headed browser and ask the user to complete SSO/MOA in the browser; never ask for passwords, OTPs, cookies, or private keys in chat.
 
 ## Detailed References
 

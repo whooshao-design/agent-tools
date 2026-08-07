@@ -4,7 +4,9 @@ const path = require('path');
 const { createRequire } = require('module');
 
 const TOOL_DIR = path.join(os.homedir(), 'tools/lexiao-browser');
-const DEFAULT_PROFILE = path.join(os.homedir(), '.cache/lexiao-browser-profile');
+const DEFAULT_PROFILE = process.env.BROWSER_SESSION_PROFILE
+  || process.env.DEVTOOLS_BROWSER_PROFILE
+  || path.join(os.homedir(), '.cache/lexiao-browser-profile');
 const CHROME_PATH = path.join(TOOL_DIR, 'browsers/chrome-linux64/chrome');
 const RUNTIME_LIB_DIR = path.join(TOOL_DIR, 'runtime-libs/usr/lib/x86_64-linux-gnu');
 const chromium = createRequire(path.join(TOOL_DIR, 'package.json'))('playwright').chromium;

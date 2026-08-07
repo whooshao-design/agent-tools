@@ -2,7 +2,7 @@
 name: test-dubbo-api
 description: 通过 bianque 服务模拟器 HTTP 接口调用和编排 Dubbo 服务测试。支持从项目配置提取 Dubbo 元信息、按 targets.json 复用 IP:Port、自动获取 Cookie、区分 stable/pre 环境，并用 JSON 场景复用多接口验收流程。
 metadata:
-  version: 1.2.1
+  version: 1.2.2
 ---
 
 # Dubbo 接口测试
@@ -63,14 +63,14 @@ metadata:
 
 ### 自动获取（推荐）
 
-固定脚本默认通过 `get-browser-session` 从 `/home/joney/.codex/lexiao-browser-profile` 获取 bianque Cookie。需要单独检查登录态时使用：
+固定脚本默认通过 `get-browser-session` 从共享 profile 获取 bianque Cookie，优先读取 `BROWSER_SESSION_PROFILE` / `DEVTOOLS_BROWSER_PROFILE`，否则使用 `/home/joney/.cache/lexiao-browser-profile`。需要单独检查登录态时使用：
 
 ```bash
 node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js \
   --url=https://stable-bianque.lexinfintech.com \
   --cookies \
   --domain=stable-bianque.lexinfintech.com \
-  --profile=/home/joney/.codex/lexiao-browser-profile
+  --profile=/home/joney/.cache/lexiao-browser-profile
 ```
 
 如果默认 profile 登录态不可用，打开 headed 浏览器让用户完成 SSO/MOA 登录；不要在聊天中索要密码、OTP 或 Cookie。
@@ -108,7 +108,7 @@ python3 /home/joney/projects/ai/agent-tools/skills/lexin/test-dubbo-api/scripts/
   --params '<JSON_ARRAY>'
 ```
 
-目标地址可以用 `--app` 从 `targets.json` 读取，也可以直接传 `--ip '<IP>' --port '<PORT>'`。默认 profile 使用 `/home/joney/.codex/lexiao-browser-profile`。如果需要换浏览器登录态，传 `--profile=<profile-dir>`；如果已经有 Cookie，传 `--cookie='<COOKIE>'`。
+目标地址可以用 `--app` 从 `targets.json` 读取，也可以直接传 `--ip '<IP>' --port '<PORT>'`。默认 profile 使用 `/home/joney/.cache/lexiao-browser-profile`，并接受 `BROWSER_SESSION_PROFILE` / `DEVTOOLS_BROWSER_PROFILE` 覆盖。如果需要换浏览器登录态，传 `--profile=<profile-dir>`；如果已经有 Cookie，传 `--cookie='<COOKIE>'`。
 
 手工 curl 仅作为脚本不可用时的备用：
 

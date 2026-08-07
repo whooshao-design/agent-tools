@@ -33,7 +33,12 @@ function resolvePaths(args) {
   const toolDir = expandHome(args['tool-dir'] || process.env.BROWSER_SESSION_TOOL_DIR || '~/tools/lexiao-browser');
   return {
     toolDir,
-    profileDir: expandHome(args.profile || process.env.BROWSER_SESSION_PROFILE || '~/.cache/lexiao-browser-profile'),
+    profileDir: expandHome(
+      args.profile
+      || process.env.BROWSER_SESSION_PROFILE
+      || process.env.DEVTOOLS_BROWSER_PROFILE
+      || '~/.cache/lexiao-browser-profile'
+    ),
     chromePath: expandHome(args.chrome || path.join(toolDir, 'browsers/chrome-linux64/chrome')),
     runtimeLibDir: expandHome(args['runtime-lib-dir'] || path.join(toolDir, 'runtime-libs/usr/lib/x86_64-linux-gnu')),
     playwrightPackage: path.join(toolDir, 'package.json'),

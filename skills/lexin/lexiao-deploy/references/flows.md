@@ -9,13 +9,13 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/lexiao-deploy/scripts/lexi
   --action=status \
   --url=<lexiao-related-demand-url> \
   --app=<app-name> \
-  --profile=/home/joney/.codex/lexiao-browser-profile
+  --profile=/home/joney/.cache/lexiao-browser-profile
 
 node /home/joney/projects/ai/agent-tools/skills/lexin/lexiao-deploy/scripts/lexiao_project_env.js \
   --action=deploy \
   --url=<lexiao-related-demand-url> \
   --app=<app-name> \
-  --profile=/home/joney/.codex/lexiao-browser-profile \
+  --profile=/home/joney/.cache/lexiao-browser-profile \
   --build-timeout=1200000 \
   --deploy-timeout=1200000
 ```

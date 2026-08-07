@@ -12,11 +12,23 @@ const {
   chromiumArgsFor,
 } = require('../../get-browser-session/scripts/browser_network');
 
-const BASE_URL = 'http://hippo.oa.fenqile.com';
-const DASHBOARD_URL = `${BASE_URL}/#/app/dashboard`;
+const STANDARD_BASE_URL = 'http://hippo.oa.fenqile.com';
+const STABLE_BASE_URL = 'http://stable-hippo.oa.fenqile.com';
 const DEFAULT_PROFILE = '/tmp/healthy-dashboard-profile';
 const DEFAULT_TOOL_DIR = path.join(os.homedir(), 'tools/lexiao-browser');
 const COMMANDS = new Set(['doctor', 'status', 'plan', 'upsert', 'verify', 'self-test', 'help']);
+const PUBLISH_AUTHORIZATION_VALUE = 'explicit';
+const STABLE_HOST_ALIASES = new Set([
+  'stable',
+  'test',
+  'testing',
+  '测试',
+  '测试环境',
+  'prj',
+  'project',
+  '项目',
+  '项目环境',
+]);
 const ENV_ALIASES = {
   pre: 'fql_pre',
   '预发': 'fql_pre',
@@ -28,6 +40,15 @@ const ENV_ALIASES = {
   production: 'fql_prod',
   '生产': 'fql_prod',
   '线上': 'fql_prod',
+  stable: 'fql_pre',
+  test: 'fql_pre',
+  testing: 'fql_pre',
+  '测试': 'fql_pre',
+  '测试环境': 'fql_pre',
+  prj: 'fql_pre',
+  project: 'fql_pre',
+  '项目': 'fql_pre',
+  '项目环境': 'fql_pre',
 };
 
 class HippoError extends Error {
@@ -82,9 +103,31 @@ function parseArgs(argv) {
   return args;
 }
 
+function flagEnabled(value) {
+  if (value === undefined || value === false) return false;
+  if (value === true) return true;
+  return !['0', 'false', 'no', 'off'].includes(String(value).trim().toLowerCase());
+}
+
 function normalizeEnv(value) {
   const raw = String(value || 'fql_pre').trim().toLowerCase();
   return ENV_ALIASES[raw] || raw;
+}
+
+function normalizeSite(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return '';
+  if (STABLE_HOST_ALIASES.has(raw) || raw === 'stable-hippo') return 'stable';
+  if (['standard', 'online', 'prod', '生产', '线上', 'hippo'].includes(raw)) return 'standard';
+  fail('HIPPO_SITE_INVALID', '不支持的 --hippo-site；只能传 stable 或 standard', { hippoSite: value });
+}
+
+function resolveBaseUrl(env, requestedEnv, hippoSite) {
+  const site = normalizeSite(hippoSite);
+  if (site === 'stable') return STABLE_BASE_URL;
+  if (site === 'standard') return STANDARD_BASE_URL;
+  const raw = String(requestedEnv || '').trim().toLowerCase();
+  return STABLE_HOST_ALIASES.has(raw) ? STABLE_BASE_URL : STANDARD_BASE_URL;
 }
 
 function readUtf8File(filePath, label, allowEmpty = true) {
@@ -289,6 +332,7 @@ function summarizeState(target, paths, state) {
     summary: {
       target: `${target.appId}/${target.env}/${target.cluster}/${target.namespaceName}/${target.key}`,
       env: target.env,
+      baseUrl: target.baseUrl,
       endpoints: paths,
       draftExists,
       activeExists,
@@ -315,6 +359,67 @@ function desiredDiffKeys(beforeDiffKeys, target, activeConfig, desiredValue) {
     result.add(target.key);
   }
   return [...result].sort();
+}
+
+function activeValueMatches(active, target, desired) {
+  return hasOwn(active.configurations, target.key)
+    && String(active.configurations[target.key] ?? '') === desired.value;
+}
+
+function activeConfigChangedKeys(beforeConfig, afterConfig) {
+  const keys = new Set([...Object.keys(beforeConfig), ...Object.keys(afterConfig)]);
+  return [...keys]
+    .filter((key) => !hasOwn(beforeConfig, key)
+      || !hasOwn(afterConfig, key)
+      || String(beforeConfig[key] ?? '') !== String(afterConfig[key] ?? ''))
+    .sort();
+}
+
+function releaseSelectedItem(target, targetItem, active, desired) {
+  assert(targetItem, 'TARGET_ITEM_MISSING', '发布前目标配置项不存在');
+  assert(targetItem.id !== undefined && targetItem.id !== null, 'TARGET_ITEM_ID_MISSING',
+    '发布前目标配置项缺少 id');
+  const activeExists = hasOwn(active.configurations, target.key);
+  return {
+    id: targetItem.id,
+    key: target.key,
+    oldValue: activeExists ? String(active.configurations[target.key] ?? '') : null,
+    newValue: desired.value,
+    type: activeExists ? 'modify' : 'create',
+  };
+}
+
+function summarizeReleaseSelectedItem(item) {
+  return {
+    id: item.id,
+    key: item.key,
+    type: item.type,
+    oldValueSha256: item.oldValue === null ? null : sha256(item.oldValue),
+    newValueSha256: sha256(item.newValue),
+  };
+}
+
+function formatReleaseTimestamp(date = new Date()) {
+  const pad = (value) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}`
+    + `${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
+}
+
+function publishOptions(args, summarized) {
+  if (!flagEnabled(args.publish)) return { enabled: false };
+  assert(String(args['publish-authorization'] || '') === PUBLISH_AUTHORIZATION_VALUE,
+    'PUBLISH_AUTHORIZATION_REQUIRED',
+    '发布必须由用户在当前对话中明确授权，并传 --publish-authorization=explicit');
+  assert(args['expected-current-token'], 'EXPECTED_TOKEN_REQUIRED_FOR_PUBLISH',
+    '发布必须携带本次 plan 返回的 currentStateToken', {
+      currentStateToken: summarized.currentStateToken,
+    });
+  return {
+    enabled: true,
+    releaseTitle: String(args['release-title'] || `${formatReleaseTimestamp()}-release`),
+    releaseComment: String(args['release-comment'] || `codex publish ${summarized.summary.target}`),
+    isEmergencyPublish: flagEnabled(args['emergency-publish']),
+  };
 }
 
 function readDesired(args) {
@@ -356,9 +461,11 @@ function planChange(target, summarized, desired, expectedToken) {
 
 function resolveRuntime(args, command) {
   const env = normalizeEnv(args.env);
+  const baseUrl = resolveBaseUrl(env, args.env, args['hippo-site']);
   const target = command === 'doctor' ? null : {
     appId: resolveAppId(args),
     env,
+    baseUrl,
     cluster: String(args.cluster || 'default'),
     namespaceName: String(args.namespace || 'application'),
     key: String(args.key || '').trim(),
@@ -371,6 +478,9 @@ function resolveRuntime(args, command) {
   const toolDir = path.resolve(expandHome(args['tool-dir'] || DEFAULT_TOOL_DIR));
   return {
     env,
+    baseUrl,
+    dashboardUrl: `${baseUrl}/#/app/dashboard`,
+    expectedHost: new URL(baseUrl).hostname,
     target,
     paths: target ? buildPaths(target) : null,
     profile: path.resolve(expandHome(args.profile || DEFAULT_PROFILE)),
@@ -416,16 +526,17 @@ async function findInjector(page, timeoutMs) {
   }
 }
 
-async function pageDiagnosis(page) {
-  return page.evaluate(() => ({
+async function pageDiagnosis(page, expectedHost) {
+  return page.evaluate((targetHost) => ({
     title: document.title,
     url: location.href,
     host: location.hostname,
+    expectedHost: targetHost,
     hasPasswordInput: Boolean(document.querySelector('input[type="password"]')),
     hasPortalMarker: /atrust/i.test(location.hostname)
       || /Work Happy|QR Code|Use MOA|Account Login|Password Login|乐空间传送门|ATrust/i
         .test((document.body?.innerText || '').slice(0, 4000)),
-  }));
+  }), expectedHost);
 }
 
 async function serviceInfo(page) {
@@ -445,16 +556,24 @@ async function serviceInfo(page) {
     }).find(Boolean);
     if (!injector) return { injectorReady: false };
     let service;
+    let releaseService;
     try {
       service = injector.get('ConfigService');
     } catch (_) {
       return { injectorReady: true, configServiceReady: false };
     }
+    try {
+      releaseService = injector.get('ReleaseService');
+    } catch (_) {
+      releaseService = null;
+    }
     return {
       injectorReady: true,
       configServiceReady: true,
+      releaseServiceReady: Boolean(releaseService),
       createItemReady: typeof service.create_item === 'function',
       updateItemReady: typeof service.update_item === 'function',
+      publishReady: Boolean(releaseService) && typeof releaseService.publish === 'function',
       createItemArity: typeof service.create_item === 'function' ? service.create_item.length : null,
       updateItemArity: typeof service.update_item === 'function' ? service.update_item.length : null,
     };
@@ -463,7 +582,7 @@ async function serviceInfo(page) {
 
 async function openHippo(runtime) {
   const chromium = loadChromium(runtime);
-  const network = buildBrowserEnv(BASE_URL, process.env);
+  const network = buildBrowserEnv(runtime.baseUrl, process.env);
   const env = { ...network.env };
   env.LD_LIBRARY_PATH = [runtime.runtimeLibDir, process.env.LD_LIBRARY_PATH].filter(Boolean).join(':');
   let context;
@@ -472,7 +591,7 @@ async function openHippo(runtime) {
       executablePath: runtime.chromePath,
       headless: true,
       env,
-      args: chromiumArgsFor(BASE_URL, ['--no-sandbox']),
+      args: chromiumArgsFor(runtime.baseUrl, ['--no-sandbox']),
     });
   } catch (error) {
     if (/ProcessSingleton|SingletonLock|profile.*use|already in use/i.test(String(error.stack || error))) {
@@ -484,12 +603,13 @@ async function openHippo(runtime) {
   }
   try {
     const page = context.pages()[0] || await context.newPage();
-    await page.goto(DASHBOARD_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.goto(runtime.dashboardUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
     const injectorReady = await findInjector(page, 30000);
     if (!injectorReady) {
-      const diagnosis = await pageDiagnosis(page);
-      const code = diagnosis.hasPasswordInput || diagnosis.hasPortalMarker || diagnosis.host !== 'hippo.oa.fenqile.com'
+      const diagnosis = await pageDiagnosis(page, runtime.expectedHost);
+      const code = diagnosis.hasPasswordInput || diagnosis.hasPortalMarker
+        || diagnosis.host !== runtime.expectedHost
         ? 'LOGIN_REQUIRED'
         : 'ANGULAR_INJECTOR_UNAVAILABLE';
       fail(code, 'Hippo 登录态或页面初始化不可用，请用 get-browser-session 刷新登录态', diagnosis);
@@ -587,6 +707,156 @@ async function waitForDesiredState(page, target, paths, desired, timeoutMs = 100
   fail('DRAFT_READBACK_TIMEOUT', '保存后回读未得到目标草稿值');
 }
 
+async function waitForPublishedState(page, target, paths, desired, timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs;
+  let latest;
+  while (Date.now() < deadline) {
+    latest = await readState(page, paths);
+    const active = parseActive(latest.active);
+    if (activeValueMatches(active, target, desired)) return latest;
+    await page.waitForTimeout(500);
+  }
+  fail('PUBLISH_READBACK_TIMEOUT', '发布后 active release 未得到目标配置值');
+}
+
+async function publishDraft(page, target, selectedItem, options) {
+  const result = await page.evaluate(async ({
+    appId,
+    env,
+    cluster,
+    namespaceName,
+    releaseTitle,
+    releaseComment,
+    isEmergencyPublish,
+    releaseSelectedItems,
+  }) => {
+    const candidates = [
+      document.documentElement,
+      document.body,
+      document.querySelector('#wrapper'),
+      document.querySelector('.apollo-container'),
+    ].filter(Boolean);
+    const injector = candidates.map((element) => {
+      try {
+        return window.angular.element(element).injector();
+      } catch (_) {
+        return null;
+      }
+    }).find(Boolean);
+    if (!injector) throw new Error('Angular injector unavailable');
+    const releaseService = injector.get('ReleaseService');
+    if (!releaseService || typeof releaseService.publish !== 'function') {
+      throw new Error('ReleaseService.publish unavailable');
+    }
+    let stableEnv = false;
+    try {
+      const envService = injector.get('EnvService');
+      const stableResult = await envService.is_stable_env();
+      stableEnv = Boolean(stableResult?.isStableEnv);
+    } catch (_) {
+      stableEnv = false;
+    }
+    if (!stableEnv && typeof releaseService.checkIfWhiteApp === 'function') {
+      const check = await releaseService.checkIfWhiteApp(
+        appId,
+        env,
+        cluster,
+        namespaceName,
+        releaseTitle,
+        releaseComment,
+        isEmergencyPublish,
+      );
+      if (check?.isAbandoned === true) {
+        return {
+          approvalRequired: true,
+          comment: check?.comment ?? null,
+          result: check?.result ?? null,
+          isAbandoned: true,
+        };
+      }
+    }
+    const release = await releaseService.publish(
+      appId,
+      env,
+      cluster,
+      namespaceName,
+      releaseTitle,
+      releaseComment,
+      isEmergencyPublish,
+      releaseSelectedItems,
+    );
+    return {
+      approvalRequired: false,
+      id: release?.id ?? null,
+      releaseKey: release?.releaseKey ?? null,
+      name: release?.name ?? null,
+      comment: release?.comment ?? null,
+      result: release?.result ?? null,
+      isAbandoned: release?.isAbandoned ?? false,
+      dataChangeCreatedBy: release?.dataChangeCreatedBy ?? null,
+      dataChangeCreatedTime: release?.dataChangeCreatedTime ?? null,
+    };
+  }, {
+    appId: target.appId,
+    env: target.env,
+    cluster: target.cluster,
+    namespaceName: target.namespaceName,
+    releaseTitle: options.releaseTitle,
+    releaseComment: options.releaseComment,
+    isEmergencyPublish: options.isEmergencyPublish,
+    releaseSelectedItems: [selectedItem],
+  });
+  assert(!result.approvalRequired, 'PUBLISH_REQUIRES_APPROVAL',
+    '该环境发布需要走 Hippo 审批流，脚本不会绕过审批直接发布', {
+      comment: result.comment,
+      result: result.result,
+    });
+  assert(!result.isAbandoned, 'PUBLISH_ABANDONED', 'Hippo 拒绝发布', {
+    comment: result.comment,
+    result: result.result,
+  });
+  return result;
+}
+
+async function publishTargetAndVerify(page, target, paths, targetItem, beforeActive, desired, options) {
+  if (activeValueMatches(beforeActive, target, desired)) {
+    return {
+      publishAttempted: false,
+      publishSkipped: true,
+      publishSkipReason: 'active release already matches desired value',
+      published: false,
+    };
+  }
+  const selectedItem = releaseSelectedItem(target, targetItem, beforeActive, desired);
+  const release = await publishDraft(page, target, selectedItem, options);
+  const afterState = await waitForPublishedState(page, target, paths, desired);
+  const afterSummarized = summarizeState(target, paths, afterState);
+  const changedKeys = activeConfigChangedKeys(beforeActive.configurations, afterSummarized.active.configurations);
+  assert(changedKeys.length === 1 && changedKeys[0] === target.key,
+    'NON_TARGET_ACTIVE_CONFIG_CHANGED', '发布后 active release 出现非目标 key 变化', {
+      changedKeys,
+      targetKey: target.key,
+    });
+  assert(activeValueMatches(afterSummarized.active, target, desired),
+    'PUBLISH_VERIFY_FAILED', '发布后 active release 目标值与期望不一致');
+  return {
+    publishAttempted: true,
+    published: true,
+    releaseTitle: options.releaseTitle,
+    releaseCommentSha256: sha256(options.releaseComment),
+    emergencyPublish: options.isEmergencyPublish,
+    releaseSelectedItem: summarizeReleaseSelectedItem(selectedItem),
+    activeChangedKeys: changedKeys,
+    activeReleaseKeyBefore: beforeActive.release?.releaseKey || null,
+    activeReleaseKeyAfter: afterSummarized.active.release?.releaseKey || null,
+    activeReleaseIdBefore: beforeActive.release?.id ?? null,
+    activeReleaseIdAfter: afterSummarized.active.release?.id ?? null,
+    activeConfigurationsSha256AfterPublish: sha256(afterSummarized.active.rawConfigurations),
+    afterDraftDiffKeys: afterSummarized.summary.draftDiffKeys,
+    publishResult: release,
+  };
+}
+
 function releaseUnchanged(before, after) {
   const beforeId = before.release?.id ?? null;
   const afterId = after.release?.id ?? null;
@@ -609,13 +879,24 @@ function helpText() {
   hippo_draft_config.js self-test
 
 Defaults: --env=fql_pre --cluster=default --namespace=application
-Safety: upsert only saves a draft. This script has no publish command or release mutation.
+Stable aliases: stable/test/testing/prj/project/测试/项目/项目环境 -> env=fql_pre and stable Hippo host
+Use --hippo-site=stable with explicit envs such as pdwl_pre when navtree shows a stable env prefix.
+Safety: upsert saves a draft by default. Publishing requires --publish, --publish-authorization=explicit,
+and the current plan token via --expected-current-token. Publish selects only the target key.
 `;
 }
 
 function runSelfTest() {
   assert(normalizeEnv('pre') === 'fql_pre', 'SELF_TEST_FAILED', 'pre 环境映射失败');
   assert(normalizeEnv('prod') === 'fql_prod', 'SELF_TEST_FAILED', 'prod 环境映射失败');
+  assert(normalizeEnv('stable') === 'fql_pre', 'SELF_TEST_FAILED', 'stable 环境映射失败');
+  assert(normalizeEnv('test') === 'fql_pre', 'SELF_TEST_FAILED', 'test 环境映射失败');
+  assert(normalizeEnv('项目环境') === 'fql_pre', 'SELF_TEST_FAILED', '项目环境映射失败');
+  assert(resolveBaseUrl('fql_pre', 'stable') === STABLE_BASE_URL, 'SELF_TEST_FAILED', 'stable 域名映射失败');
+  assert(resolveBaseUrl('fql_pre', 'test') === STABLE_BASE_URL, 'SELF_TEST_FAILED', 'test 域名映射失败');
+  assert(resolveBaseUrl('pdwl_pre', 'pdwl_pre', 'stable') === STABLE_BASE_URL, 'SELF_TEST_FAILED', '显式 stable 站点映射失败');
+  assert(resolveBaseUrl('fql_pre', 'pre') === STANDARD_BASE_URL, 'SELF_TEST_FAILED', '预发标准域名映射失败');
+  assert(resolveBaseUrl('fql_prod', 'prod') === STANDARD_BASE_URL, 'SELF_TEST_FAILED', '标准域名映射失败');
   const target = { appId: 'demo', env: 'fql_pre', cluster: 'default', namespaceName: 'application', key: 'target' };
   const items = [{ id: 1, key: 'same', value: '1' }, { id: 2, key: 'target', value: 'draft' }];
   const activeRows = [{ id: 9, releaseKey: 'r1', configurations: JSON.stringify({ same: '1', target: 'active' }) }];
@@ -628,6 +909,25 @@ function runSelfTest() {
   const plan = planChange(target, summarized, desired);
   assert(plan.operation === 'update' && plan.guardRequired, 'SELF_TEST_FAILED', 'update plan 计算失败');
   assertTargetAfterMutation(items[1], { ...items[1], value: 'next' }, desired);
+  assert(JSON.stringify(activeConfigChangedKeys({ same: '1', target: 'active' }, { same: '1', target: 'next' }))
+    === JSON.stringify(['target']), 'SELF_TEST_FAILED', 'active changed keys 计算失败');
+  const selected = releaseSelectedItem(target, items[1], summarized.active, desired);
+  assert(selected.key === 'target' && selected.type === 'modify' && selected.id === 2,
+    'SELF_TEST_FAILED', '发布选择项计算失败');
+  const publish = publishOptions({
+    publish: true,
+    'publish-authorization': PUBLISH_AUTHORIZATION_VALUE,
+    'expected-current-token': summarized.currentStateToken,
+  }, summarized);
+  assert(publish.enabled && publish.releaseTitle.endsWith('-release'),
+    'SELF_TEST_FAILED', '发布选项计算失败');
+  let publishRejected = false;
+  try {
+    publishOptions({ publish: true }, summarized);
+  } catch (error) {
+    publishRejected = error.code === 'PUBLISH_AUTHORIZATION_REQUIRED';
+  }
+  assert(publishRejected, 'SELF_TEST_FAILED', '发布授权缺失未被拒绝');
   assert(planChange(target, summarized, { value: 'draft', comment: undefined }).operation === 'noop',
     'SELF_TEST_FAILED', 'noop plan 计算失败');
   let staleRejected = false;
@@ -654,12 +954,15 @@ async function runBrowserCommand(command, args) {
         networkPolicy: browser.networkPolicy,
         ...browser.services,
         defaultEnv: 'fql_pre',
+        baseUrl: runtime.baseUrl,
         publishAttempted: false,
       };
     }
 
     const state = await readState(browser.page, runtime.paths);
     const summarized = summarizeState(runtime.target, runtime.paths, state);
+    assert(!flagEnabled(args.publish) || command === 'upsert', 'PUBLISH_COMMAND_INVALID',
+      '只有 upsert 支持 --publish；plan/verify/status 不会发布');
     if (command === 'status') return { command, ...summarized.summary };
 
     const desired = readDesired(args);
@@ -686,11 +989,13 @@ async function runBrowserCommand(command, args) {
         ...common,
         verified: true,
         unpublishedDraft: summarized.summary.targetHasUnpublishedDraft,
-        published: false,
+        activeEqualsDesired: activeValueMatches(summarized.active, runtime.target, desired),
+        published: activeValueMatches(summarized.active, runtime.target, desired),
       };
     }
 
     assert(command === 'upsert', 'COMMAND_INVALID', `不支持的 command: ${command}`);
+    const publish = publishOptions(args, summarized);
     if (plan.operation === 'noop') {
       const afterState = await readState(browser.page, runtime.paths);
       const afterSummarized = summarizeState(runtime.target, runtime.paths, afterState);
@@ -709,6 +1014,25 @@ async function runBrowserCommand(command, args) {
           expected: plan.expectedDraftDiffKeys,
           actual: afterSummarized.summary.draftDiffKeys,
         });
+      if (publish.enabled) {
+        const publishResult = await publishTargetAndVerify(
+          browser.page,
+          runtime.target,
+          runtime.paths,
+          afterSummarized.targetItem,
+          afterSummarized.active,
+          desired,
+          publish,
+        );
+        return {
+          ...common,
+          draftSaved: false,
+          targetItemValidated: Boolean(afterSummarized.targetItem),
+          otherDraftItemsUnchangedBeforePublish: true,
+          nonTargetActiveConfigurationsUnchanged: true,
+          ...publishResult,
+        };
+      }
       return {
         ...common,
         draftSaved: false,
@@ -717,7 +1041,6 @@ async function runBrowserCommand(command, args) {
         activeReleaseKeyUnchanged: true,
         activeConfigurationsUnchanged: true,
         activeReleaseIdUnchanged: true,
-        publishAttempted: false,
         published: false,
       };
     }
@@ -743,6 +1066,27 @@ async function runBrowserCommand(command, args) {
         expected: plan.expectedDraftDiffKeys,
         actual: afterSummarized.summary.draftDiffKeys,
       });
+    if (publish.enabled) {
+      const publishResult = await publishTargetAndVerify(
+        browser.page,
+        runtime.target,
+        runtime.paths,
+        afterSummarized.targetItem,
+        afterSummarized.active,
+        desired,
+        publish,
+      );
+      return {
+        ...common,
+        operation: mutation.operation,
+        draftSaved: true,
+        targetItemValidated: true,
+        otherDraftItemsUnchangedBeforePublish: true,
+        activeReleaseUnchangedBeforePublish: true,
+        nonTargetActiveConfigurationsUnchanged: true,
+        ...publishResult,
+      };
+    }
     return {
       ...common,
       operation: mutation.operation,
@@ -788,12 +1132,21 @@ if (require.main === module) {
 }
 
 module.exports = {
+  activeConfigChangedKeys,
   buildPaths,
   desiredDiffKeys,
   diffKeys,
+  fetchJson,
+  flagEnabled,
+  loadChromium,
   makeStateToken,
   normalizeEnv,
+  parseActive,
   parseArgs,
   planChange,
+  publishOptions,
+  releaseSelectedItem,
+  resolveAppId,
+  resolveBaseUrl,
   summarizeState,
 };
