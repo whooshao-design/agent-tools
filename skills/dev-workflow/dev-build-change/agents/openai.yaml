@@ -1,6 +1,6 @@
 interface:
   display_name: "dev-build-change"
-  short_description: "基于现有代码模式实施最小必要改动，并给出后续验证重点"
-  default_prompt: "使用 $dev-build-change 基于现有代码上下文实施最小必要改动，并说明影响范围和验证建议。"
+  short_description: "根据技术方案生成 DEV 开发清单，或按清单实施改动"
+  default_prompt: "使用 $dev-build-change 从技术方案、测试清单或完成标准派生 DEV 执行清单；用户只要求清单时在拆分后停止且不改代码，用户要求实施时再核对 gate_context，按依赖和写集安全编码并记录 change_revision。"
 policy:
   allow_implicit_invocation: true

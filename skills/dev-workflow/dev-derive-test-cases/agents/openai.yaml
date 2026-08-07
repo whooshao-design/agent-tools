@@ -1,6 +1,6 @@
 interface:
-  display_name: "dev-derive-test-cases"
-  short_description: "基于需求、已审批方案与代码基线推导可追踪的测试场景清单"
-  default_prompt: "使用 $dev-derive-test-cases 绑定原始需求、已审批方案、风险授权与代码基线，建立需求到方案再到测试场景的追踪清单。"
+  display_name: "编写测试清单"
+  short_description: "根据需求和已审批方案编写可追踪的测试清单"
+  default_prompt: "使用 $dev-derive-test-cases 绑定已审批的 R/S/B 与风险授权，编写可追踪的测试清单 C；不要执行测试或批准该清单。"
 policy:
   allow_implicit_invocation: true

@@ -17,19 +17,30 @@
 
 | Skill | 说明 |
 |---|---|
-| `dev-clarify-task` | 需求澄清 - 收敛范围、非目标、验收标准 |
-| `requirements-review` | 需求评审 - 评审 PRD/需求文档完整性 |
+| `dev-clarify-task` | 需求澄清 - 收敛范围、非目标、稳定需求身份与验收标准 |
+| `requirements-review` | 独立需求文档评审 - 检查 PRD/规格完整性并交接主线 |
 | `dev-design-solution` | 方案设计 - 比较实现路径、识别影响与风险 |
 | `dev-review-solution` | 技术方案评审 - 独立检查可行性、完整性与风险并给出评审结论 |
-| `dev-derive-test-cases` | 测试场景推导 - 把已评审方案转化为结构化测试场景清单 |
-| `dev-review-test-cases` | 测试场景评审 - 独立核对场景是否忠实覆盖方案 |
+| `dev-derive-test-cases` | 编写测试清单 - 列清改完后检查什么、怎样算通过、需要什么证据 |
+| `dev-review-test-cases` | 独立复核测试清单 - 由另一 agent 检查漏项、错项和可执行性，不执行测试 |
 | `dev-build-change` | 代码开发 - 基于现有模式实施最小必要改动 |
 | `dev-verify-change` | 验证 - 围绕变更做最小必要验证 |
 | `dev-review-change` | 代码评审 - 基于变更证据评审正确性/架构/安全 |
-| `dev-finish-branch` | 分支收尾 - 提交、推送、收尾检查 |
-| `dev-auto-loop` | 自动编排 - 串联设计评审、测试场景与开发交付三段闭环持续推进 |
+| `dev-finish-branch` | 分支收尾 - 交付前核对变更、证据、评审与风险 |
+| `dev-auto-loop` | 自动编排 - 用可恢复 checkpoint、独立预算和评审 agents 串联设计、测试清单准备与开发交付闭环 |
 
 **主线**: dev-clarify-task → dev-design-solution → dev-review-solution → dev-derive-test-cases → dev-review-test-cases → dev-build-change → dev-verify-change → dev-review-change → dev-finish-branch
+
+需求、方案、测试检查项、基线、代码修订和准入上下文统一遵循 [`skills/dev-workflow/references/artifact-identity.md`](skills/dev-workflow/references/artifact-identity.md)，防止评审或风险授权跨版本误用。
+
+研发先选择 `governance_path`，交付阶段再形成同名的 `G.mode`：`approved` 用于完整阶段制流程，`direct` 用于边界清楚的普通开发任务，`waived` 仅表示明确豁免适用的正式门禁。`dev-auto-loop` 可在尚无方案/清单审批时按 `governance_path=approved` 启动，只有两项审批完成后才生成交付 `G.mode=approved`；它需显式调用 `$dev-auto-loop`。普通修复、测试或收尾不会为了满足格式伪造审批。
+
+“测试清单”使用 `C` 和 `TC-*` 作为内部兼容标识，对用户统一称“检查项”。编写阶段产出待验证检查项，独立复核阶段只检查覆盖与可执行性；真正执行测试由 `dev-verify-change` 完成。正式审批写入 `rounds/round-<N>/approval-record.json`；direct/waived 分别使用不可变 `direct-record-v1` / `waiver-record-v1`。下游均以记录引用和指纹为准，不把可覆盖的 `review.md` 当审批事实源。
+
+## agents/ 与 hooks/
+
+- `agents/claude/`、`agents/codex/`：四类只读 reviewer，分别评审需求、方案、测试清单和代码。
+- `hooks/subagent_result_guard.py`：在 reviewer 停止时校验 `delegation-result-v1` 结果信封；它不替代编排器对独立身份、实际工具面、有效沙箱、工作区写入和领域结论的核验。若 Codex 父会话权限覆盖 reviewer 配置，使其获得写入或危险 MCP 能力，本次结果不能作为正式独立评审。
 
 ## skills/dev-quality — 开发质量增强
 
@@ -78,9 +89,9 @@
 |---|---|---|
 | `redis-query` | 通过 DevService.queryRedis 只读查询 Redis | `redis_query` |
 | `query-mysql-data` | 从代码定位实例并只读查询 MySQL 测试/stable 与经授权线上数据 | `mysql_readonly` |
-| `query-clickhouse-water` | 查询 ClickHouse 流水并输出 SQL 与结果 | `bastion_dba` |
-| `query-hippo-config` | 查看 Hippo 配置中心实际生效配置 | `browser_session` |
-| `configure-hippo` | 新增或修改 Hippo 草稿配置，默认预发布且不发布 | `browser_session` |
+| `query-clickhouse-water` | 通过预发布/灰度/线上共用 DBA 堡垒机或 stable/测试 HTTP 接口查询 ClickHouse 流水 | `bastion_dba`、`browser_session` |
+| `query-hippo-config` | 查看标准或 stable Hippo 配置中心实际生效配置 | `browser_session` |
+| `configure-hippo` | 新增、修改并在明确授权后发布标准或 stable Hippo 配置 | `browser_session` |
 
 ### 监控与诊断
 
@@ -124,9 +135,14 @@ python3 install.py --groups dev-workflow
 python3 install.py --skills dev-build-change,dev-review-change
 python3 install.py --targets claude        # 只装 Claude
 python3 install.py --copy                  # 复制模式兜底
+python3 install.py --with-subagents        # 额外安装双端 reviewer agents 与结果守卫 hook
+python3 install.py --with-subagents --dry-run
 python3 install.py --list
-python3 install.py --uninstall
+python3 install.py --with-subagents --uninstall
 ```
+
+`--with-subagents` 会先检查所有 reviewer 目标；若发现同名外部 agent，默认整次失败且不写入，只有显式 `--force` 才替换，避免“外部 reviewer + 官方 hook”的半安装状态。它只合并本仓库拥有的 `SubagentStop` handler，不覆盖其他 hooks 或设置。Codex 首次安装或 hook 内容变化后，按客户端提示使用 `/hooks` 审查并信任新定义；安装器不会绕过该安全确认。
+若 `~/.claude/settings.json` 或 `~/.codex/hooks.json` 本身由符号链接管理，安装器会拒绝替换链接；请在真实配置源中手工合并或改用普通文件。
 
 MCP 注册（每端一次）：Claude 用 `claude mcp add --scope user`，Codex 在 `~/.codex/config.toml`，
 PYTHONPATH 指向本仓库内对应 MCP 目录，模块形如 `python3 -m devtools_mcp.jenkins_server`。
@@ -138,7 +154,7 @@ PYTHONPATH 指向本仓库内对应 MCP 目录，模块形如 `python3 -m devtoo
 cd ~/projects/ai/agent-tools && git pull
 ```
 
-符号链接模式下无需重装；skill 改动对新会话生效，MCP 改动需重启 Claude/Codex。
+符号链接模式下 skill 改动无需重装；agent/hook 清单变化后重新运行 `python3 install.py --with-subagents`。skill 与 agent 改动对新会话生效，MCP 改动需重启 Claude/Codex。
 
 ## 添加新内容
 

@@ -1,7 +1,6 @@
 interface:
-  display_name: "dev-review-test-cases"
-  short_description: "独立核对需求、方案与测试场景的三向追踪并形成编码准入结论"
-  default_prompt: "使用 $dev-review-test-cases 绑定需求、方案审批记录、场景版本与代码基线，独立评审三向追踪和风险覆盖并形成准入报告。"
+  display_name: "独立复核测试清单"
+  short_description: "由非清单产出者检查漏项、错项与可执行性"
+  default_prompt: "使用 $dev-review-test-cases 绑定完整 (R,S,C,B) 和方案审批，独立复核测试清单的三向追踪、风险覆盖与编码准入；通过后再由编排器构造 T/G，不要执行测试。"
 policy:
-  # 和 dev-review-solution 同理：能否进入编码的关卡，要求用户显式触发
-  allow_implicit_invocation: false
+  allow_implicit_invocation: true

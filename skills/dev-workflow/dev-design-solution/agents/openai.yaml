@@ -1,6 +1,6 @@
 interface:
   display_name: "dev-design-solution"
-  short_description: "基于需求和代码证据产出可评审、可实施、可验证的技术方案"
-  default_prompt: "使用 $dev-design-solution 分析需求和代码上下文，收敛技术方案、设计决策、影响范围、风险与验证路径。"
+  short_description: "产出结论前置、变更清晰且可追踪的技术方案"
+  default_prompt: "使用 $dev-design-solution 基于稳定 R/B 收敛方案 S：结论前置，分离现状与新增/修改/删除/不变项，按 DEC/CHG 组织权威正文，并建立 AC 到变更和验证的追踪。"
 policy:
   allow_implicit_invocation: true

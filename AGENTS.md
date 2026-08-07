@@ -16,6 +16,10 @@ agent-tools/
 │   ├── dev-quality/     # 开发质量增强：评审/验证维度 + 编码规范（5）
 │   ├── cicd/            # 通用构建、流水线与质量门禁（2）
 │   └── lexin/           # 乐信业务和内网平台访问（13）
+├── agents/
+│   ├── claude/          # Claude Code 只读独立评审 subagents
+│   └── codex/           # Codex 只读独立评审 agents
+├── hooks/               # SubagentStop 结构化结果守卫及测试
 ├── mcp/
 │   ├── devtools-mcp/    # 研发工具链只读 MCP 集合（Python 包 devtools_mcp，16 个 server）
 │   ├── bastion-mcp/     # 堡垒机 SSH 通道 MCP（config.json 本地化）
@@ -30,13 +34,42 @@ agent-tools/
 ```bash
 python3 install.py            # 符号链接安装到 ~/.claude/skills 和 ~/.codex/skills
 python3 install.py --copy     # 复制模式兜底（符号链接不可用时）
+python3 install.py --with-subagents  # 额外安装 reviewer agents 与结果守卫 hook
+python3 install.py --with-subagents --dry-run
 python3 install.py --list     # 查看分类与技能
-python3 install.py --uninstall
+python3 install.py --with-subagents --uninstall
 ```
 
 - 符号链接已实测可用：Claude Code（2026-06 验证）与 Codex 都能发现 skill 目录下的符号链接。
   早期"符号链接不可靠"的结论已过时。
 - ❌ Plugin System（`~/.claude/plugins/local/` 手动注册）依然不可行，不要尝试。
+- `--with-subagents` 只合并 owner 为 `agent-tools-subagent-result-v1` 的 `SubagentStop` handler，
+  不覆盖其他 settings/hooks；Codex 的 hook 信任由用户在 `/hooks` 中审查，安装器不代替确认。
+- settings/hooks JSON 本身是符号链接时安装器会拒绝写入，避免破坏 dotfiles 管理关系。
+
+## 独立评审约定
+
+- 需求、方案、测试清单和代码的正式评审分别使用 `agent-tools-requirements-reviewer`、
+  `agent-tools-solution-reviewer`、`agent-tools-test-design-reviewer`、`agent-tools-change-reviewer`。
+- reviewer 的运行时身份必须与对应 `producer_agent_refs[]` 不相交，并保持实际有效的只读沙箱与最小工具面；
+  写入即成为 producer，本轮评审失效。Codex 父会话权限可能覆盖 agent 静态沙箱，编排器必须核验生效配置，
+  不能仅凭配置文件声明认定隔离成立。完整约定见 `skills/dev-workflow/references/delegation-contract.md`。
+- hook 只校验 reviewer 的结构化结果信封；真实身份、有效权限、工作区写入与领域结论仍由编排器核验。
+- `checks.write_set_empty` 必须引用平台可信的逐 agent 写入事件，或同一监视范围的派发前/stop 后快照；
+  `changed_files: []` 和单次 `git status` 不能作为未写入证明。
+- 正式审批以 `rounds/round-<N>/approval-record.json` 的引用和指纹为准；不得覆盖历史轮次，
+  也不得把可变的 `review.md` 当作下游门禁事实源。
+- `--with-subagents` 遇到同名外部 reviewer 时必须在写入前整体失败；仅在用户显式 `--force` 后替换，
+  避免安装本仓库 hook 却继续运行未受控 reviewer。
+
+## 研发流程模式
+
+- 先选择 `governance_path`，构建、验证和收口时再形成对应的 `G.mode`；路径选择不等于门禁已通过。
+- `approved`：完整阶段制流程；方案与测试清单的不可变审批记录齐全后才生成交付 `G`。
+- `direct`：边界明确的普通修复、开发或验证；以不可变 `direct-record-v1` 保留最小可追踪上下文，不虚构正式审批。
+- `waived`：用户明确豁免原本适用的正式门禁；`waiver-record-v1` 必须记录门禁闭包、逐项替代证据及残余风险。
+- `dev-auto-loop` 仅适用于 `governance_path=approved`，并要求显式调用；不得隐式接管普通开发请求。
+- `dev-auto-loop` 同一 run 的预算、补证次数和终态通过不可变 checkpoint 延续，恢复时不得重置；完整规则见 `skills/dev-workflow/dev-auto-loop/references/run-state-and-resume.md`。
 
 ## SKILL.md 约定
 

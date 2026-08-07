@@ -1,6 +1,6 @@
 interface:
   display_name: "dev-verify-change"
   short_description: "围绕本次改动执行最小有效验证，明确验证结论与后续动作"
-  default_prompt: "使用 $dev-verify-change 围绕这次改动执行最小有效验证，并输出验证结论和后续建议。"
+  default_prompt: "使用 $dev-verify-change 核对 gate_context、change_revision 和 DEV 完成状态，确认实际写集有归属，再按 TC/完成标准到 DEV 的映射执行最小有效验证，输出证据、限制与唯一结论。"
 policy:
   allow_implicit_invocation: true
