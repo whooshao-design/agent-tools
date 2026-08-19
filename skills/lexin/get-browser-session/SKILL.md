@@ -2,10 +2,14 @@
 name: get-browser-session
 description: 获取、检查、续期和复用 WSL Playwright/Chromium 浏览器登录态与网页 session（底层会话层，供其他 skill 复用）。Use when 需要访问要求登录的内网页面、检查或定时续期浏览器 profile 登录态、打开浏览器让用户完成 SSO/OTP 登录、复用已保存 profile 做页面自动化，或按默认脱敏方式查看 session Cookie/localStorage token。
 metadata:
-  version: 1.5.0
+  version: 1.6.0
 ---
 
 # Get Browser Session
+
+## Feishu Boundary
+
+`https://lexin.feishu.cn/docx/*` 与 `https://lexin.feishu.cn/wiki/*` 的内容读取、写入和权限处理不属于本 Skill，必须交给 `manage-feishu-doc` 通过 Lark MCP 完成。即使网络探测能直连该域名，也不要为飞书文档启动浏览器会话；Linux 设备合规策略会拦截文档登录。
 
 ## Workflow
 
@@ -73,7 +77,7 @@ The reason is the exit IP. On this workstation `HTTP(S)_PROXY`/`ALL_PROXY` point
 
 Every launch therefore strips `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` (both cases) from the Chromium child environment, extends `NO_PROXY`, and passes `--no-proxy-server`. Results report `networkPolicy: "direct-only"`; treat any other value as a bug in this skill, not as a configuration choice.
 
-Direct reachability was verified for both internal OA hosts and external SaaS such as `lexin.feishu.cn`, where it is also roughly 12x faster than the proxied path. If some future target is genuinely unreachable direct, fix routing or DNS for that target — do not reintroduce a proxy opt-in here.
+Direct reachability was verified for both internal OA hosts and external SaaS such as `lexin.feishu.cn`, where it is also roughly 12x faster than the proxied path. This is a network observation only; Feishu document content operations remain excluded by "Feishu Boundary" above. If some future target is genuinely unreachable direct, fix routing or DNS for that target — do not reintroduce a proxy opt-in here.
 
 Only the Chromium child process is affected; the shell's own proxy settings are left untouched.
 
@@ -167,3 +171,20 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/script
 ```
 
 Use `--show-secrets` only for a downstream local process that consumes the value in memory, such as `query-mysql-data`; never write the value to a file or final answer.
+
+## 登录态排查顺序
+
+遇到 `LOGIN_REQUIRED` 时按序确认，**三步都失败才认定登录过期**：
+
+1. **profile 路径是否解析正确**：脚本已统一展开 `~`，但仍建议传绝对路径。若报
+   `PROFILE_NOT_FOUND`，那是路径问题而非登录问题，错误信息里会列出当前可用的 profile。
+2. **换一个 profile 试**：不同站点的登录态分布在不同 profile，常见的是
+   `~/.cache/lexiao-browser-profile`（乐效、Hippo、lxcloud、WebShell）和
+   `/tmp/healthy-dashboard-profile`（Healthy）。用
+   `browser_session.js --check --profile=<abs> --url=<目标站点>` 逐个确认，
+   `sessionState=READY` 即可用。
+3. **确认目标 host**：返回 `passport.lexincloud.com` 或 `trust.oa.fenqile.com`
+   才是真的需要重新登录。
+
+不要在第 1 步失败后就去拉起 headed 浏览器重新登录——历史上多次"登录不上"实际都是
+路径未展开或选错 profile。

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 const os = require('os');
+const fs = require('fs');
 const path = require('path');
 const { createRequire } = require('module');
 const {
@@ -17,6 +18,37 @@ const { asBoolean, normalizeQuery } = require('./log_query');
 
 const TOOL_DIR = path.join(os.homedir(), 'tools/lexiao-browser');
 const DEFAULT_PROFILE = path.join(os.homedir(), '.codex/webshell-direct-profile');
+
+/** 统一展开 ~ 并转绝对路径：多处曾因未展开而落到字面量 "~" 目录，被误报为登录态失效。 */
+function resolveProfile(value, fallback) {
+  const raw = String(value || fallback || '');
+  const expanded = raw === '~' ? os.homedir()
+      : raw.startsWith('~/') ? path.join(os.homedir(), raw.slice(2))
+      : raw;
+  return path.resolve(expanded);
+}
+
+/** profile 目录不存在时必须与"未登录"区分开，否则排查方向会被带偏。 */
+function assertProfileExists(profileDir) {
+  if (fs.existsSync(profileDir)) return;
+  const candidates = [
+    path.join(os.homedir(), '.cache/lexiao-browser-profile'),
+    path.join(os.homedir(), '.codex/webshell-direct-profile'),
+    '/tmp/healthy-dashboard-profile',
+  ].filter((p) => fs.existsSync(p));
+  const err = new Error(
+    `PROFILE_NOT_FOUND: ${profileDir} 不存在（这不是登录态失效）。`
+    + `可用 profile: ${candidates.length ? candidates.join(', ') : '无'}`);
+  err.code = 'PROFILE_NOT_FOUND';
+  throw err;
+}
+
+function profileDir(a) {
+  const dir = resolveProfile(a && a.profile, DEFAULT_PROFILE);
+  assertProfileExists(dir);
+  return dir;
+}
+
 const CHROME_PATH = path.join(TOOL_DIR, 'browsers/chrome-linux64/chrome');
 const RUNTIME_LIB_DIR = path.join(TOOL_DIR, 'runtime-libs/usr/lib/x86_64-linux-gnu');
 const chromium = createRequire(path.join(TOOL_DIR, 'package.json'))('playwright').chromium;
@@ -226,7 +258,7 @@ function parseSummary(text) {
 async function openContext(args) {
   const ldLibraryPath = [RUNTIME_LIB_DIR, process.env.LD_LIBRARY_PATH].filter(Boolean).join(':');
   const network = buildBrowserEnv(args.url, process.env);
-  const context = await chromium.launchPersistentContext(args.profile || DEFAULT_PROFILE, {
+  const context = await chromium.launchPersistentContext(profileDir(args), {
     executablePath: args.chrome || CHROME_PATH,
     headless: !args.headed,
     viewport: { width: Number(args.width || 1800), height: Number(args.height || 1200) },

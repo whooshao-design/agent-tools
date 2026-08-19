@@ -1,12 +1,36 @@
 #!/usr/bin/env node
 const os = require('os');
 const path = require('path');
+const fs = require('fs');
 const { createRequire } = require('module');
 
 const TOOL_DIR = path.join(os.homedir(), 'tools/lexiao-browser');
 const DEFAULT_PROFILE = process.env.BROWSER_SESSION_PROFILE
   || process.env.DEVTOOLS_BROWSER_PROFILE
   || path.join(os.homedir(), '.cache/lexiao-browser-profile');
+
+/** 统一展开 ~ 并转绝对路径：曾因未展开而落到字面量 "~" 目录，被误报为登录态失效。 */
+function resolveProfilePath(value) {
+  const raw = String(value || DEFAULT_PROFILE);
+  const expanded = raw === '~' ? os.homedir()
+      : raw.startsWith('~/') ? path.join(os.homedir(), raw.slice(2))
+      : raw;
+  return path.resolve(expanded);
+}
+
+/** profile 目录不存在时必须与「未登录」区分开，否则排查方向会被带偏。 */
+function profileDir(value) {
+  const dir = resolveProfilePath(value);
+  if (fs.existsSync(dir)) return dir;
+  const candidates = [
+    path.join(os.homedir(), '.cache/lexiao-browser-profile'),
+    path.join(os.homedir(), '.codex/webshell-direct-profile'),
+    '/tmp/healthy-dashboard-profile',
+  ].filter((p) => fs.existsSync(p));
+  throw new Error(`PROFILE_NOT_FOUND: ${dir} 不存在（这不是登录态失效）。`
+    + `可用 profile: ${candidates.length ? candidates.join(', ') : '无'}`);
+}
+
 const CHROME_PATH = path.join(TOOL_DIR, 'browsers/chrome-linux64/chrome');
 const RUNTIME_LIB_DIR = path.join(TOOL_DIR, 'runtime-libs/usr/lib/x86_64-linux-gnu');
 const chromium = createRequire(path.join(TOOL_DIR, 'package.json'))('playwright').chromium;
@@ -68,7 +92,7 @@ function pipelineMatchesApp(pipeline, appName) {
 
 async function openContext(args) {
   const ldLibraryPath = [RUNTIME_LIB_DIR, process.env.LD_LIBRARY_PATH].filter(Boolean).join(':');
-  return chromium.launchPersistentContext(args.profile || DEFAULT_PROFILE, {
+  return chromium.launchPersistentContext(profileDir(args.profile), {
     executablePath: args.chrome || CHROME_PATH,
     headless: !args.headed,
     env: { ...process.env, LD_LIBRARY_PATH: ldLibraryPath },
