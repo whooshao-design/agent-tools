@@ -15,7 +15,7 @@ SPEC.loader.exec_module(installer)
 
 
 class SessionRenewalInstallerTest(unittest.TestCase):
-    def test_build_unit_contents_uses_headless_renewal_and_six_hour_timer(self):
+    def test_build_unit_contents_uses_headless_renewal_and_daily_timer(self):
         service, timer = installer.build_unit_contents(
             browser_script=Path("/opt/agent tools/browser_session.js"),
             targets=[{
@@ -23,7 +23,7 @@ class SessionRenewalInstallerTest(unittest.TestCase):
                 "profile": Path("/home/test/.cache/browser profile"),
                 "success_text": "当前环境",
             }],
-            interval_hours=6,
+            schedule="*-*-* 11:00:00",
         )
 
         self.assertIn('ExecStart=-"/usr/bin/node" "/opt/agent tools/browser_session.js" "--renew"', service)
@@ -31,16 +31,18 @@ class SessionRenewalInstallerTest(unittest.TestCase):
         self.assertIn('"--profile=/home/test/.cache/browser profile"', service)
         self.assertIn('"--success-text=当前环境"', service)
         self.assertIn("TimeoutStartSec=5min", service)
+        self.assertIn("OnCalendar=*-*-* 11:00:00", timer)
         self.assertIn("OnBootSec=5m", timer)
-        self.assertIn("OnUnitActiveSec=6h", timer)
-        self.assertIn("RandomizedDelaySec=10m", timer)
-        self.assertNotIn("Persistent=true", timer)
+        self.assertIn("RandomizedDelaySec=5m", timer)
+        # WSL is frequently shut down; a missed 11:00 run must be caught up on next boot.
+        self.assertIn("Persistent=true", timer)
+        self.assertNotIn("OnUnitActiveSec", timer)
 
     def test_build_unit_contents_emits_one_skippable_exec_line_per_target(self):
         service, _ = installer.build_unit_contents(
             browser_script=Path("/opt/browser_session.js"),
             targets=installer.default_targets(),
-            interval_hours=6,
+            schedule="*-*-* 11:00:00",
         )
 
         exec_lines = [line for line in service.splitlines() if line.startswith("ExecStart=")]
@@ -57,7 +59,7 @@ class SessionRenewalInstallerTest(unittest.TestCase):
             installer.build_unit_contents(
                 browser_script=Path("/opt/browser_session.js"),
                 targets=[],
-                interval_hours=6,
+                schedule="*-*-* 11:00:00",
             )
 
     def test_default_targets_lead_with_the_sso_endpoint_for_every_profile(self):
@@ -68,13 +70,18 @@ class SessionRenewalInstallerTest(unittest.TestCase):
         self.assertNotIn("/tmp", str(installer.HEALTHY_PROFILE))
         self.assertEqual([t for t in targets if t.get("export")][0]["export"], installer.SESSION_SNAPSHOT)
 
-    def test_validate_config_rejects_insecure_url_and_out_of_range_interval(self):
+    def test_validate_config_rejects_insecure_url(self):
         with self.assertRaisesRegex(ValueError, "HTTPS"):
-            installer.validate_config("http://lexiao.oa.fenqile.com/", 6)
-        with self.assertRaisesRegex(ValueError, "between 1 and 168"):
-            installer.validate_config("https://lexiao.oa.fenqile.com/", 0)
-        with self.assertRaisesRegex(ValueError, "between 1 and 168"):
-            installer.validate_config("https://lexiao.oa.fenqile.com/", 169)
+            installer.validate_config("http://lexiao.oa.fenqile.com/")
+        installer.validate_config("https://lexiao.oa.fenqile.com/")
+
+    def test_validate_schedule_rejects_empty_and_multiline_expressions(self):
+        with self.assertRaisesRegex(ValueError, "must not be empty"):
+            installer.validate_schedule("  ")
+        # A newline would let extra directives be injected into the timer unit.
+        with self.assertRaisesRegex(ValueError, "single line"):
+            installer.validate_schedule("*-*-* 11:00:00\nExecStart=/bin/sh")
+        installer.validate_schedule("*-*-* 11:00:00")
 
     def test_write_and_remove_units_only_touch_named_user_units(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -97,7 +104,7 @@ class SessionRenewalInstallerTest(unittest.TestCase):
             script.write_text("// browser\n")
             unit_dir = root / "units"
             args = argparse.Namespace(
-                interval_hours=6,
+                schedule="*-*-* 11:00:00",
                 browser_script=str(script),
             )
             with patch.object(installer, "default_unit_dir", return_value=unit_dir), \
@@ -115,7 +122,7 @@ class SessionRenewalInstallerTest(unittest.TestCase):
 
     def test_install_rejects_missing_browser_script_before_writing_units(self):
         args = argparse.Namespace(
-            interval_hours=6,
+            schedule="*-*-* 11:00:00",
             browser_script="/tmp/browser-session-script-that-does-not-exist.js",
         )
         with self.assertRaisesRegex(FileNotFoundError, "script not found"):
@@ -158,9 +165,9 @@ class SessionRenewalInstallerTest(unittest.TestCase):
             )
 
     def test_parse_args_and_main_route_install_or_uninstall(self):
-        with patch.object(sys, "argv", ["installer", "--interval-hours", "12"]):
+        with patch.object(sys, "argv", ["installer", "--schedule", "*-*-* 09:00:00"]):
             args = installer.parse_args()
-        self.assertEqual(args.interval_hours, 12)
+        self.assertEqual(args.schedule, "*-*-* 09:00:00")
         self.assertFalse(args.uninstall)
 
         installed = {"action": "installed"}

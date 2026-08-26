@@ -133,14 +133,16 @@ To install the default Lexiao renewal as a systemd user timer, run:
 python /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/install_session_renewal.py
 ```
 
-The installer performs one renewal immediately, then schedules the same headless sweep every 6 hours with up to 10 minutes of randomized delay. It renews four targets in order, each as its own skippable `ExecStart` so one failure never aborts the rest:
+The installer performs one renewal immediately, then schedules the same headless sweep daily at 11:00 (`OnCalendar=*-*-* 11:00:00`, up to 5 minutes of randomized delay). Pass `--schedule` for a different `OnCalendar` expression. It renews four targets in order, each as its own skippable `ExecStart` so one failure never aborts the rest:
 
 1. `passport.lexincloud.com` on the main profile — the only entry that re-signs fixed-lifetime tickets;
 2. `passport.lexincloud.com` on the Healthy profile — that profile is separate and is not covered by the main one;
 3. `lexiao.oa.fenqile.com` on the main profile — slides `oa_session` and verifies reachability;
 4. `lxcloud.oa.fenqile.com` on the main profile — refreshes the localStorage token and writes the session snapshot.
 
-The timer runs while the WSL systemd user manager is active; `OnBootSec` schedules it again after WSL starts. Remove only these units with `--uninstall`. Do not describe this as a permanent or guaranteed login: account policy, SSO revocation, network interruption, or a stopped WSL instance can still let the session expire.
+The timer runs while the WSL systemd user manager is active. `Persistent=true` matters on WSL: the machine is often shut down at 11:00, and without it that day's run would simply be skipped — instead it is caught up on the next boot. `OnBootSec=5m` additionally refreshes the session shortly after WSL starts. Remove only these units with `--uninstall`.
+
+At a daily cadence the 10-day tickets still have 10x margin, but `oa_token_id` — which is only re-issued when missing — can stay expired for up to 24 hours before the next sweep re-seeds it. If that window causes trouble for OA-domain sites, either run the service manually or install a twice-daily schedule such as `--schedule='*-*-* 11,23:00:00'`. Do not describe this as a permanent or guaranteed login: account policy, SSO revocation, network interruption, or a stopped WSL instance can still let the session expire.
 
 ## Session Snapshot
 

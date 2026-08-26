@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 UNIT_NAME = "agent-tools-browser-session-renewal"
 SERVICE_NAME = f"{UNIT_NAME}.service"
 TIMER_NAME = f"{UNIT_NAME}.timer"
-DEFAULT_INTERVAL_HOURS = 6
+DEFAULT_SCHEDULE = "*-*-* 11:00:00"
 MAIN_PROFILE = Path.home() / ".cache" / "lexiao-browser-profile"
 HEALTHY_PROFILE = Path.home() / ".cache" / "healthy-dashboard-profile"
 SESSION_SNAPSHOT = Path.home() / ".cache" / "agent-tools-session" / "main.json"
@@ -40,12 +40,18 @@ def default_targets() -> list[dict]:
     ]
 
 
-def validate_config(url: str, interval_hours: int) -> None:
+def validate_config(url: str) -> None:
     parsed = urlparse(url)
     if parsed.scheme != "https" or not parsed.hostname:
         raise ValueError("renewal URL must be an HTTPS URL")
-    if not 1 <= interval_hours <= 168:
-        raise ValueError("interval hours must be between 1 and 168")
+
+
+def validate_schedule(schedule: str) -> None:
+    """Reject anything that could break out of the timer unit's OnCalendar line."""
+    if not schedule or not schedule.strip():
+        raise ValueError("schedule must not be empty")
+    if any(ch in schedule for ch in "\n\r"):
+        raise ValueError("schedule must be a single line")
 
 
 def systemd_quote(value: object) -> str:
@@ -74,12 +80,13 @@ def build_unit_contents(
     *,
     browser_script: Path,
     targets: list[dict],
-    interval_hours: int,
+    schedule: str,
 ) -> tuple[str, str]:
     if not targets:
         raise ValueError("at least one renewal target is required")
+    validate_schedule(schedule)
     for target in targets:
-        validate_config(target["url"], interval_hours)
+        validate_config(target["url"])
     # "-" lets a failing target be skipped instead of aborting the remaining ones.
     exec_lines = "\n".join(f"ExecStart=-{target_command(browser_script, target)}" for target in targets)
     service = f"""[Unit]
@@ -92,13 +99,16 @@ Type=oneshot
 {exec_lines}
 TimeoutStartSec=5min
 """
+    # Persistent=true matters here: WSL is often shut down, and without it a missed
+    # 11:00 trigger would simply be skipped until the next day.
     timer = f"""[Unit]
-Description=Renew the agent-tools browser session every {interval_hours} hours
+Description=Renew the agent-tools browser session on schedule ({schedule})
 
 [Timer]
+OnCalendar={schedule}
+Persistent=true
 OnBootSec=5m
-OnUnitActiveSec={interval_hours}h
-RandomizedDelaySec=10m
+RandomizedDelaySec=5m
 AccuracySec=1m
 Unit={SERVICE_NAME}
 
@@ -156,7 +166,7 @@ def install(args: argparse.Namespace) -> dict[str, object]:
     service, timer = build_unit_contents(
         browser_script=browser_script,
         targets=targets,
-        interval_hours=args.interval_hours,
+        schedule=args.schedule,
     )
     paths = write_units(default_unit_dir(), service, timer)
     run_systemctl("daemon-reload")
@@ -166,7 +176,7 @@ def install(args: argparse.Namespace) -> dict[str, object]:
         "action": "installed",
         "service": str(paths["service"]),
         "timer": str(paths["timer"]),
-        "intervalHours": args.interval_hours,
+        "schedule": args.schedule,
         "targets": [
             {"url": target["url"], "profile": str(target["profile"]), "export": str(target["export"])}
             if target.get("export")
@@ -192,7 +202,7 @@ def uninstall() -> dict[str, object]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--uninstall", action="store_true", help="disable the timer and remove its user units")
-    parser.add_argument("--interval-hours", type=int, default=DEFAULT_INTERVAL_HOURS)
+    parser.add_argument("--schedule", default=DEFAULT_SCHEDULE, help="systemd OnCalendar expression")
     parser.add_argument("--browser-script", default=str(DEFAULT_BROWSER_SCRIPT))
     return parser.parse_args()
 
