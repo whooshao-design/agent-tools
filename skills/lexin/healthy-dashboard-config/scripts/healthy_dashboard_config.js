@@ -37,12 +37,14 @@ function usage() {
   console.log(`Usage:
   healthy_dashboard_config.js --board=<id> --read [--profile=/home/joney/.cache/healthy-dashboard-profile]
   healthy_dashboard_config.js --board=<id> --mode=hawk-read-through --apply [--profile=/home/joney/.cache/healthy-dashboard-profile]
+  healthy_dashboard_config.js --board=<id> --configs-file=<path> --apply [--profile=/home/joney/.cache/healthy-dashboard-profile]
 
 Options:
   --board          Healthy board id, for example 16761
   --read           Only read board configs and write /tmp backup
   --apply          Write generated configs back to Healthy
   --mode           Built-in mode. Currently supports: hawk-read-through
+  --configs-file   Full configs JSON file to PUT; takes precedence over --mode
   --profile        Browser profile with Healthy login state
   --tool-dir       Local Playwright tool dir, defaults to ~/tools/lexiao-browser
 `);
@@ -276,10 +278,17 @@ async function main() {
     let finalConfigs = parsed.configs;
     let putResp = null;
     if (args.apply) {
-      if (args.mode !== 'hawk-read-through') {
-        throw new Error(`未知 mode：${args.mode}`);
+      if (args['configs-file']) {
+        const raw = fs.readFileSync(args['configs-file'], 'utf-8');
+        finalConfigs = JSON.parse(raw);
+        if (!finalConfigs || typeof finalConfigs !== 'object' || Array.isArray(finalConfigs)) {
+          throw new Error(`--configs-file 必须是完整 configs 对象：${args['configs-file']}`);
+        }
+      } else if (args.mode === 'hawk-read-through') {
+        finalConfigs = hawkReadThroughPatch(parsed.configs);
+      } else {
+        throw new Error(`未知 mode：${args.mode}，或改用 --configs-file=<path>`);
       }
-      finalConfigs = hawkReadThroughPatch(parsed.configs);
       putResp = await requestJson(page, 'PUT', `${boardUrl}/configs`, auth, {
         configs: JSON.stringify(finalConfigs),
       });
