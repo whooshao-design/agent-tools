@@ -2,6 +2,15 @@
 
 飞书官方 MCP server `@larksuiteoapi/lark-mcp` 的本地 wrapper，用于读写飞书云文档与知识库。
 
+业务文档入口明确支持：
+
+- `https://lexin.feishu.cn/docx/<document_token>`
+- `https://lexin.feishu.cn/wiki/<wiki_token>`
+
+操作流程、权限预检、幂等写入和回读校验由
+`skills/lexin/manage-feishu-doc/SKILL.md` 治理。不要把 `ledocs.lexincloud.com` 的文档 ID
+直接当作飞书 docx token。
+
 Wrapper：`bin/lark-mcp`，固定版本 `@larksuiteoapi/lark-mcp@0.5.1`，首次运行自动装到
 `~/.local/share/agent-tools/mcp-cache/lark`（与 context7 同惯例）。它从仓库公共凭证文件 `env/credentials.env` 读取配置并注入，
 **App Secret 不会出现在 Codex/Claude 配置、shell 历史或进程命令行里**。
@@ -78,6 +87,34 @@ claude mcp add lark -- /home/joney/projects/ai/agent-tools/mcp/third-party-mcp/l
 - `docx_v1_document_rawContent` — 读文档正文
 - `wiki_v1_node_search`、`docx_builtin_search` — 搜索
 - `docx_builtin_import`、`drive_v1_permissionMember_create`
+
+该预设能读文档和导入新文档，但**不能修改已有文档块**。需要写入已有文档时，优先使用当前
+会话已暴露的 Lark MCP 写工具；若未暴露，使用 `manage-feishu-doc` 的脚本兜底。脚本会为自己的
+MCP 子进程精确加载 `documentBlockChildren.create/get/batchDelete`，无需把全部 Lark 工具塞进
+常驻会话。
+
+## 权限预检与快速恢复
+
+不要等到写入中途才发现权限不足。目标操作开始前运行：
+
+```bash
+node /home/joney/projects/ai/agent-tools/skills/lexin/manage-feishu-doc/scripts/feishu_doc_mcp.mjs \
+  auth-check --operation=write-json --target='https://lexin.feishu.cn/docx/<token>'
+```
+
+预检会一次性返回缺失 scope。用户已经要求完成文档操作时，可直接运行对应的 `authorize`
+命令并让用户在系统浏览器完成授权；回调结束后会立即复检。错误分类如下：
+
+| 分类 | 含义 | 最短处理 |
+|---|---|---|
+| `AUTH_REQUIRED` / `TOKEN_EXPIRED` | 无会话或无法续期 | 重新 OAuth |
+| `OAUTH_SCOPE_MISSING` | 用户 token 缺 scope | 合并缺失 scope 后一次性重授权 |
+| `APP_PERMISSION_NOT_PUBLISHED` | 应用未开通或未发布权限 | 添加准确权限、发布版本，再 OAuth |
+| `DOCUMENT_ACCESS_DENIED` | 应用 scope 齐全但文档 ACL 不足 | 申请目标文档阅读/编辑权限 |
+| `MCP_TOOL_MISSING` | 当前工具预设未加载接口 | 用 Skill 脚本或调整工具后重启会话 |
+
+飞书错误 `99991679` 以 `permission_violations[].subject` 指出的 scope 为准；OAuth 错误
+`20027` 表示请求的权限尚未在应用中生效，不要循环重新登录。
 
 读一篇 wiki 文档要两步（**URL 里的 token 不是文档 ID**）：
 

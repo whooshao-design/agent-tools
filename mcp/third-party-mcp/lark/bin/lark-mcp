@@ -49,16 +49,35 @@ if [[ -z "${LARK_MCP_BIN:-}" ]]; then
         echo "Installing $PACKAGE into $INSTALL_ROOT" >&2
         npm --prefix "$INSTALL_ROOT" install --save-exact --omit=dev --no-audit --no-fund "$PACKAGE" >&2
         printf '%s\n' "$PACKAGE" > "$PACKAGE_SPEC_FILE"
+        rm -f "$INSTALL_ROOT/.patch-stamp"
     fi
+fi
+
+# 上游 lark-mcp 有两个必须修掉的缺陷（descendants schema 漏字段、OAuth 服务器写死 60 秒关闭），
+# 详见 patches/apply.mjs。补丁应用失败时拒绝以未修复状态启动。
+if [[ -z "${LARK_MCP_SKIP_PATCH:-}" ]]; then
+    node "$REPO_DIR/mcp/third-party-mcp/lark/patches/apply.mjs" "$INSTALL_ROOT" || {
+        echo "lark-mcp 上游补丁未能应用（可能已 bump 版本），拒绝以未修复状态启动" >&2
+        exit 1
+    }
 fi
 
 DOMAIN="${LARK_DOMAIN:-https://open.feishu.cn}"
 PORT="${LARK_OAUTH_PORT:-3000}"
+# OAuth 授权窗口。上游写死 60 秒，人工点授权链接根本来不及。
+export LARK_OAUTH_WINDOW_MS="${LARK_OAUTH_WINDOW_MS:-900000}"
 
 subcommand="${1:-mcp}"
 shift || true
 
-common_args=(-a "$LARK_APP_ID" -s "$LARK_APP_SECRET" -d "$DOMAIN")
+# lark-mcp 从 APP_ID / APP_SECRET 环境变量读凭证（上游 dist/utils/constants.js:23-30），
+# 且 commander 只把显式传入的选项放进 options，不会用 undefined 覆盖环境变量。
+# 走环境变量可以让 App Secret 只出现在仅属主可读的 /proc/<pid>/environ，
+# 而不是全局可读的 /proc/<pid>/cmdline。
+export APP_ID="$LARK_APP_ID"
+export APP_SECRET="$LARK_APP_SECRET"
+
+common_args=(-d "$DOMAIN")
 
 case "$subcommand" in
     whoami)
