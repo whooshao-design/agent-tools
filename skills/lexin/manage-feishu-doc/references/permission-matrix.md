@@ -12,8 +12,12 @@
 | `write-blocks`（wiki） | `wiki:wiki:readonly`, `docx:document`, `docx:document:readonly`, `offline_access` | 先解析 wiki，再改块和回读 |
 | `convert` | `docx:document.block:convert`, `offline_access` | 仅把 Markdown/HTML 转成块，不包含把块写入目标文档 |
 | `write-markdown` | `docx:document.block:convert`, `docx:document`, `docx:document:readonly`, `offline_access` | 转换、写入和回读的组合操作 |
+| `create-doc` | `docx:document`, `offline_access` | 在指定目录下新建文档（`folder_token`）；**不需要 drive 权限** |
+| `insert-image` | `docs:document.media:upload`, `docx:document`, `offline_access` | 建图片块 → 上传媒体 → `replace_image` 绑定 |
 
 `auth:user.id:read` 可保留在 OAuth scope 集合中，但不是文档读写的业务权限。
+
+> **`docs:document.media:upload` 是可以授权到的**（2026-08-17 实测：授权页正常勾选并成功上传）。曾因某次应用身份调用失败而被误判为“应用级未开通”——应用身份与用户身份是两套权限，不能相互推断。缺这个 scope 时 `drive/v1/medias/upload_all` 返回 `99991679`，按第 5 条处理即可，不要直接跳到“去后台发版”。
 
 ## 快速判定顺序
 

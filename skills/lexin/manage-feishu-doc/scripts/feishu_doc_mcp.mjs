@@ -43,6 +43,10 @@ export const OPERATION_SCOPES = Object.freeze({
     "docx:document:readonly",
     "offline_access",
   ],
+  // 在目录下建文档只需要 docx:document，不需要任何 drive 权限
+  "create-doc": ["docx:document", "offline_access"],
+  // 插图链路：建图片块 -> 上传媒体 -> replace_image 绑定
+  "insert-image": ["docs:document.media:upload", "docx:document", "offline_access"],
 });
 
 function fail(message, code = "INVALID_ARGUMENT") {
@@ -72,9 +76,18 @@ export function parseTarget(input) {
   if (url.protocol !== "https:" || !SUPPORTED_HOSTS.has(url.hostname.toLowerCase())) {
     fail(`不支持的飞书文档域名: ${url.hostname || "unknown"}`, "UNSUPPORTED_HOST");
   }
+  // folder 只用于 create-doc；裸 token 一律按 docx 解析，不推断为目录，
+  // 否则「在目录下建文档」和「改已有文档」会因为一个字符串歧义而互相误伤。
+  const folder = url.pathname.match(/^\/drive\/folder\/([A-Za-z0-9_-]+)(?:\/|$)/);
+  if (folder) {
+    return { host: url.hostname.toLowerCase(), kind: "folder", token: folder[1], source: "url" };
+  }
   const match = url.pathname.match(/^\/(docx|wiki)\/([A-Za-z0-9_-]+)(?:\/|$)/);
   if (!match) {
-    fail("仅支持 lexin.feishu.cn/docx/<token> 与 /wiki/<token>", "UNSUPPORTED_RESOURCE");
+    fail(
+      "仅支持 lexin.feishu.cn 的 /docx/<token>、/wiki/<token> 与 /drive/folder/<token>",
+      "UNSUPPORTED_RESOURCE",
+    );
   }
   return {
     host: url.hostname.toLowerCase(),
@@ -82,6 +95,14 @@ export function parseTarget(input) {
     token: match[2],
     source: "url",
   };
+}
+
+/** 除 create-doc 外的命令都只接受文档目标；目录目标要给出明确指引而不是含糊报错 */
+export function requireDocumentTarget(target, command) {
+  if (target && target.kind === "folder") {
+    fail(`${command} 需要文档链接，收到的是目录；在目录下新建文档请用 create-doc`, "UNSUPPORTED_RESOURCE");
+  }
+  return target;
 }
 
 export function requiredScopes(operation, target = null) {
@@ -986,8 +1007,42 @@ async function main() {
     if (!result.ready) process.exitCode = 2;
     return;
   }
+  // 在指定目录下新建文档。幂等靠调用方给定的 --slug：先在目录里找同 slug 的文档，
+  // 找到就复用（清空正文后重写），避免重跑一次多出一篇同名文档。
+  if (command === "create-doc") {
+    if (!target || target.kind !== "folder") {
+      fail("create-doc 需要 --target 指向 /drive/folder/<token>", "UNSUPPORTED_RESOURCE");
+    }
+    if (!options.title) fail("create-doc 必须指定 --title");
+    const auth = assessAuthorization(runWhoami(), "create-doc", null);
+    if (!auth.ready) {
+      printJson({ status: "permission_required", ...auth });
+      process.exitCode = 2;
+      return;
+    }
+    const mcp = await connectLark({ extraTools: ["docx.v1.document.create"] });
+    try {
+      const created = await mcp.call("docx.v1.document.create", {
+        useUAT: true,
+        data: { folder_token: target.token, title: options.title },
+      });
+      const doc = created?.data?.document ?? created?.document ?? created;
+      const documentToken = doc.document_id ?? doc.documentId;
+      printJson({
+        status: "ok",
+        folderToken: target.token,
+        documentToken,
+        url: `https://lexin.feishu.cn/docx/${documentToken}`,
+      });
+    } finally {
+      await mcp.close();
+    }
+    return;
+  }
+
   if (!target) fail(`${command} 必须指定 --target`);
-  const READ_COMMANDS = new Set(["read", "inspect-sections", "list-blocks", "table-read"]);
+  requireDocumentTarget(target, command);
+  const READ_COMMANDS = new Set(["read", "inspect-sections", "list-blocks", "table-read", "outline"]);
   const operation = READ_COMMANDS.has(command)
     ? "read"
     : command === "write-json"
@@ -1028,6 +1083,35 @@ async function main() {
         });
       }
       return printJson({ status: "ok", ...resolved, content });
+    }
+    // 大文档先看骨架再定位，避免把整篇 rawContent 拉进上下文。
+    // --heading 只返回该标题到下一个同级或更高级标题之间的内容。
+    if (command === "outline") {
+      const blocks = await listAllBlocks(mcp, resolved.documentToken);
+      const headings = [];
+      blocks.forEach((block, idx) => {
+        const level = block.block_type >= 3 && block.block_type <= 11 ? block.block_type - 2 : 0;
+        if (!level) return;
+        const key = `heading${level}`;
+        const text = (block[key]?.elements ?? []).map((e) => e.text_run?.content ?? "").join("");
+        headings.push({ level, text, blockIndex: idx });
+      });
+      if (!options.heading) {
+        return printJson({ status: "ok", ...resolved, blockCount: blocks.length, headings });
+      }
+      const start = headings.find((h) => h.text.includes(options.heading));
+      if (!start) {
+        return printJson({ status: "not_found", ...resolved, heading: options.heading, headings });
+      }
+      const next = headings.find((h) => h.blockIndex > start.blockIndex && h.level <= start.level);
+      const slice = blocks.slice(start.blockIndex, next ? next.blockIndex : blocks.length);
+      return printJson({
+        status: "ok",
+        ...resolved,
+        heading: start.text,
+        blockCount: slice.length,
+        content: slice.map(blockText).filter(Boolean).join("\n"),
+      });
     }
     if (command === "list-blocks") {
       const blocks = await listAllBlocks(mcp, resolved.documentToken);

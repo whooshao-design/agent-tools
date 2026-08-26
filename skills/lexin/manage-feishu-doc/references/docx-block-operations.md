@@ -48,6 +48,71 @@
 
 写入时以**格内最后一个文本块**为目标，读取时拼接格内所有文本块，二者自洽。
 
+## 建表行数硬上限：9 行
+
+`documentBlockChildren.create` 建表时 `row_size` **最多 9**，第 10 行起直接 `1770001 invalid param`（2026-08-17 实测，9 行成功 / 10 行失败）：
+
+| row_size | 结果 |
+|---|---|
+| 9 | ✅ |
+| 10 | ❌ `1770001 invalid param` |
+
+**这是把 Markdown 表格写进飞书时最容易踩的坑**：8 行以内的表能正常写入，超过 9 行（含表头）就整段失败，且错误信息不会提到行数。超长表必须先建 9 行骨架，再用 `documentBlock.patch` 的 `insert_table_row`（`row_index: -1` 追加）补足剩余行。
+
+## descendant 单次块数
+
+`documentBlockDescendant.create` 实测 500 块可一次写入成功（50 / 200 / 500 三档均通过），上限高于本文早期估计。真正的约束更可能是请求体大小而非块数。
+
+一张 74 行 × 6 列的表约需 889 块，仍超出安全范围，**已有大表继续走原地扩行，不要删表重建**。
+
+## 经 lark-mcp 调用 descendant 会失败
+
+`docx.v1.documentBlockDescendant.create` 通过 lark-mcp 调用必定返回 `1770041 open schema mismatch`：上游的 zod schema 里 `descendants[]` 元素漏了 `block_id` 和 `children`，MCP SDK 的 `safeParseAsync` 默认 strip 会把这两个字段在发出前剥掉，服务端收到「`children_id` 引用了不存在的块」。
+
+已由 `mcp/third-party-mcp/lark/patches/apply.mjs` 修复（`.extend()` 补两个 optional 字段）。**直连 REST 不受影响**。
+
+## convert 的两个坑
+
+`docx.v1.document.convert` 支持 `content_type` 为 `markdown` 或 `html`，产出可直接喂给 descendant 接口，但有两处必须自己补：
+
+1. **表格块只给 `table.cells`，不给 `table.property`**，而建表必须有 `row_size`/`column_size`，否则 `1770001`。单元格 id 形如 `row<uuid>col<uuid>`，据此统计去重后的行列数补上。
+2. **块自带 `parent_id: ""`**，descendant 接口靠 `children` 表达父子关系，`parent_id` 需剥掉。用 `documentBlockChildren.create` 时还要额外剥掉 `block_id`。
+
+HTML 模式下**内联 `<svg>` 会被整个丢弃**（产出 0 块）；`<img src="data:...">` 和外链 `<img>` 会转成图片块占位，URL 放在 `block_id_to_image_urls`，但图片内容仍需自己上传绑定。
+
+## 插图：唯一可行路径
+
+流程图/UML 块（`block_type=21`）**不能通过 API 创建**（`1770029 block not support to create`）；画板块（43）能建但只是空画布，内容要走画板产品的独立 API。
+
+要在文档里放图，只有这一条链路（需 `docs:document.media:upload`）：
+
+```
+1. 建图片占位块   POST /docx/v1/documents/{doc}/blocks/{doc}/children
+                  { block_type: 27, image: { width, height } }
+2. 上传媒体       POST /drive/v1/medias/upload_all   (multipart)
+                  file_name / parent_type=docx_image / parent_node=<图片块id> / size / file
+3. 绑定           PATCH /docx/v1/documents/{doc}/blocks/{图片块id}
+                  { replace_image: { token: <file_token> } }
+```
+
+**飞书接受直接上传 SVG**（`image/svg+xml`），因此画时序图/架构图不需要本地安装任何渲染器：手写 SVG 上传即可，中文由查看端字体渲染。
+
+## children.create 的 index 必须放在 body 里
+
+`docx.v1.documentBlockChildren.create` 的 `index` 是**请求体字段**，不是 query 参数：
+
+```js
+// 正确：新块插入到最前面
+data: { children, index: 0 }
+
+// 错误：index 被静默忽略，新块一律追加到末尾
+params: { document_revision_id: -1, client_token, index: 0 }
+```
+
+放错位置不会报错，只会让所有插入都变成追加。症状是"内容顺序全对，但整体位置不对"——2026-08-19 实测：删到只剩一张表后，用 params 传 `index: 0` 建的 17 个块落在了表的**后面**。
+
+注意与 `insert_table_row` 的 `row_index` 区分：那个是"新行落在该索引"，而 `children.create` 的 `index` 是"插入到该位置"（`index: 0` = 最前面）。
+
 ## 批量写入与整表重建
 
 - `documentBlock.batchUpdate` 用于批量改文本，`table-sync` 按每批 40 条切分。

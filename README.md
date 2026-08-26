@@ -62,6 +62,12 @@
 |---|---|---|
 | `get-browser-session` | 浏览器登录态会话层（被多个内网页面 skill 复用） | `browser_session` |
 
+### 文档协作
+
+| Skill | 说明 | 配套 MCP |
+|---|---|---|
+| `manage-feishu-doc` | 读写 `lexin.feishu.cn` 飞书文档，预检权限并做幂等与回读校验 | `lark` |
+
 ### 发布与部署
 
 | Skill | 说明 | 配套 MCP |
