@@ -2,7 +2,7 @@
 name: get-browser-session
 description: 获取、检查、续期和复用 WSL Playwright/Chromium 浏览器登录态与网页 session（底层会话层，供其他 skill 复用）。Use when 需要访问要求登录的内网页面、检查或定时续期浏览器 profile 登录态、打开浏览器让用户完成 SSO/OTP 登录、复用已保存 profile 做页面自动化，或按默认脱敏方式查看 session Cookie/localStorage token。
 metadata:
-  version: 1.6.0
+  version: 1.7.0
 ---
 
 # Get Browser Session
@@ -23,7 +23,7 @@ Use the existing WSL browser tool at `~/tools/lexiao-browser` by default. Overri
 
 When another skill needs a logged-in browser session, use this skill as the session layer. The calling skill should pass only the target `url`, the intended `profile`, and an optional `success-text`; do not duplicate login instructions in the calling skill.
 
-MCP 优先：能用 `browser_session` MCP 时，优先使用 `check_session` / `renew_session` / `browser_page_snapshot` / `browser_click_text` / `browser_click_button` / `get_cookies` / `fetch_with_session`；脚本作为兜底入口。
+MCP 优先：能用 `browser_session` MCP 时，优先使用 `check_session` / `renew_session` / `export_session` / `browser_page_snapshot` / `browser_click_text` / `browser_click_button` / `get_cookies` / `fetch_with_session`；脚本作为兜底入口。
 
 ## Check Existing Session
 
@@ -54,7 +54,7 @@ For WebShell pages such as `https://webshell.oa.fenqile.com/?arg=...`, use this 
 ```bash
 node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js \
   --status \
-  --profile=/tmp/healthy-dashboard-profile \
+  --profile=/home/joney/.cache/healthy-dashboard-profile \
   --url=<login_pod_addr> \
   --success-text=none
 ```
@@ -119,7 +119,13 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/script
   --success-text=当前环境
 ```
 
-Treat `renewalState: "SESSION_ACTIVE"` as evidence that the session was still usable during the visit, not proof that every authentication Cookie changed. If it returns `LOGIN_REQUIRED` or `PROXY_INTERCEPTED`, run `ensure_session` interactively; background renewal never opens a headed browser and never retries indefinitely.
+Renewal state is decided by actual Cookie change, not by page text:
+
+- `SESSION_RENEWED` means authentication Cookies were re-signed during the visit; `authRenewal.renewed` / `authRenewal.added` list exactly which ones. **This is the state to expect from `passport.lexincloud.com`, whose landing page looks like a login page even when renewal succeeded** — never treat that page text as failure.
+- `SESSION_ACTIVE` means the session was usable but no authentication Cookie changed.
+- `LOGIN_REQUIRED` / `PROXY_INTERCEPTED` with no Cookie change means run `ensure_session` interactively; background renewal never opens a headed browser and never retries indefinitely.
+
+Only `https://passport.lexincloud.com/` re-signs the fixed-lifetime tickets (`oa_token_id` / `mid`). Business pages such as 乐效 or Healthy only slide `oa_session`, so they cannot substitute for the SSO endpoint. `oa_token_id` follows "issue when missing, leave alone when present": it is re-issued automatically once expired and cleared, so an expired ticket does not require manual login.
 
 To install the default Lexiao renewal as a systemd user timer, run:
 
@@ -127,7 +133,27 @@ To install the default Lexiao renewal as a systemd user timer, run:
 python /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/install_session_renewal.py
 ```
 
-The installer performs one renewal immediately, then schedules the same headless check every 6 hours with up to 10 minutes of randomized delay. The timer runs while the WSL systemd user manager is active; `OnBootSec` schedules it again after WSL starts. Remove only these units with `--uninstall`. Do not describe this as a permanent or guaranteed login: fixed server-side expiry, account policy, SSO revocation, network interruption, or a stopped WSL instance can still let the session expire.
+The installer performs one renewal immediately, then schedules the same headless sweep every 6 hours with up to 10 minutes of randomized delay. It renews four targets in order, each as its own skippable `ExecStart` so one failure never aborts the rest:
+
+1. `passport.lexincloud.com` on the main profile — the only entry that re-signs fixed-lifetime tickets;
+2. `passport.lexincloud.com` on the Healthy profile — that profile is separate and is not covered by the main one;
+3. `lexiao.oa.fenqile.com` on the main profile — slides `oa_session` and verifies reachability;
+4. `lxcloud.oa.fenqile.com` on the main profile — refreshes the localStorage token and writes the session snapshot.
+
+The timer runs while the WSL systemd user manager is active; `OnBootSec` schedules it again after WSL starts. Remove only these units with `--uninstall`. Do not describe this as a permanent or guaranteed login: account policy, SSO revocation, network interruption, or a stopped WSL instance can still let the session expire.
+
+## Session Snapshot
+
+`export_session` visits the target page and writes that profile's Cookies plus localStorage to a JSON file with mode `0600`:
+
+```bash
+node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js \
+  --export-session=~/.cache/agent-tools-session/main.json \
+  --url=https://lxcloud.oa.fenqile.com/ \
+  --success-text=none
+```
+
+The timer keeps `~/.cache/agent-tools-session/main.json` current. Downstream skills that need the lxcloud `token` may read it directly instead of launching Chromium and contending for the profile lock. `storageState` only captures localStorage for origins visited in that run, so export against the origin whose token is needed. The file holds credentials in cleartext — keep it at `0600`, never copy it into a repository, a log, or a reply.
 
 Status checks and `--ensure` also visit the target page on demand, so a server-side sliding session can refresh its Cookie naturally. `fetch_with_session` runs inside the same BrowserContext rather than copying a Cookie header into a separate HTTP client; response `Set-Cookie` values are therefore persisted back to the profile.
 
@@ -180,7 +206,7 @@ Use `--show-secrets` only for a downstream local process that consumes the value
    `PROFILE_NOT_FOUND`，那是路径问题而非登录问题，错误信息里会列出当前可用的 profile。
 2. **换一个 profile 试**：不同站点的登录态分布在不同 profile，常见的是
    `~/.cache/lexiao-browser-profile`（乐效、Hippo、lxcloud、WebShell）和
-   `/tmp/healthy-dashboard-profile`（Healthy）。用
+   `/home/joney/.cache/healthy-dashboard-profile`（Healthy）。用
    `browser_session.js --check --profile=<abs> --url=<目标站点>` 逐个确认，
    `sessionState=READY` 即可用。
 3. **确认目标 host**：返回 `passport.lexincloud.com` 或 `trust.oa.fenqile.com`

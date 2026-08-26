@@ -17,7 +17,7 @@ const chromium = createRequire(path.join(TOOL_DIR, 'package.json'))('playwright'
 const LEXIAO_URL = 'https://lexiao.oa.fenqile.com/#/new-workbench';
 const API_BASE = 'https://lexiao-api.oa.fenqile.com';
 const DEFAULT_PROFILES = [
-  '/tmp/healthy-dashboard-profile',
+  '/home/joney/.cache/healthy-dashboard-profile',
   path.join(os.homedir(), '.cache/lexiao-browser-profile'),
 ];
 const DEFAULT_ENV = 'pre';
@@ -50,7 +50,7 @@ Defaults:
   --app       omitted -> infer application.name from current directory
   --env       omitted -> pre
   --type      omitted -> all
-  --profile   omitted -> try /tmp/healthy-dashboard-profile, then ~/.cache/lexiao-browser-profile
+  --profile   omitted -> try /home/joney/.cache/healthy-dashboard-profile, then ~/.cache/lexiao-browser-profile
 
 Options:
   --app          Lexiao app name, app_name, or project_name

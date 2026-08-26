@@ -25,7 +25,7 @@ function profileDir(value) {
   const candidates = [
     path.join(os.homedir(), '.cache/lexiao-browser-profile'),
     path.join(os.homedir(), '.codex/webshell-direct-profile'),
-    '/tmp/healthy-dashboard-profile',
+    '/home/joney/.cache/healthy-dashboard-profile',
   ].filter((p) => fs.existsSync(p));
   throw new Error(`PROFILE_NOT_FOUND: ${dir} 不存在（这不是登录态失效）。`
     + `可用 profile: ${candidates.length ? candidates.join(', ') : '无'}`);

@@ -15,6 +15,8 @@ const {
   runPageFlow,
   runEnsureFlow,
   runRequestFlow,
+  summarizeAuthCookies,
+  diffAuthCookies,
   summarizeRenewalResult,
 } = require('../scripts/browser_session');
 
@@ -227,6 +229,8 @@ test('renewal summary reports active session without leaking page or credential 
   assert.deepEqual(result, {
     renewalAttempted: true,
     renewalState: 'SESSION_ACTIVE',
+    renewedAuthCookies: false,
+    authRenewal: null,
     sessionState: 'READY',
     sessionReady: true,
     requestedUrl: 'https://lexiao.oa.fenqile.com/',
@@ -526,4 +530,77 @@ test('profile lock recovers an old lock even when its pid was reused', async () 
   release();
   assert.equal(fs.existsSync(lockPath), false);
   fs.rmSync(directory, { recursive: true, force: true });
+});
+
+test('auth cookie summary keeps only authentication cookies and sorts by remaining life', () => {
+  const nowMs = Date.parse('2026-08-26T00:00:00.000Z');
+  const day = 86400;
+  const summary = summarizeAuthCookies([
+    { domain: '.oa.fenqile.com', name: 'oa_session', expires: nowMs / 1000 + 10 * day },
+    { domain: '.oa.fenqile.com', name: 'oa_token_id', expires: nowMs / 1000 + 3 * day },
+    { domain: '.baidu.com', name: 'BAIDUID', expires: nowMs / 1000 + 365 * day },
+    { domain: 'hippo.oa.fenqile.com', name: 'JSESSIONID', expires: -1 },
+  ], { nowMs });
+
+  assert.equal(summary.authCookieCount, 2);
+  assert.deepEqual(summary.cookies.map((cookie) => cookie.name), ['oa_token_id', 'oa_session']);
+  assert.equal(summary.earliestExpiresInDays, 3);
+  assert.equal(summary.expiringSoon, false);
+  assert.deepEqual(summary.expiredCookies, []);
+});
+
+test('auth cookie summary flags cookies inside the expiry threshold and already-expired ones', () => {
+  const nowMs = Date.parse('2026-08-26T00:00:00.000Z');
+  const summary = summarizeAuthCookies([
+    { domain: '.oa.fenqile.com', name: 'oa_token_id', expires: nowMs / 1000 - 60 },
+    { domain: '.lexincloud.com', name: 'oa_session', expires: nowMs / 1000 + 3600 },
+  ], { nowMs });
+
+  assert.equal(summary.expiringSoon, true);
+  assert.deepEqual(summary.expiredCookies, [{ domain: '.oa.fenqile.com', name: 'oa_token_id' }]);
+});
+
+test('auth cookie diff separates resigned cookies from newly issued ones', () => {
+  const before = [
+    { domain: '.lexincloud.com', name: 'oa_session', expiresAt: '2026-08-27T09:32:51.000Z' },
+  ];
+  const after = [
+    { domain: '.lexincloud.com', name: 'oa_session', expiresAt: '2026-09-05T02:11:52.000Z' },
+    { domain: '.oa.fenqile.com', name: 'oa_token_id', expiresAt: '2026-08-29T02:33:24.000Z' },
+  ];
+
+  const diff = diffAuthCookies(before, after);
+  assert.equal(diff.changedCount, 2);
+  assert.deepEqual(diff.renewed, [{
+    domain: '.lexincloud.com',
+    name: 'oa_session',
+    from: '2026-08-27T09:32:51.000Z',
+    to: '2026-09-05T02:11:52.000Z',
+  }]);
+  assert.deepEqual(diff.added, [{
+    domain: '.oa.fenqile.com',
+    name: 'oa_token_id',
+    expiresAt: '2026-08-29T02:33:24.000Z',
+  }]);
+});
+
+test('renewal on the SSO endpoint counts as renewed even when the page itself looks like a login page', () => {
+  const result = summarizeRenewalResult({
+    sessionState: 'LOGIN_REQUIRED',
+    sessionReady: false,
+    requestedUrl: 'https://passport.lexincloud.com/',
+    profileDir: '/tmp/profile',
+    browserMode: 'headless',
+    networkPolicy: { proxyMode: 'direct' },
+    sessionHealth: { cookieCount: 4 },
+    authRenewal: {
+      renewed: [{ domain: '.lexincloud.com', name: 'oa_session', from: 'a', to: 'b' }],
+      added: [],
+      changedCount: 1,
+    },
+  });
+
+  assert.equal(result.renewalState, 'SESSION_RENEWED');
+  assert.equal(result.renewedAuthCookies, true);
+  assert.equal(result.actionRequired, null);
 });

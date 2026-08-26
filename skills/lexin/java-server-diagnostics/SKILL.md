@@ -198,7 +198,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/java-server-diagnostics/sc
    `PROFILE_NOT_FOUND`，那是路径问题而非登录问题，错误信息里会列出当前可用的 profile。
 2. **换一个 profile 试**：不同站点的登录态分布在不同 profile，常见的是
    `~/.cache/lexiao-browser-profile`（乐效、Hippo、lxcloud、WebShell）和
-   `/tmp/healthy-dashboard-profile`（Healthy）。用
+   `/home/joney/.cache/healthy-dashboard-profile`（Healthy）。用
    `browser_session.js --check --profile=<abs> --url=<目标站点>` 逐个确认，
    `sessionState=READY` 即可用。
 3. **确认目标 host**：返回 `passport.lexincloud.com` 或 `trust.oa.fenqile.com`

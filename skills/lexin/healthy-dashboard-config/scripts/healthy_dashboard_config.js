@@ -5,7 +5,7 @@ const path = require('path');
 const { createRequire } = require('module');
 
 const BASE_URL = 'https://healthy.lexincloud.com';
-const DEFAULT_PROFILE = '/tmp/healthy-dashboard-profile';
+const DEFAULT_PROFILE = '/home/joney/.cache/healthy-dashboard-profile';
 const DEFAULT_TOOL_DIR = '~/tools/lexiao-browser';
 
 function expandHome(value) {
@@ -35,8 +35,8 @@ function parseArgs(argv) {
 
 function usage() {
   console.log(`Usage:
-  healthy_dashboard_config.js --board=<id> --read [--profile=/tmp/healthy-dashboard-profile]
-  healthy_dashboard_config.js --board=<id> --mode=hawk-read-through --apply [--profile=/tmp/healthy-dashboard-profile]
+  healthy_dashboard_config.js --board=<id> --read [--profile=/home/joney/.cache/healthy-dashboard-profile]
+  healthy_dashboard_config.js --board=<id> --mode=hawk-read-through --apply [--profile=/home/joney/.cache/healthy-dashboard-profile]
 
 Options:
   --board          Healthy board id, for example 16761

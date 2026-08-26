@@ -14,11 +14,30 @@ from urllib.parse import urlparse
 UNIT_NAME = "agent-tools-browser-session-renewal"
 SERVICE_NAME = f"{UNIT_NAME}.service"
 TIMER_NAME = f"{UNIT_NAME}.timer"
-DEFAULT_URL = "https://lexiao.oa.fenqile.com/"
-DEFAULT_SUCCESS_TEXT = "当前环境"
 DEFAULT_INTERVAL_HOURS = 6
-DEFAULT_PROFILE = Path.home() / ".cache" / "lexiao-browser-profile"
+MAIN_PROFILE = Path.home() / ".cache" / "lexiao-browser-profile"
+HEALTHY_PROFILE = Path.home() / ".cache" / "healthy-dashboard-profile"
+SESSION_SNAPSHOT = Path.home() / ".cache" / "agent-tools-session" / "main.json"
 DEFAULT_BROWSER_SCRIPT = Path(__file__).resolve().with_name("browser_session.js")
+
+
+def default_targets() -> list[dict]:
+    """Renewal targets, in execution order.
+
+    The SSO endpoint comes first: it is the only entry that re-signs the fixed-lifetime
+    tickets. Business pages only slide `oa_session`, so they cannot replace it.
+    """
+    return [
+        {"url": "https://passport.lexincloud.com/", "profile": MAIN_PROFILE, "success_text": "none"},
+        {"url": "https://passport.lexincloud.com/", "profile": HEALTHY_PROFILE, "success_text": "none"},
+        {"url": "https://lexiao.oa.fenqile.com/", "profile": MAIN_PROFILE, "success_text": "当前环境"},
+        {
+            "url": "https://lxcloud.oa.fenqile.com/",
+            "profile": MAIN_PROFILE,
+            "success_text": "none",
+            "export": SESSION_SNAPSHOT,
+        },
+    ]
 
 
 def validate_config(url: str, interval_hours: int) -> None:
@@ -38,23 +57,31 @@ def systemd_quote(value: object) -> str:
     return f'"{escaped}"'
 
 
+def target_command(browser_script: Path, target: dict) -> str:
+    export_path = target.get("export")
+    mode_arg = f"--export-session={export_path}" if export_path else "--renew"
+    return " ".join(systemd_quote(value) for value in (
+        "/usr/bin/node",
+        browser_script,
+        mode_arg,
+        f"--url={target['url']}",
+        f"--profile={target['profile']}",
+        f"--success-text={target['success_text']}",
+    ))
+
+
 def build_unit_contents(
     *,
     browser_script: Path,
-    url: str,
-    profile: Path,
-    success_text: str,
+    targets: list[dict],
     interval_hours: int,
 ) -> tuple[str, str]:
-    validate_config(url, interval_hours)
-    command = " ".join(systemd_quote(value) for value in (
-        "/usr/bin/node",
-        browser_script,
-        "--renew",
-        f"--url={url}",
-        f"--profile={profile}",
-        f"--success-text={success_text}",
-    ))
+    if not targets:
+        raise ValueError("at least one renewal target is required")
+    for target in targets:
+        validate_config(target["url"], interval_hours)
+    # "-" lets a failing target be skipped instead of aborting the remaining ones.
+    exec_lines = "\n".join(f"ExecStart=-{target_command(browser_script, target)}" for target in targets)
     service = f"""[Unit]
 Description=Renew the agent-tools browser session
 After=network-online.target
@@ -62,7 +89,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart={command}
+{exec_lines}
 TimeoutStartSec=5min
 """
     timer = f"""[Unit]
@@ -122,16 +149,13 @@ def default_unit_dir() -> Path:
 
 
 def install(args: argparse.Namespace) -> dict[str, object]:
-    validate_config(args.url, args.interval_hours)
     browser_script = Path(args.browser_script).expanduser().resolve()
-    profile = Path(args.profile).expanduser().resolve()
     if not browser_script.is_file():
         raise FileNotFoundError(f"browser session script not found: {browser_script}")
+    targets = default_targets()
     service, timer = build_unit_contents(
         browser_script=browser_script,
-        url=args.url,
-        profile=profile,
-        success_text=args.success_text,
+        targets=targets,
         interval_hours=args.interval_hours,
     )
     paths = write_units(default_unit_dir(), service, timer)
@@ -143,8 +167,13 @@ def install(args: argparse.Namespace) -> dict[str, object]:
         "service": str(paths["service"]),
         "timer": str(paths["timer"]),
         "intervalHours": args.interval_hours,
-        "url": args.url,
-        "profile": str(profile),
+        "targets": [
+            {"url": target["url"], "profile": str(target["profile"]), "export": str(target["export"])}
+            if target.get("export")
+            else {"url": target["url"], "profile": str(target["profile"])}
+            for target in targets
+        ],
+        "sessionSnapshot": str(SESSION_SNAPSHOT),
         "initialRenewalAttempted": True,
     }
 
@@ -163,9 +192,6 @@ def uninstall() -> dict[str, object]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--uninstall", action="store_true", help="disable the timer and remove its user units")
-    parser.add_argument("--url", default=DEFAULT_URL)
-    parser.add_argument("--profile", default=str(DEFAULT_PROFILE))
-    parser.add_argument("--success-text", default=DEFAULT_SUCCESS_TEXT)
     parser.add_argument("--interval-hours", type=int, default=DEFAULT_INTERVAL_HOURS)
     parser.add_argument("--browser-script", default=str(DEFAULT_BROWSER_SCRIPT))
     return parser.parse_args()

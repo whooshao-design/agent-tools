@@ -127,6 +127,22 @@ def renew_session(url: str, profile: str = "", success_text: str = "none") -> st
 
 
 @mcp.tool()
+def export_session(url: str, export_path: str, profile: str = "", success_text: str = "none") -> str:
+    """访问目标页面并把该 profile 的 Cookie 与 localStorage 导出为本地 JSON 快照（权限 0600）。
+
+    快照含明文凭据，仅供本机下游进程直接读取（如 lxcloud token），不要写入仓库、日志或回复。
+    storageState 只覆盖本次访问过的 origin，需要哪个 origin 的 token 就用哪个 URL 导出。
+    """
+    if not url:
+        return error_text("url is required")
+    if not export_path:
+        return error_text("export_path is required")
+    args = _browser_args(url, profile, success_text)
+    args.append(f"--export-session={export_path}")
+    return _run_browser(args, timeout=120)
+
+
+@mcp.tool()
 def get_cookies(url: str, domain: str = "", profile: str = "", show_secrets: bool = False) -> str:
     """读取指定域名 Cookie。默认脱敏；只有显式 show_secrets=true 才返回原始值。"""
     cookie_domain = domain or safe_domain_from_url(url)

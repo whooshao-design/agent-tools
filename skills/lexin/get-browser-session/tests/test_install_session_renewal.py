@@ -18,13 +18,15 @@ class SessionRenewalInstallerTest(unittest.TestCase):
     def test_build_unit_contents_uses_headless_renewal_and_six_hour_timer(self):
         service, timer = installer.build_unit_contents(
             browser_script=Path("/opt/agent tools/browser_session.js"),
-            url="https://lexiao.oa.fenqile.com/#/home?ratio=100%",
-            profile=Path("/home/test/.cache/browser profile"),
-            success_text="当前环境",
+            targets=[{
+                "url": "https://lexiao.oa.fenqile.com/#/home?ratio=100%",
+                "profile": Path("/home/test/.cache/browser profile"),
+                "success_text": "当前环境",
+            }],
             interval_hours=6,
         )
 
-        self.assertIn('ExecStart="/usr/bin/node" "/opt/agent tools/browser_session.js" "--renew"', service)
+        self.assertIn('ExecStart=-"/usr/bin/node" "/opt/agent tools/browser_session.js" "--renew"', service)
         self.assertIn('"--url=https://lexiao.oa.fenqile.com/#/home?ratio=100%%"', service)
         self.assertIn('"--profile=/home/test/.cache/browser profile"', service)
         self.assertIn('"--success-text=当前环境"', service)
@@ -33,6 +35,38 @@ class SessionRenewalInstallerTest(unittest.TestCase):
         self.assertIn("OnUnitActiveSec=6h", timer)
         self.assertIn("RandomizedDelaySec=10m", timer)
         self.assertNotIn("Persistent=true", timer)
+
+    def test_build_unit_contents_emits_one_skippable_exec_line_per_target(self):
+        service, _ = installer.build_unit_contents(
+            browser_script=Path("/opt/browser_session.js"),
+            targets=installer.default_targets(),
+            interval_hours=6,
+        )
+
+        exec_lines = [line for line in service.splitlines() if line.startswith("ExecStart=")]
+        self.assertEqual(len(exec_lines), 4)
+        # "-" keeps a failing target from aborting the remaining ones.
+        self.assertTrue(all(line.startswith("ExecStart=-") for line in exec_lines))
+        # The SSO endpoint must run before the business pages that cannot re-sign tickets.
+        self.assertIn("passport.lexincloud.com", exec_lines[0])
+        self.assertIn(str(installer.HEALTHY_PROFILE), exec_lines[1])
+        self.assertIn("--export-session=", exec_lines[3])
+
+    def test_build_unit_contents_rejects_an_empty_target_list(self):
+        with self.assertRaisesRegex(ValueError, "at least one renewal target"):
+            installer.build_unit_contents(
+                browser_script=Path("/opt/browser_session.js"),
+                targets=[],
+                interval_hours=6,
+            )
+
+    def test_default_targets_lead_with_the_sso_endpoint_for_every_profile(self):
+        targets = installer.default_targets()
+        sso = [t for t in targets if t["url"] == "https://passport.lexincloud.com/"]
+
+        self.assertEqual({t["profile"] for t in sso}, {installer.MAIN_PROFILE, installer.HEALTHY_PROFILE})
+        self.assertNotIn("/tmp", str(installer.HEALTHY_PROFILE))
+        self.assertEqual([t for t in targets if t.get("export")][0]["export"], installer.SESSION_SNAPSHOT)
 
     def test_validate_config_rejects_insecure_url_and_out_of_range_interval(self):
         with self.assertRaisesRegex(ValueError, "HTTPS"):
@@ -63,9 +97,6 @@ class SessionRenewalInstallerTest(unittest.TestCase):
             script.write_text("// browser\n")
             unit_dir = root / "units"
             args = argparse.Namespace(
-                url="https://lexiao.oa.fenqile.com/",
-                profile=str(root / "profile"),
-                success_text="当前环境",
                 interval_hours=6,
                 browser_script=str(script),
             )
@@ -84,9 +115,6 @@ class SessionRenewalInstallerTest(unittest.TestCase):
 
     def test_install_rejects_missing_browser_script_before_writing_units(self):
         args = argparse.Namespace(
-            url="https://lexiao.oa.fenqile.com/",
-            profile="/tmp/profile",
-            success_text="当前环境",
             interval_hours=6,
             browser_script="/tmp/browser-session-script-that-does-not-exist.js",
         )

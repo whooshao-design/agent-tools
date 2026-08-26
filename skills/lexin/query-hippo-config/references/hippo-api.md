@@ -6,13 +6,13 @@
 - 标准 API host：`http://hippo.oa.fenqile.com`
 - stable/测试/项目环境入口：`http://stable-hippo.oa.fenqile.com/#/app/dashboard`
 - stable/测试/项目环境 API host：`http://stable-hippo.oa.fenqile.com`
-- 默认浏览器 profile：`/tmp/healthy-dashboard-profile`
+- 默认浏览器 profile：`/home/joney/.cache/healthy-dashboard-profile`
 - 常用登录检查成功标识：页面标题 `Hippo - Dashboard` 或正文包含 `Welcome`
 
 通过 `browser_session` MCP 请求时使用 `fetch_with_session`，不要输出 Cookie：
 
 ```text
-profile=/tmp/healthy-dashboard-profile
+profile=/home/joney/.cache/healthy-dashboard-profile
 url=<按环境选择的 API host>/<path>
 max_chars=30000
 ```

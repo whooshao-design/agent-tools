@@ -34,7 +34,7 @@ function assertProfileExists(profileDir) {
   const candidates = [
     path.join(os.homedir(), '.cache/lexiao-browser-profile'),
     path.join(os.homedir(), '.codex/webshell-direct-profile'),
-    '/tmp/healthy-dashboard-profile',
+    '/home/joney/.cache/healthy-dashboard-profile',
   ].filter((p) => fs.existsSync(p));
   const err = new Error(
     `PROFILE_NOT_FOUND: ${profileDir} 不存在（这不是登录态失效）。`

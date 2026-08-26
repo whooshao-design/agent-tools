@@ -16,7 +16,7 @@ def _run(args: list[str], timeout: int = 180) -> str:
 
 
 @mcp.tool()
-def healthy_read_board(board_id: int, profile: str = "/tmp/healthy-dashboard-profile") -> str:
+def healthy_read_board(board_id: int, profile: str = "/home/joney/.cache/healthy-dashboard-profile") -> str:
     """只读回读 Healthy/Nightingale 大盘配置，并写 /tmp 备份。"""
     if not board_id:
         return error_text("board_id is required")
@@ -24,7 +24,7 @@ def healthy_read_board(board_id: int, profile: str = "/tmp/healthy-dashboard-pro
 
 
 @mcp.tool()
-def healthy_apply_hawk_read_through(board_id: int, profile: str = "/tmp/healthy-dashboard-profile") -> str:
+def healthy_apply_hawk_read_through(board_id: int, profile: str = "/home/joney/.cache/healthy-dashboard-profile") -> str:
     """向指定大盘应用已沉淀的 hawk-read-through 面板模板。会先回读备份再写入。"""
     if not board_id:
         return error_text("board_id is required")

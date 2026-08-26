@@ -33,7 +33,73 @@ const DEFAULT_LOGIN_PATTERN = [
 const DEFAULT_PORTAL_PATTERN = '乐空间传送门|ATrust';
 const FORBIDDEN_PATTERN = '403|Forbidden|无权限|拒绝访问';
 const PROFILE_LOCK_STALE_MS = 60 * 60 * 1000;
+const AUTH_COOKIE_NAMES = new Set(['oa_session', 'oa_token_id', 'mid', 'sessionId']);
+const DEFAULT_AUTH_EXPIRY_THRESHOLD_SECONDS = 24 * 60 * 60;
 const DEFAULT_WSLG_LOG_PATH = '/mnt/wslg/weston.log';
+
+function summarizeAuthCookies(cookies, options = {}) {
+  const nowMs = Number.isFinite(options.nowMs) ? options.nowMs : Date.now();
+  const thresholdSeconds = Number.isFinite(options.thresholdSeconds)
+    ? options.thresholdSeconds
+    : DEFAULT_AUTH_EXPIRY_THRESHOLD_SECONDS;
+  const entries = (cookies || [])
+    .filter((cookie) => AUTH_COOKIE_NAMES.has(cookie.name))
+    .map((cookie) => {
+      const expires = Number(cookie.expires);
+      const persistent = Number.isFinite(expires) && expires > 0;
+      const expiresInSeconds = persistent ? Math.floor(expires - (nowMs / 1000)) : null;
+      return {
+        domain: cookie.domain,
+        name: cookie.name,
+        persistent,
+        expiresAt: persistent ? new Date(expires * 1000).toISOString() : null,
+        expiresInSeconds,
+        expiresInDays: expiresInSeconds === null ? null : Math.round(expiresInSeconds / 864) / 100,
+      };
+    })
+    .sort((left, right) => {
+      if (left.expiresInSeconds === null) return 1;
+      if (right.expiresInSeconds === null) return -1;
+      return left.expiresInSeconds - right.expiresInSeconds;
+    });
+  const persistentEntries = entries.filter((entry) => entry.persistent);
+  const earliest = persistentEntries[0] || null;
+  return {
+    thresholdSeconds,
+    authCookieCount: entries.length,
+    cookies: entries,
+    earliestExpiresAt: earliest ? earliest.expiresAt : null,
+    earliestExpiresInSeconds: earliest ? earliest.expiresInSeconds : null,
+    earliestExpiresInDays: earliest ? earliest.expiresInDays : null,
+    expiringSoon: Boolean(earliest && earliest.expiresInSeconds <= thresholdSeconds),
+    expiredCookies: persistentEntries
+      .filter((entry) => entry.expiresInSeconds <= 0)
+      .map((entry) => ({ domain: entry.domain, name: entry.name })),
+  };
+}
+
+function diffAuthCookies(before, after) {
+  const keyOf = (cookie) => `${cookie.domain}|${cookie.name}`;
+  const beforeMap = new Map((before || []).map((cookie) => [keyOf(cookie), cookie]));
+  const renewed = [];
+  const added = [];
+  for (const cookie of after || []) {
+    const previous = beforeMap.get(keyOf(cookie));
+    if (!previous) {
+      added.push({ domain: cookie.domain, name: cookie.name, expiresAt: cookie.expiresAt });
+      continue;
+    }
+    if (cookie.expiresAt && previous.expiresAt !== cookie.expiresAt) {
+      renewed.push({
+        domain: cookie.domain,
+        name: cookie.name,
+        from: previous.expiresAt,
+        to: cookie.expiresAt,
+      });
+    }
+  }
+  return { renewed, added, changedCount: renewed.length + added.length };
+}
 
 function expandHome(value) {
   if (!value) return value;
@@ -435,6 +501,7 @@ async function acquireProfileLock(profileDir, options = {}) {
 
 async function collectSessionHealth(context, targetUrl, expiryThresholdSeconds = 900) {
   const cookies = await context.cookies([targetUrl]);
+  const auth = summarizeAuthCookies(await context.cookies());
   const persistentExpiries = cookies
     .map((cookie) => Number(cookie.expires))
     .filter((expires) => Number.isFinite(expires) && expires > 0)
@@ -451,14 +518,22 @@ async function collectSessionHealth(context, targetUrl, expiryThresholdSeconds =
     earliestPersistentCookieExpiresAt: earliestExpiry === null ? null : new Date(earliestExpiry * 1000).toISOString(),
     earliestPersistentCookieExpiresInSeconds: expiresInSeconds,
     persistentCookieExpiringSoon: expiresInSeconds !== null && expiresInSeconds <= Number(expiryThresholdSeconds),
+    auth,
   };
 }
 
 function summarizeRenewalResult(status) {
   const sessionReady = Boolean(status.sessionReady);
+  const authRenewal = status.authRenewal || null;
+  const renewedAuthCookies = Boolean(authRenewal && authRenewal.changedCount > 0);
+  const renewalState = renewedAuthCookies
+    ? 'SESSION_RENEWED'
+    : (sessionReady ? 'SESSION_ACTIVE' : (status.sessionState || 'UNKNOWN'));
   return {
     renewalAttempted: true,
-    renewalState: sessionReady ? 'SESSION_ACTIVE' : (status.sessionState || 'UNKNOWN'),
+    renewalState,
+    renewedAuthCookies,
+    authRenewal,
     sessionState: status.sessionState || 'UNKNOWN',
     sessionReady,
     requestedUrl: status.requestedUrl,
@@ -466,7 +541,7 @@ function summarizeRenewalResult(status) {
     browserMode: status.browserMode,
     networkPolicy: status.networkPolicy,
     sessionHealth: status.sessionHealth,
-    actionRequired: sessionReady ? null : 'run ensure_session interactively',
+    actionRequired: (sessionReady || renewedAuthCookies) ? null : 'run ensure_session interactively',
   };
 }
 
@@ -596,6 +671,10 @@ async function runPageFlow(paths, chromium, flow) {
   const { context } = launched;
   try {
     const page = context.pages()[0] || await context.newPage();
+    const trackAuthRenewal = flow.mode === 'renew';
+    const authCookiesBefore = trackAuthRenewal
+      ? summarizeAuthCookies(await context.cookies()).cookies
+      : null;
     const response = await page.goto(flow.url, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
 
@@ -682,11 +761,23 @@ async function runPageFlow(paths, chromium, flow) {
       status.valuesRedacted = !showSecrets;
     }
 
+    if (flow.mode === 'export') {
+      const exportPath = expandHome(flow.args['export-session']);
+      fs.mkdirSync(path.dirname(exportPath), { recursive: true });
+      await context.storageState({ path: exportPath });
+      fs.chmodSync(exportPath, 0o600);
+      status.exportedSessionPath = exportPath;
+    }
+
     status.sessionHealth = await collectSessionHealth(
       context,
       flow.url,
       flow.expiryThresholdSeconds,
     );
+
+    if (authCookiesBefore) {
+      status.authRenewal = diffAuthCookies(authCookiesBefore, status.sessionHealth.auth.cookies);
+    }
 
     status.requestedUrl = redactUrl(flow.url);
     status.url = redactUrl(status.url);
@@ -773,7 +864,7 @@ async function runEnsureFlow(paths, chromium, baseFlow) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const mode = args.request ? 'request' : args.ensure ? 'ensure' : args.renew ? 'renew' : args.cookies ? 'cookies' : args.storage ? 'storage' : args.doctor ? 'doctor' : 'status';
+  const mode = args.request ? 'request' : args.ensure ? 'ensure' : args.renew ? 'renew' : args['export-session'] ? 'export' : args.cookies ? 'cookies' : args.storage ? 'storage' : args.doctor ? 'doctor' : 'status';
   const url = args.url || DEFAULT_URL;
   const paths = resolvePaths(args, url);
   const successText = args['success-text'] === 'none' ? '' : (args['success-text'] || DEFAULT_SUCCESS_TEXT);
@@ -786,7 +877,7 @@ async function main() {
   const stableDwellMs = Number(args['stable-dwell-ms'] || 2500);
   const statusTimeoutMs = Number(args['status-timeout'] || 10000);
   const expiryThresholdSeconds = boundedNumber(args['expiry-threshold-seconds'], 900, 0, 86400);
-  const headless = mode === 'renew' || (mode !== 'ensure' && !args.headed);
+  const headless = mode === 'renew' || mode === 'export' || (mode !== 'ensure' && !args.headed);
 
   if (mode === 'doctor') {
     const inferredEnv = inferWslgEnv(process.env);
@@ -867,6 +958,7 @@ module.exports = {
   collectStatus,
   collectSessionHealth,
   cookieMatchesDomain,
+  diffAuthCookies,
   inspectWslgHealth,
   main,
   parseArgs,
@@ -874,6 +966,7 @@ module.exports = {
   runPageFlow,
   runEnsureFlow,
   runRequestFlow,
+  summarizeAuthCookies,
   summarizeRenewalResult,
   waitForStableSession,
 };

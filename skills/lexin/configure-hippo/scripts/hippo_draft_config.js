@@ -14,7 +14,7 @@ const {
 
 const STANDARD_BASE_URL = 'http://hippo.oa.fenqile.com';
 const STABLE_BASE_URL = 'http://stable-hippo.oa.fenqile.com';
-const DEFAULT_PROFILE = '/tmp/healthy-dashboard-profile';
+const DEFAULT_PROFILE = '/home/joney/.cache/healthy-dashboard-profile';
 const DEFAULT_TOOL_DIR = path.join(os.homedir(), 'tools/lexiao-browser');
 const COMMANDS = new Set(['doctor', 'status', 'plan', 'upsert', 'verify', 'self-test', 'help']);
 const PUBLISH_AUTHORIZATION_VALUE = 'explicit';

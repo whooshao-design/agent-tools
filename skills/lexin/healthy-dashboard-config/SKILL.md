@@ -18,7 +18,7 @@ metadata:
 
 ## 核心约束
 
-- 复用 `get-browser-session` 获取 Healthy 登录态，默认 profile：`/tmp/healthy-dashboard-profile`。
+- 复用 `get-browser-session` 获取 Healthy 登录态，默认 profile：`/home/joney/.cache/healthy-dashboard-profile`。
 - 不在回复、skill 或脚本输出中暴露完整 `Authorization`、`ticket`、Cookie。
 - 修改前必须回读并备份原始大盘配置；修改后必须再次回读确认。
 - Healthy 写入 configs 的 body 必须是 `{"configs":"<config JSON string>"}`，不能直接传对象。
@@ -66,7 +66,7 @@ Content-Type: application/json;charset=UTF-8
 node /home/joney/projects/ai/agent-tools/skills/lexin/healthy-dashboard-config/scripts/healthy_dashboard_config.js \
   --board=16761 \
   --mode=hawk-read-through \
-  --profile=/tmp/healthy-dashboard-profile \
+  --profile=/home/joney/.cache/healthy-dashboard-profile \
   --apply
 ```
 
@@ -75,7 +75,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/healthy-dashboard-config/s
 ```bash
 node /home/joney/projects/ai/agent-tools/skills/lexin/healthy-dashboard-config/scripts/healthy_dashboard_config.js \
   --board=16761 \
-  --profile=/tmp/healthy-dashboard-profile \
+  --profile=/home/joney/.cache/healthy-dashboard-profile \
   --read
 ```
 
@@ -87,7 +87,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/healthy-dashboard-config/s
 
 ```text
 url=https://healthy.lexincloud.com/dashboards/{boardId}
-profile=/tmp/healthy-dashboard-profile
+profile=/home/joney/.cache/healthy-dashboard-profile
 success-text=none 或 Healthy 页面上的稳定文案
 ```
 

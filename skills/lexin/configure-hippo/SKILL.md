@@ -62,7 +62,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/configure-hippo/scripts/hi
 --key=<配置 key>                  doctor 之外必填
 --value-file=<UTF-8 文件>         plan/upsert/verify 必填
 --comment=<备注>                  可选；修改时缺省则保留原备注
---profile=/tmp/healthy-dashboard-profile
+--profile=/home/joney/.cache/healthy-dashboard-profile
 --expected-current-token=<token>  覆盖已有未发布目标草稿时必填
 --allow-non-pre                   非 fql_pre 写入的二次保护
 --allow-empty-value               明确允许写入空值
@@ -77,7 +77,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/configure-hippo/scripts/hi
 
 1. 明确 `appId/env/cluster/namespace/key`。appId 未给时从当前仓库 `app.properties` 推断；候选不唯一就停止并让用户确认。用户说 stable/测试/项目环境时传 `--env=stable` 或同义别名，并确认脚本输出的 `baseUrl` 是 `http://stable-hippo.oa.fenqile.com`、`env` 是 `fql_pre`。若要写 `pdwl_pre` 这类 navtree 显示的 stable env，传 `--env=pdwl_pre --hippo-site=stable`。
 2. 把目标值保存到本地 UTF-8 文件。若值已在仓库文件中，直接使用该文件，不创建临时副本。
-3. 可先运行 `doctor`；登录失效时调用 `get-browser-session`，标准环境目标 URL 使用 `http://hippo.oa.fenqile.com/#/app/dashboard`，stable/测试/项目环境使用 `http://stable-hippo.oa.fenqile.com/#/app/dashboard`，profile 保持 `/tmp/healthy-dashboard-profile`。
+3. 可先运行 `doctor`；登录失效时调用 `get-browser-session`，标准环境目标 URL 使用 `http://hippo.oa.fenqile.com/#/app/dashboard`，stable/测试/项目环境使用 `http://stable-hippo.oa.fenqile.com/#/app/dashboard`，profile 保持 `/home/joney/.cache/healthy-dashboard-profile`。
 4. 运行 `plan`，检查 `operation`、`targetHasUnpublishedDraft`、`draftDiffKeys`。非目标草稿只保留并报告，不得清除。
 5. 若 `operation=noop`，无需写入，直接运行 `verify`。若目标有未发布草稿且需覆盖，将刚返回的 `currentStateToken` 原样传给 `upsert`；用户没有明确授权覆盖目标草稿时先说明并等待确认。
 6. 未授权发布时，运行 `upsert`。必须看到 `publishAttempted=false`、`activeReleaseKeyUnchanged=true`、`activeConfigurationsUnchanged=true`、`otherItemsUnchanged=true`；实际写入时还必须有 `targetItemValidated=true`。
@@ -128,7 +128,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/configure-hippo/scripts/hi
 ```bash
 node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js \
   --ensure \
-  --profile=/tmp/healthy-dashboard-profile \
+  --profile=/home/joney/.cache/healthy-dashboard-profile \
   --url=http://hippo.oa.fenqile.com/#/app/dashboard \
   --success-text=Welcome \
   --login-pattern='Work Happy|QR Code|Use MOA|Account Login|Password Login|乐空间传送门|ATrust'

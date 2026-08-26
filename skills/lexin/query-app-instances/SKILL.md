@@ -18,7 +18,7 @@ MCP 暂无专用实例发现工具，使用固定脚本兜底。脚本复用本�
 - 未指定应用名：从当前工作目录递归查 `app.properties`，读取 `application.name`。
 - 未指定环境：默认 `pre`，即预发布环境。
 - 未指定实例类型：默认同时查 VM/KVM 和容器 Pod。
-- 默认浏览器 profile：脚本依次尝试 `/tmp/healthy-dashboard-profile`、`~/.cache/lexiao-browser-profile`。
+- 默认浏览器 profile：脚本依次尝试 `/home/joney/.cache/healthy-dashboard-profile`、`~/.cache/lexiao-browser-profile`。
 - 访问乐效内网域名时，脚本只在自身 Chromium 子进程中清除 VPS 代理并设置 `NO_PROXY`；不修改当前 shell、系统代理或用户 Chrome 配置。
 - 如果登录态不可用，先使用 `get-browser-session` 刷新乐效登录态；不要向用户索要 Cookie、密码或 OTP。
 
