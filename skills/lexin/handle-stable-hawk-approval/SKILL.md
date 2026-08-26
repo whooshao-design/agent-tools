@@ -28,9 +28,13 @@ MCP 优先、脚本兜底。只读查询优先复用 `query-mysql-data` / `mysql
 | scope | source | db_type | table |
 |---|---|---|---|
 | `domestic` | `hawk` | `HawkDecisionDB` | `hawkeye_decision_engine_db.t_hawk_approval` |
-| `domestic` | `process` | `MxgProcessmanageDB` | `process_engine_db.t_approval` |
-| `overseas` | `hawk` | `MxgHawkDecisionDB` | `hawkeye_decision_engine_db.t_hawk_approval` |
-| `overseas` | `process` | `MxgProcessmanageDB` | `process_engine_db.t_approval` |
+| `domestic` | `process` | `ProcessmanageDB` | `process_engine_db.t_approval` |
+| `mexico` | `hawk` | `MxgHawkDecisionDB` | `hawkeye_decision_engine_db.t_hawk_approval` |
+| `mexico` | `process` | `MxgProcessmanageDB` | `process_engine_db.t_approval` |
+| `indonesia` | `hawk` | `YnHawkDecisionDB` | `hawkeye_decision_engine_db.t_hawk_approval` |
+| `indonesia` | `process` | `YnProcessmanageDB` | `process_engine_db.t_approval` |
+
+海外每个地区是独立应用、独立库、独立实例，不能混用。`--scope overseas` 保留为 `mexico` 的别名。
 
 查询待处理记录时固定筛选 `Fapproval_state = 10`。默认只查当天 `Fmodify_time >= CURDATE()`；需要处理历史待审批时才加 `--all-dates`。
 
@@ -52,7 +56,7 @@ MCP 优先、脚本兜底。只读查询优先复用 `query-mysql-data` / `mysql
 
 ## 推荐流程
 
-1. 明确范围：`domestic` 还是 `overseas`，`hawk`、`process` 还是 `all`，是否指定 `logic_id`。
+1. 明确范围：`domestic`、`mexico` 还是 `indonesia`，`hawk`、`process` 还是 `all`，是否指定 `logic_id`。用户说“海外”而没指明国家时要问清楚，不要默认墨西哥。
 2. 查询待审批并 dry-run：
 
 ```bash
@@ -65,8 +69,8 @@ python3 /home/joney/projects/ai/agent-tools/skills/lexin/handle-stable-hawk-appr
 ```bash
 python3 /home/joney/projects/ai/agent-tools/skills/lexin/handle-stable-hawk-approval/scripts/stable_approval_cli.py \
   approve --scope domestic --source hawk --select \
-  --target hawk_manage=<ip>:<port> \
-  --target hawk_process_publish=<ip>:<port> \
+  --target domestic.hawk_manage=<ip>:<port> \
+  --target domestic.hawk_process_publish=<ip>:<port> \
   --confirm
 ```
 
@@ -81,17 +85,35 @@ python3 /home/joney/projects/ai/agent-tools/skills/lexin/handle-stable-hawk-appr
 ~/.config/hawk-stable-approval/targets.json
 ```
 
-格式：
+格式按 scope 分层，每个地区有自己的实例：
 
 ```json
 {
-  "hawk_manage": {"ip": "<ip>", "port": "<port>", "group": "stable", "version": "1.0.0"},
-  "hawk_process_publish": {"ip": "<ip>", "port": "<port>", "group": "stable", "version": "1.0.0"},
-  "process_engine": {"ip": "<ip>", "port": "<port>", "group": "stable", "version": "1.0.0"}
+  "domestic": {
+    "hawk_manage": {"ip": "<ip>", "port": "<port>", "group": "stable", "version": "1.0.0"},
+    "hawk_process_publish": {"ip": "<ip>", "port": "<port>", "group": "stable", "version": "1.0.0"},
+    "process_engine": {"ip": "<ip>", "port": "<port>", "group": "stable", "version": "1.0.0"}
+  },
+  "mexico": {
+    "hawk_manage": {"ip": "<ip>", "port": "<port>", "group": "stable", "version": "1.0.0"}
+  },
+  "indonesia": {
+    "hawk_manage": {"ip": "<ip>", "port": "<port>", "group": "stable", "version": "1.0.0"}
+  }
 }
 ```
 
-该文件必须只保存在本地，不提交到仓库。目标来自 Bianque 服务模拟器或 `test-dubbo-api` 的当前可用提供者。
+取地址时先查 `<scope>.<target_key>`，没有再回退到顶层裸 `<target_key>`；`--target mexico.hawk_manage=<ip>:<port>` 覆盖文件配置。不分 scope 只写裸 key 时，国内和海外会互相覆盖，回调可能打到错误地区的实例。
+
+对应的 stable 管理端应用：
+
+| scope | 应用名 |
+|---|---|
+| `domestic` | `server_hawk_decision_manage` |
+| `mexico` | `server-hawk-decision-manage-mexyw` |
+| `indonesia` | `server-hawk-decision-manage-ynyw` |
+
+该文件必须只保存在本地，不提交到仓库。用 `query-app-instances` 按上表应用名查 stable 实例地址，或取 Bianque 服务模拟器当前可用提供者。
 
 ## 常用命令
 
@@ -109,11 +131,14 @@ python3 /home/joney/projects/ai/agent-tools/skills/lexin/handle-stable-hawk-appr
   approve --scope domestic --source hawk --select
 ```
 
-海外米霍克待审批：
+海外米霍克待审批（按国家分别查）：
 
 ```bash
 python3 /home/joney/projects/ai/agent-tools/skills/lexin/handle-stable-hawk-approval/scripts/stable_approval_cli.py \
-  list --scope overseas --source hawk
+  list --scope mexico --source hawk
+
+python3 /home/joney/projects/ai/agent-tools/skills/lexin/handle-stable-hawk-approval/scripts/stable_approval_cli.py \
+  list --scope indonesia --source hawk
 ```
 
 流程引擎单条执行：
@@ -121,7 +146,7 @@ python3 /home/joney/projects/ai/agent-tools/skills/lexin/handle-stable-hawk-appr
 ```bash
 python3 /home/joney/projects/ai/agent-tools/skills/lexin/handle-stable-hawk-approval/scripts/stable_approval_cli.py \
   approve --scope domestic --source process --logic-id <logic_id> \
-  --target process_engine=<ip>:<port> \
+  --target domestic.process_engine=<ip>:<port> \
   --confirm
 ```
 

@@ -28,7 +28,7 @@ except ImportError as exc:  # pragma: no cover - import failure is environment-s
 DEFAULT_LXCLOUD_URL = "https://stable-lxcloud.oa.fenqile.com/v1/mysql/sql-query/exec-query/"
 DEFAULT_BIANQUE_URL = "https://stable-bianque.lexinfintech.com/serviceEmulator/request"
 DEFAULT_TARGET_FILE = "~/.config/hawk-stable-approval/targets.json"
-LOGIC_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+LOGIC_ID_RE = re.compile(r"^[A-Za-z0-9_@-]+$")
 
 
 class UserError(Exception):
@@ -94,27 +94,47 @@ SOURCE_CONFIGS: Mapping[Tuple[str, str], SourceConfig] = {
         scope="domestic",
         source="process",
         label="流程引擎审批",
-        db_type="MxgProcessmanageDB",
+        db_type="ProcessmanageDB",
         table="process_engine_db.t_approval",
         supports_oper_type=False,
     ),
-    ("overseas", "hawk"): SourceConfig(
-        scope="overseas",
+    ("mexico", "hawk"): SourceConfig(
+        scope="mexico",
         source="hawk",
-        label="海外米霍克审批",
+        label="墨西哥米霍克审批",
         db_type="MxgHawkDecisionDB",
         table="hawkeye_decision_engine_db.t_hawk_approval",
         supports_oper_type=True,
     ),
-    ("overseas", "process"): SourceConfig(
-        scope="overseas",
+    ("mexico", "process"): SourceConfig(
+        scope="mexico",
         source="process",
-        label="海外流程引擎审批",
+        label="墨西哥流程引擎审批",
         db_type="MxgProcessmanageDB",
         table="process_engine_db.t_approval",
         supports_oper_type=False,
     ),
+    ("indonesia", "hawk"): SourceConfig(
+        scope="indonesia",
+        source="hawk",
+        label="印尼米霍克审批",
+        db_type="YnHawkDecisionDB",
+        table="hawkeye_decision_engine_db.t_hawk_approval",
+        supports_oper_type=True,
+    ),
+    ("indonesia", "process"): SourceConfig(
+        scope="indonesia",
+        source="process",
+        label="印尼流程引擎审批",
+        db_type="YnProcessmanageDB",
+        table="process_engine_db.t_approval",
+        supports_oper_type=False,
+    ),
 }
+
+# `overseas` used to mean Mexico only; keep it working as an alias.
+SCOPE_ALIASES: Mapping[str, str] = {"overseas": "mexico"}
+SCOPE_CHOICES = ["domestic", "mexico", "indonesia", "overseas"]
 
 ROUTES: Mapping[str, CallbackRoute] = {
     "hawk_manage": CallbackRoute(
@@ -188,12 +208,17 @@ def split_logic_ids(values: Optional[Sequence[str]]) -> List[str]:
             if not item:
                 continue
             if not LOGIC_ID_RE.match(item):
-                raise UserError(f"Invalid logic_id {item!r}; only letters, digits, underscore and hyphen are allowed.")
+                raise UserError(f"Invalid logic_id {item!r}; only letters, digits, underscore, hyphen and '@' are allowed.")
             logic_ids.append(item)
     return list(dict.fromkeys(logic_ids))
 
 
+def resolve_scope(scope: str) -> str:
+    return SCOPE_ALIASES.get(scope, scope)
+
+
 def selected_source_configs(scope: str, source: str) -> List[SourceConfig]:
+    scope = resolve_scope(scope)
     source_names = ("hawk", "process") if source == "all" else (source,)
     return [SOURCE_CONFIGS[(scope, item)] for item in source_names]
 
@@ -378,6 +403,17 @@ def parse_target(value: str) -> Tuple[str, Target]:
     return key.strip(), Target(ip=parts[0].strip(), port=parts[1].strip(), group=group, version=version)
 
 
+def build_target(value: Mapping[str, Any], label: str, target_file: Path) -> Target:
+    if not value.get("ip") or not value.get("port"):
+        raise UserError(f"Target {label!r} in {target_file} must contain ip and port.")
+    return Target(
+        ip=str(value["ip"]),
+        port=str(value["port"]),
+        group=str(value.get("group", "stable")),
+        version=str(value.get("version", "1.0.0")),
+    )
+
+
 def load_targets(args: argparse.Namespace) -> Dict[str, Target]:
     targets: Dict[str, Target] = {}
     target_file = Path(args.target_file).expanduser()
@@ -389,14 +425,15 @@ def load_targets(args: argparse.Namespace) -> Dict[str, Target]:
         for key, value in raw_targets.items():
             if not isinstance(value, Mapping):
                 raise UserError(f"Target {key!r} in {target_file} must be an object.")
-            if not value.get("ip") or not value.get("port"):
-                raise UserError(f"Target {key!r} in {target_file} must contain ip and port.")
-            targets[str(key)] = Target(
-                ip=str(value["ip"]),
-                port=str(value["port"]),
-                group=str(value.get("group", "stable")),
-                version=str(value.get("version", "1.0.0")),
-            )
+            # A scope block nests one entry per route: {"mexico": {"hawk_manage": {...}}}.
+            if str(key) in SCOPE_CHOICES:
+                scope_key = resolve_scope(str(key))
+                for route_key, route_value in value.items():
+                    if not isinstance(route_value, Mapping):
+                        raise UserError(f"Target {key}.{route_key!r} in {target_file} must be an object.")
+                    targets[f"{scope_key}.{route_key}"] = build_target(route_value, f"{key}.{route_key}", target_file)
+                continue
+            targets[str(key)] = build_target(value, str(key), target_file)
 
     for item in args.target or []:
         key, target = parse_target(item)
@@ -538,10 +575,12 @@ def command_approve(args: argparse.Namespace) -> int:
     results: List[Dict[str, str]] = []
     for record in records:
         route = route_for(record)
-        target = targets.get(route.target_key)
+        # Each region runs its own manage app, so a scoped target wins over the bare route key.
+        scoped_key = f"{resolve_scope(record.scope)}.{route.target_key}"
+        target = targets.get(scoped_key) or targets.get(route.target_key)
         if not target:
             raise UserError(
-                f"Missing target {route.target_key!r}. Pass --target {route.target_key}=ip:port "
+                f"Missing target {scoped_key!r}. Pass --target {scoped_key}=ip:port "
                 f"or configure {Path(args.target_file).expanduser()}."
             )
         try:
@@ -618,7 +657,7 @@ def verify_after_callbacks(args: argparse.Namespace, records: Sequence[ApprovalR
 
 
 def add_common_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--scope", choices=["domestic", "overseas"], default="domestic", help="approval domain")
+    parser.add_argument("--scope", choices=SCOPE_CHOICES, default="domestic", help="approval region; 'overseas' is an alias of 'mexico'")
     parser.add_argument("--source", choices=["hawk", "process", "all"], default="hawk", help="approval source")
     parser.add_argument("--logic-id", action="append", help="logic id to query or approve; repeat or comma-separate")
     parser.add_argument("--all-dates", action="store_true", help="do not restrict pending queries to today")
