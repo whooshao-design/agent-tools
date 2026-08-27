@@ -108,6 +108,28 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/inspect-healthy-metrics/sc
 - `--check-registry`：同时查询指标注册表，区分未注册和无数据。
 - `--format json`：输出完整 JSON；默认输出 TSV 表格。
 
+## 多 series 陷阱（查聚合值时必读）
+
+同一个逻辑指标在同一业务维度下，会**按上报实例拆成多条 series** —— 雷神/categraf 会自动附加
+`ident`（实例 IP）、`origins`（kvm/k8s）、`env`、`prometheus_agent` 等 label。
+多实例轮询上报时，每条 series 只承载自己那一份数据。
+
+因此：
+
+- **取聚合值必须在外层加 `sum()`**：`sum(sum_over_time(m[60m]))`、`sum(count_over_time(m[60m]))`。
+  不加 `sum()` 时 Prometheus 返回多条 series，只读第一条就只是**单台机器**的数据。
+- 判断上报是否完整看 `sum(count_over_time(m[<窗口>]))`，不要看单条 series 的点数。
+  例：5 个实例每 4 分钟轮流上报一次，单条 series 一小时只有 12~18 个点，
+  但 `sum(...)` 是 60，即每分钟一个点，上报完全正常。
+- 脚本的 `range_samples` 已经是 `sum(count_over_time(...))`，`range_series` 是 `count(...)`，
+  两者含义不同：前者是样本总数，后者是 series 条数。
+- `--promql` 自由查询时脚本会输出 `series_count`；返回多条时附带 `multi_series_warning`，
+  里面列出发生分裂的 label 和聚合建议。看到这个警告就说明当前查询没有聚合，结论不可直接采信。
+- 直接用 curl 打 `healthy.lexincloud.com/api/n9e/prometheus/api/v1/query` 时，
+  必须带 `X-Cluster: Default` 请求头，否则返回 `X-Cluster missed`。
+
+排查「上报频率不足 / 数据缺失」前，先确认这一层，再去查 job 调度或耗时。
+
 ## 状态判断
 
 每个指标输出：

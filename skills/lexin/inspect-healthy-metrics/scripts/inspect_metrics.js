@@ -321,10 +321,32 @@ async function queryRegistry(baseUrl, auth, args, metric) {
   return list.filter((item) => item.metric === metric || item.standard_metric === metric);
 }
 
+// 只取第一条 series，调用方必须传已聚合的查询（用 count()/sum() 包住）。
+// 同一逻辑指标会按上报实例的 ident label 拆成多条 series，未聚合时这里会静默丢弃其余实例。
 function vectorNumber(result) {
   if (!result.length) return 0;
   const value = Number(result[0].value && result[0].value[1]);
   return Number.isFinite(value) ? value : 0;
+}
+
+// 多 series 检测：同一指标同一业务维度会按上报实例拆成多条 series，
+// 不加 sum() 直接读第一条只能看到单台机器的数据
+function seriesBreakdown(result) {
+  if (!Array.isArray(result) || result.length <= 1) return null;
+  const keys = new Set();
+  for (const series of result) {
+    for (const key of Object.keys(series.metric || {})) keys.add(key);
+  }
+  const varying = [...keys].filter(
+    (key) => new Set(result.map((series) => (series.metric || {})[key])).size > 1,
+  );
+  return {
+    series_count: result.length,
+    varying_labels: varying,
+    hint:
+      `查询返回 ${result.length} 条 series，按 ${varying.join('/') || '未知 label'} 分裂。`
+      + '要取跨实例的聚合值必须在外层加 sum()；直接读第一条只是单个上报实例的数据。',
+  };
 }
 
 function latestValue(result) {
@@ -517,8 +539,11 @@ async function runRawPromql(baseUrl, auth, args) {
     env: args.env || 'stable',
     base_url: baseUrl,
     promql: args.promql,
+    series_count: Array.isArray(result) ? result.length : 0,
     result,
   };
+  const breakdown = seriesBreakdown(result);
+  if (breakdown) output.multi_series_warning = breakdown;
   console.log(JSON.stringify(output, null, 2));
 }
 
