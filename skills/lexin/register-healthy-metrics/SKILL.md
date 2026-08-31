@@ -40,7 +40,9 @@ metadata:
 环境域名：
 
 - `stable`、`test`、`测试` -> `https://stable-eye.oa.fenqile.com`
-- `prod`、`online`、`线上`、`生产` -> `https://eye.oa.fenqile.com`
+- `prod`、`online`、`线上`、`生产` -> `https://healthy.lexincloud.com`
+
+线上不要用 `eye.oa.fenqile.com`：该域名对 `/api/n9e/metric-manage` 的 `POST` 返回 403（网关拦截），只有 `GET` 可用。`healthy.lexincloud.com` 读写都正常，且两个域名查询同一指标返回的 registry id 完全一致，是同一后端。与 `inspect-healthy-metrics` 保持一致，避免读用一个域名、写用另一个域名。
 
 请求头固定包含：
 

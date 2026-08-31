@@ -7,8 +7,8 @@ const { createRequire } = require('module');
 const BASE_URLS = {
   stable: 'https://stable-eye.oa.fenqile.com',
   test: 'https://stable-eye.oa.fenqile.com',
-  prod: 'https://eye.oa.fenqile.com',
-  online: 'https://eye.oa.fenqile.com',
+  prod: 'https://healthy.lexincloud.com',
+  online: 'https://healthy.lexincloud.com',
 };
 
 const DEFAULT_BUSINESS_LINE = '风控研发中心';
