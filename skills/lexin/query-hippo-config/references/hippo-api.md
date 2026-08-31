@@ -6,8 +6,11 @@
 - 标准 API host：`http://hippo.oa.fenqile.com`
 - stable/测试/项目环境入口：`http://stable-hippo.oa.fenqile.com/#/app/dashboard`
 - stable/测试/项目环境 API host：`http://stable-hippo.oa.fenqile.com`
-- 默认浏览器 profile：`/home/joney/.cache/healthy-dashboard-profile`
-- 常用登录检查成功标识：页面标题 `Hippo - Dashboard` 或正文包含 `Welcome`
+- 墨西哥入口与 API host：`https://hippo.oa.wowcredito.com`
+- 印尼入口与 API host：`https://hippo.oa.kredito.id`
+- 默认浏览器 profile：`/home/joney/.cache/healthy-dashboard-profile`（四个站点共用同一个 passport 登录态）
+- 常用登录检查成功标识：页面标题 `Hippo - Dashboard`、`Hippo - 统一配置中心` 或正文包含 `Welcome`
+- 所有 `hippo.oa.*` 域名都是内网域名，必须直连；预置脚本已强制直连，手工 `curl` 要加 `--noproxy '*'`，走代理会得到 503 或代理伪造的 404
 
 通过 `browser_session` MCP 请求时使用 `fetch_with_session`，不要输出 Cookie：
 
@@ -46,10 +49,22 @@ namespace 列表这类小响应接口，且必须显式传 `max_chars` 并检查
 - `gray`、`灰度` -> host `http://hippo.oa.fenqile.com`，env `fql_gray`
 - `oa` -> host `http://hippo.oa.fenqile.com`，env `fql_oa`
 - `stable`、`test`、`testing`、`prj`、`project`、`测试`、`测试环境`、`项目`、`项目环境` -> host `http://stable-hippo.oa.fenqile.com`，env 默认 `fql_pre`
-- 用户显式给 `fql_prod`、`fql_pre`、`pdwl_pre` 这类完整 env 时，env 原样使用；host 仍由用户语义决定，stable/测试/项目环境用 stable host，线上/预发/灰度/OA 用标准 host
+- `mx`、`mexico`、`墨西哥` -> host `https://hippo.oa.wowcredito.com`，env `mxyw_pre`、`mxyw_prod`
+- `id`、`idn`、`indonesia`、`印尼` -> host `https://hippo.oa.kredito.id`，env 只有 `ynyw_prod`
+- 用户显式给 `fql_prod`、`fql_pre`、`pdwl_pre`、`mxyw_prod`、`ynyw_prod` 这类完整 env 时，env 原样使用；`mxyw_*` 和 `ynyw_*` 前缀直接决定海外 host，其余 host 由用户语义决定，stable/测试/项目环境用 stable host，线上/预发/灰度/OA 用标准 host
 - stable host 中不同业务线可能有不同 env 前缀；不确定时先查 `/apps/<appId>/navtree`，再用 navtree 返回的 env 查 active release
 
-除 host 选择外，其它 API 路径、参数和 active release 判断逻辑相同。最终回复的查询接口应输出完整 URL，避免省略域名导致 stable 与标准环境混淆。
+海外站点的 env 由业务线前缀加环境后缀组成，`navtree` 的 `entities[].body.env` 会同时给出 `name`、`envShowName`、`bu`：
+
+| 站点 | env name | envShowName | bu |
+|---|---|---|---|
+| 墨西哥 | `mxyw_pre` | 墨西哥业务pre环境 | `mexicoyewu` |
+| 墨西哥 | `mxyw_prod` | 墨西哥业务prod环境 | `mexicoyewu` |
+| 印尼 | `ynyw_prod` | 印尼业务prod环境 | `indonesiayewu` |
+
+注意 `env.prefix` 字段与 env name 前缀不一致（墨西哥 `prefix` 是 `mexyw`，env name 却是 `mxyw_*`）；拼接 API 路径一律用 `env.name`。印尼只有 prod，没有 pre 环境；应用范围也和国内不同，海外常见的是 `middle-*`、`overseas-*`、`mx-*` 这类应用。
+
+除 host 和 env 前缀外，其它 API 路径、参数和 active release 判断逻辑相同。最终回复的查询接口应输出完整 URL，避免省略域名导致 stable、海外与标准环境混淆。
 
 ## 常用端点
 
@@ -83,6 +98,12 @@ GET /apps/<appId>/envs/<env>/clusters/<cluster>/namespaces/<namespaceName>/items
 - 普通应用配置使用 `namespacePubTypes/__app__`。
 - `__pub__` 是发布系统配置，不要默认使用。
 - `items` 可看到 value、comment、修改人、更新时间、`isModified`，但可能包含未发布草稿。
+
+定位类查询的响应结构（`hippo_query.js` 的 `apps`/`find` 依赖这几点）：
+
+- `GET /apps/list?appId=<keyword>&page=0&size=<n>` 返回 `{"elements":[{"appId","name","ownerName","bu",...}]}`，是**全站**应用元数据，不代表该应用在当前站点/env 有配置。海外站点尤其会搜出大量国内应用，必须再用 `navtree` 过滤。
+- `GET /apps/<appId>/navtree` 返回 `{"entities":[{"body":{"env":{...},"clusters":[...]}}]}`；`entities` 为空表示该应用在这个站点没有任何环境，直接查 active release 会 404。
+- namespace 列表的 `elements` 里，namespace 名在不同版本分别落在 `namespace.namespaceName`、`namespaceName` 或 `baseInfo.namespaceName`，三种都要兼容。
 
 查运行时生效 release：
 

@@ -96,8 +96,8 @@
 | `redis-query` | 通过 DevService.queryRedis 只读查询 Redis | `redis_query` |
 | `query-mysql-data` | 从代码定位实例并只读查询 MySQL 测试/stable 与经授权线上数据 | `mysql_readonly` |
 | `query-clickhouse-water` | 通过预发布/灰度/线上共用 DBA 堡垒机或 stable/测试 HTTP 接口查询 ClickHouse 流水 | `bastion_dba`、`browser_session` |
-| `query-hippo-config` | 查看标准或 stable Hippo 配置中心实际生效配置 | `browser_session` |
-| `configure-hippo` | 新增、修改并在明确授权后发布标准或 stable Hippo 配置 | `browser_session` |
+| `query-hippo-config` | 查看标准、stable 或墨西哥/印尼海外 Hippo 配置中心实际生效配置 | `browser_session` |
+| `configure-hippo` | 新增、修改并在明确授权后发布标准、stable 或墨西哥/印尼海外 Hippo 配置 | `browser_session` |
 
 ### 监控与诊断
 

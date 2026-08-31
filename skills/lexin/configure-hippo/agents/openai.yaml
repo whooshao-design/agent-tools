@@ -1,6 +1,6 @@
 interface:
   display_name: "Configure Hippo"
-  short_description: "安全新增、修改并在明确授权后发布标准或 stable Hippo 配置"
-  default_prompt: "使用 $configure-hippo 在标准或 stable Hippo 中新增或修改一项配置；默认只保存草稿，只有用户明确授权发布时才按 key 粒度发布并回读校验。"
+  short_description: "安全新增、修改并在明确授权后发布标准、stable 或海外 Hippo 配置"
+  default_prompt: "使用 $configure-hippo 在标准、stable 或墨西哥/印尼海外 Hippo 中新增或修改一项配置；默认只保存草稿，只有用户明确授权发布时才按 key 粒度发布并回读校验。"
 policy:
   allow_implicit_invocation: true

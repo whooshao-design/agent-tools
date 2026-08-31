@@ -5,8 +5,14 @@ const INTERNAL_HOST_SUFFIXES = [
   '.lexincloud.com',
   '.fql.com',
 ];
+// Hippo 的海外站点用各自国家的域名（hippo.oa.wowcredito.com、hippo.oa.kredito.id），
+// 但都是 hippo.oa.* 内网域名。按主机前缀识别，避免把整个国家域当成内网，
+// 也避免每新增一个国家就要改这里。
+const INTERNAL_HOST_PATTERNS = [/^(?:[a-z0-9-]+-)?hippo\.oa\./i];
 const INTERNAL_NO_PROXY = [
   '.oa.fenqile.com',
+  'hippo.oa.wowcredito.com',
+  'hippo.oa.kredito.id',
   '.lexincloud.com',
   '.fql.com',
   'localhost',
@@ -20,7 +26,7 @@ const PROXY_ENV_KEYS = [
   'https_proxy',
   'all_proxy',
 ];
-const WEBSHELL_HOSTS = new Set(['webshell.oa.fenqile.com']);
+const WEBSHELL_HOSTS = new Set(['webshell.oa.fenqile.com', 'webshell.lexincloud.com']);
 const SENSITIVE_QUERY_PATTERN = /ticket|token|auth|session|cookie|code/i;
 
 function urlOf(value) {
@@ -40,7 +46,8 @@ function isInternalUrl(value) {
   const parsed = urlOf(value);
   if (!parsed) return false;
   const host = parsed.hostname.toLowerCase();
-  return INTERNAL_HOST_SUFFIXES.some((suffix) => hostMatchesSuffix(host, suffix));
+  return INTERNAL_HOST_SUFFIXES.some((suffix) => hostMatchesSuffix(host, suffix))
+    || INTERNAL_HOST_PATTERNS.some((pattern) => pattern.test(host));
 }
 
 function isWebShellUrl(value) {
@@ -165,6 +172,7 @@ function validateWebShellUrl(value, target = {}) {
 }
 
 module.exports = {
+  INTERNAL_HOST_PATTERNS,
   INTERNAL_NO_PROXY,
   NETWORK_POLICY,
   PROXY_ENV_KEYS,

@@ -1,6 +1,6 @@
 interface:
   display_name: "Query Hippo Config"
-  short_description: "快速只读查看标准或 stable Hippo 应用配置和实际生效结果"
-  default_prompt: "使用 $query-hippo-config 快速查看 Hippo 配置，按环境选择标准或 stable 域名，默认查询 prod 环境并输出接口 URL 和结果。"
+  short_description: "快速只读查看标准、stable 或海外 Hippo 配置，可按关键字定位应用和 namespace"
+  default_prompt: "使用 $query-hippo-config 快速查看 Hippo 配置，按环境选择标准、stable 或墨西哥/印尼海外域名；应用名或 namespace 不明确时先用 apps/find 定位，默认查询 prod 环境并输出接口 URL 和结果。"
 policy:
   allow_implicit_invocation: true

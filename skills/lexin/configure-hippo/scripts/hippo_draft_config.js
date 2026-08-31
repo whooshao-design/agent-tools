@@ -12,8 +12,14 @@ const {
   chromiumArgsFor,
 } = require('../../get-browser-session/scripts/browser_network');
 
-const STANDARD_BASE_URL = 'http://hippo.oa.fenqile.com';
-const STABLE_BASE_URL = 'http://stable-hippo.oa.fenqile.com';
+const SITE_BASE_URLS = {
+  standard: 'http://hippo.oa.fenqile.com',
+  stable: 'http://stable-hippo.oa.fenqile.com',
+  mx: 'https://hippo.oa.wowcredito.com',
+  id: 'https://hippo.oa.kredito.id',
+};
+const STANDARD_BASE_URL = SITE_BASE_URLS.standard;
+const STABLE_BASE_URL = SITE_BASE_URLS.stable;
 const DEFAULT_PROFILE = '/home/joney/.cache/healthy-dashboard-profile';
 const DEFAULT_TOOL_DIR = path.join(os.homedir(), 'tools/lexiao-browser');
 const COMMANDS = new Set(['doctor', 'status', 'plan', 'upsert', 'verify', 'self-test', 'help']);
@@ -29,26 +35,60 @@ const STABLE_HOST_ALIASES = new Set([
   '项目',
   '项目环境',
 ]);
-const ENV_ALIASES = {
-  pre: 'fql_pre',
-  '预发': 'fql_pre',
-  '预发布': 'fql_pre',
-  gray: 'fql_gray',
-  '灰度': 'fql_gray',
-  oa: 'fql_oa',
-  prod: 'fql_prod',
-  production: 'fql_prod',
-  '生产': 'fql_prod',
-  '线上': 'fql_prod',
+const OVERSEAS_HOST_ALIASES = new Map([
+  ['mx', 'mx'],
+  ['mex', 'mx'],
+  ['mexico', 'mx'],
+  ['墨西哥', 'mx'],
+  ['wowcredito', 'mx'],
+  ['hippo.oa.wowcredito.com', 'mx'],
+  ['id', 'id'],
+  ['idn', 'id'],
+  ['indonesia', 'id'],
+  ['印尼', 'id'],
+  ['印度尼西亚', 'id'],
+  ['kredito', 'id'],
+  ['hippo.oa.kredito.id', 'id'],
+]);
+const STANDARD_HOST_ALIASES = new Set(['standard', 'online', 'prod', '生产', '线上', 'hippo']);
+// env 名由站点前缀和环境后缀组成：国内是 fql_pre/fql_prod，
+// 墨西哥站点是 mxyw_pre/mxyw_prod，印尼站点是 ynyw_prod。
+const SITE_ENV_PREFIXES = {
+  standard: 'fql',
+  stable: 'fql',
+  mx: 'mxyw',
+  id: 'ynyw',
+};
+const ENV_PREFIX_SITES = {
+  fql: 'standard',
+  mxyw: 'mx',
+  ynyw: 'id',
+};
+// 站点缺省环境：印尼只有 ynyw_prod，没有 pre，缺省用 pre 会得到一个必然 404 的 env。
+const SITE_DEFAULT_SUFFIXES = {
+  standard: 'pre',
+  stable: 'pre',
+  mx: 'pre',
+  id: 'prod',
+};
+// 免二次确认即可写入的环境。印尼没有 pre，所以该站点任何写入都要 --allow-non-pre。
+const SITE_UNGUARDED_WRITE_ENVS = {
+  standard: 'fql_pre',
   stable: 'fql_pre',
-  test: 'fql_pre',
-  testing: 'fql_pre',
-  '测试': 'fql_pre',
-  '测试环境': 'fql_pre',
-  prj: 'fql_pre',
-  project: 'fql_pre',
-  '项目': 'fql_pre',
-  '项目环境': 'fql_pre',
+  mx: 'mxyw_pre',
+  id: null,
+};
+const ENV_SUFFIX_ALIASES = {
+  pre: 'pre',
+  '预发': 'pre',
+  '预发布': 'pre',
+  gray: 'gray',
+  '灰度': 'gray',
+  oa: 'oa',
+  prod: 'prod',
+  production: 'prod',
+  '生产': 'prod',
+  '线上': 'prod',
 };
 
 class HippoError extends Error {
@@ -109,25 +149,48 @@ function flagEnabled(value) {
   return !['0', 'false', 'no', 'off'].includes(String(value).trim().toLowerCase());
 }
 
-function normalizeEnv(value) {
-  const raw = String(value || 'fql_pre').trim().toLowerCase();
-  return ENV_ALIASES[raw] || raw;
+function normalizeEnv(value, site) {
+  const raw = value === undefined || value === true ? '' : String(value).trim().toLowerCase();
+  const resolvedSite = site || siteOfAlias(raw) || 'standard';
+  const prefix = SITE_ENV_PREFIXES[resolvedSite] || SITE_ENV_PREFIXES.standard;
+  if (!raw) return `${prefix}_${SITE_DEFAULT_SUFFIXES[resolvedSite] || 'pre'}`;
+  // 海外站点以 prod 为主（印尼只有 ynyw_prod），只给国家别名时按线上解析，
+  // 写入保护会强制用户再传 --allow-non-pre；stable 系别名仍按预发解析。
+  if (OVERSEAS_HOST_ALIASES.has(raw)) return `${prefix}_prod`;
+  if (STABLE_HOST_ALIASES.has(raw) || raw === 'stable-hippo') return `${prefix}_pre`;
+  const suffix = ENV_SUFFIX_ALIASES[raw];
+  return suffix ? `${prefix}_${suffix}` : raw;
+}
+
+function siteOfAlias(raw) {
+  if (!raw) return '';
+  if (OVERSEAS_HOST_ALIASES.has(raw)) return OVERSEAS_HOST_ALIASES.get(raw);
+  if (STABLE_HOST_ALIASES.has(raw) || raw === 'stable-hippo') return 'stable';
+  if (STANDARD_HOST_ALIASES.has(raw)) return 'standard';
+  return '';
 }
 
 function normalizeSite(value) {
   const raw = String(value || '').trim().toLowerCase();
   if (!raw) return '';
-  if (STABLE_HOST_ALIASES.has(raw) || raw === 'stable-hippo') return 'stable';
-  if (['standard', 'online', 'prod', '生产', '线上', 'hippo'].includes(raw)) return 'standard';
-  fail('HIPPO_SITE_INVALID', '不支持的 --hippo-site；只能传 stable 或 standard', { hippoSite: value });
+  const site = siteOfAlias(raw);
+  if (site) return site;
+  fail('HIPPO_SITE_INVALID', '不支持的 --hippo-site；只能传 standard、stable、mx 或 id', { hippoSite: value });
+}
+
+function resolveSite(requestedEnv, hippoSite) {
+  const explicit = normalizeSite(hippoSite);
+  if (explicit) return explicit;
+  const raw = requestedEnv === undefined || requestedEnv === true ? '' : String(requestedEnv).trim().toLowerCase();
+  const aliasSite = siteOfAlias(raw);
+  if (aliasSite) return aliasSite;
+  const prefix = raw.includes('_') ? raw.slice(0, raw.indexOf('_')) : '';
+  return ENV_PREFIX_SITES[prefix] || 'standard';
 }
 
 function resolveBaseUrl(env, requestedEnv, hippoSite) {
-  const site = normalizeSite(hippoSite);
-  if (site === 'stable') return STABLE_BASE_URL;
-  if (site === 'standard') return STANDARD_BASE_URL;
-  const raw = String(requestedEnv || '').trim().toLowerCase();
-  return STABLE_HOST_ALIASES.has(raw) ? STABLE_BASE_URL : STANDARD_BASE_URL;
+  const requested = requestedEnv === undefined || requestedEnv === true || requestedEnv === '' ? env : requestedEnv;
+  return SITE_BASE_URLS[resolveSite(requested, hippoSite)];
 }
 
 function readUtf8File(filePath, label, allowEmpty = true) {
@@ -460,8 +523,9 @@ function planChange(target, summarized, desired, expectedToken) {
 }
 
 function resolveRuntime(args, command) {
-  const env = normalizeEnv(args.env);
-  const baseUrl = resolveBaseUrl(env, args.env, args['hippo-site']);
+  const site = resolveSite(args.env, args['hippo-site']);
+  const env = normalizeEnv(args.env, site);
+  const baseUrl = SITE_BASE_URLS[site];
   const target = command === 'doctor' ? null : {
     appId: resolveAppId(args),
     env,
@@ -471,13 +535,14 @@ function resolveRuntime(args, command) {
     key: String(args.key || '').trim(),
   };
   if (target) assert(target.key, 'KEY_REQUIRED', `${command} 必须传 --key`);
-  if (command === 'upsert' && env !== 'fql_pre') {
+  if (command === 'upsert' && env !== SITE_UNGUARDED_WRITE_ENVS[site]) {
     assert(args['allow-non-pre'], 'NON_PRE_WRITE_REJECTED',
       `写入 ${env} 必须由用户明确指定环境并传 --allow-non-pre`);
   }
   const toolDir = path.resolve(expandHome(args['tool-dir'] || DEFAULT_TOOL_DIR));
   return {
     env,
+    site,
     baseUrl,
     dashboardUrl: `${baseUrl}/#/app/dashboard`,
     expectedHost: new URL(baseUrl).hostname,
@@ -879,7 +944,13 @@ function helpText() {
   hippo_draft_config.js self-test
 
 Defaults: --env=fql_pre --cluster=default --namespace=application
+Sites: --hippo-site=standard|stable|mx|id
+  standard http://hippo.oa.fenqile.com, stable http://stable-hippo.oa.fenqile.com,
+  mx https://hippo.oa.wowcredito.com, id https://hippo.oa.kredito.id
 Stable aliases: stable/test/testing/prj/project/测试/项目/项目环境 -> env=fql_pre and stable Hippo host
+Overseas: env prefixes are per site, mx -> mxyw_pre/mxyw_prod, id -> ynyw_prod (id has no pre env,
+  so its default env is ynyw_prod and every id write needs --allow-non-pre).
+  --env=prod --hippo-site=mx resolves to mxyw_prod; a full env such as mxyw_pre routes to its site by itself.
 Use --hippo-site=stable with explicit envs such as pdwl_pre when navtree shows a stable env prefix.
 Safety: upsert saves a draft by default. Publishing requires --publish, --publish-authorization=explicit,
 and the current plan token via --expected-current-token. Publish selects only the target key.
@@ -897,6 +968,25 @@ function runSelfTest() {
   assert(resolveBaseUrl('pdwl_pre', 'pdwl_pre', 'stable') === STABLE_BASE_URL, 'SELF_TEST_FAILED', '显式 stable 站点映射失败');
   assert(resolveBaseUrl('fql_pre', 'pre') === STANDARD_BASE_URL, 'SELF_TEST_FAILED', '预发标准域名映射失败');
   assert(resolveBaseUrl('fql_prod', 'prod') === STANDARD_BASE_URL, 'SELF_TEST_FAILED', '标准域名映射失败');
+  assert(normalizeEnv('prod', 'mx') === 'mxyw_prod', 'SELF_TEST_FAILED', '墨西哥线上环境映射失败');
+  assert(normalizeEnv('pre', 'mx') === 'mxyw_pre', 'SELF_TEST_FAILED', '墨西哥预发环境映射失败');
+  assert(normalizeEnv('prod', 'id') === 'ynyw_prod', 'SELF_TEST_FAILED', '印尼线上环境映射失败');
+  assert(normalizeEnv('mx') === 'mxyw_prod', 'SELF_TEST_FAILED', '墨西哥别名默认线上失败');
+  assert(normalizeEnv('印尼') === 'ynyw_prod', 'SELF_TEST_FAILED', '印尼别名默认线上失败');
+  assert(normalizeEnv('mxyw_pre') === 'mxyw_pre', 'SELF_TEST_FAILED', '完整海外 env 应原样保留');
+  assert(normalizeEnv(undefined, 'mx') === 'mxyw_pre', 'SELF_TEST_FAILED', '墨西哥缺省环境应为 mxyw_pre');
+  assert(normalizeEnv(undefined, 'id') === 'ynyw_prod', 'SELF_TEST_FAILED', '印尼缺省环境应为 ynyw_prod');
+  assert(SITE_UNGUARDED_WRITE_ENVS.id === null, 'SELF_TEST_FAILED', '印尼不应存在免保护写入环境');
+  assert(resolveSite('墨西哥') === 'mx' && resolveSite('kredito') === 'id',
+    'SELF_TEST_FAILED', '海外站点别名解析失败');
+  assert(resolveSite('mxyw_prod') === 'mx' && resolveSite('ynyw_prod') === 'id',
+    'SELF_TEST_FAILED', '海外 env 前缀路由失败');
+  assert(resolveSite('fql_prod') === 'standard' && resolveSite('pdwl_pre') === 'standard',
+    'SELF_TEST_FAILED', '国内 env 前缀路由失败');
+  assert(resolveBaseUrl('mxyw_prod', 'mxyw_prod') === SITE_BASE_URLS.mx,
+    'SELF_TEST_FAILED', '墨西哥域名映射失败');
+  assert(resolveBaseUrl('ynyw_prod', undefined, 'id') === SITE_BASE_URLS.id,
+    'SELF_TEST_FAILED', '印尼域名映射失败');
   const target = { appId: 'demo', env: 'fql_pre', cluster: 'default', namespaceName: 'application', key: 'target' };
   const items = [{ id: 1, key: 'same', value: '1' }, { id: 2, key: 'target', value: 'draft' }];
   const activeRows = [{ id: 9, releaseKey: 'r1', configurations: JSON.stringify({ same: '1', target: 'active' }) }];
@@ -953,7 +1043,8 @@ async function runBrowserCommand(command, args) {
         profile: runtime.profile,
         networkPolicy: browser.networkPolicy,
         ...browser.services,
-        defaultEnv: 'fql_pre',
+        defaultEnv: runtime.env,
+        site: runtime.site,
         baseUrl: runtime.baseUrl,
         publishAttempted: false,
       };
@@ -1148,5 +1239,6 @@ module.exports = {
   releaseSelectedItem,
   resolveAppId,
   resolveBaseUrl,
+  resolveSite,
   summarizeState,
 };

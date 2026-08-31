@@ -6,6 +6,7 @@ const {
   PROXY_ENV_KEYS,
   buildBrowserEnv,
   chromiumArgsFor,
+  isInternalUrl,
   redactUrl,
   validateWebShellUrl,
 } = require('../scripts/browser_network');
@@ -26,6 +27,23 @@ test('internal browser environment removes proxy variables without mutating call
   assert.match(result.env.NO_PROXY, /\.oa\.fenqile\.com/);
   assert.match(result.env.NO_PROXY, /example\.test/);
   assert.equal(original.HTTP_PROXY, 'http://127.0.0.1:18181');
+});
+
+test('every Hippo site counts as internal, including the overseas country domains', () => {
+  for (const url of [
+    'http://hippo.oa.fenqile.com/',
+    'http://stable-hippo.oa.fenqile.com/',
+    'https://hippo.oa.wowcredito.com/#/app/dashboard',
+    'https://hippo.oa.kredito.id/#/app/dashboard',
+  ]) {
+    assert.equal(isInternalUrl(url), true, `${url} must stay on the direct path`);
+  }
+  assert.equal(isInternalUrl('https://other.oa.kredito.id/'), false);
+  assert.equal(isInternalUrl('https://example.com/'), false);
+
+  const noProxy = buildBrowserEnv('https://hippo.oa.kredito.id/', {}).env.NO_PROXY;
+  assert.match(noProxy, /hippo\.oa\.wowcredito\.com/);
+  assert.match(noProxy, /hippo\.oa\.kredito\.id/);
 });
 
 test('external hosts are direct too, with every proxy variable dropped', () => {
