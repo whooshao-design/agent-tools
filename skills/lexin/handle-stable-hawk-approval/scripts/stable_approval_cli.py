@@ -2,18 +2,22 @@
 """Safe helper for stable/test Hawk approval callbacks.
 
 The script intentionally contains no credentials and no default provider
-addresses. Read credentials from environment variables and pass target
-providers explicitly, or via a local target file.
+addresses. Credentials come from environment variables, or from the local
+get-browser-session snapshot; target providers are passed explicitly or via a
+local target file.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import dataclasses
 import getpass
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -28,7 +32,12 @@ except ImportError as exc:  # pragma: no cover - import failure is environment-s
 DEFAULT_LXCLOUD_URL = "https://stable-lxcloud.oa.fenqile.com/v1/mysql/sql-query/exec-query/"
 DEFAULT_BIANQUE_URL = "https://stable-bianque.lexinfintech.com/serviceEmulator/request"
 DEFAULT_TARGET_FILE = "~/.config/hawk-stable-approval/targets.json"
+DEFAULT_SESSION_FILE = "~/.cache/agent-tools-session/stable-lxcloud.json"
+BROWSER_SESSION_SCRIPT = "/home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js"
+LXCLOUD_ORIGIN = "https://stable-lxcloud.oa.fenqile.com"
+BIANQUE_COOKIE_DOMAIN = "stable-bianque.lexinfintech.com"
 LOGIC_ID_RE = re.compile(r"^[A-Za-z0-9_@-]+$")
+NUMERIC_ID_RE = re.compile(r"^\d+$")
 
 
 class UserError(Exception):
@@ -51,6 +60,13 @@ class CallbackRoute:
     service: str
     target_key: str
     comment: str
+
+
+@dataclasses.dataclass(frozen=True)
+class Credentials:
+    token: str = ""
+    cookie: str = ""
+    oa_user: str = ""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -213,6 +229,21 @@ def split_logic_ids(values: Optional[Sequence[str]]) -> List[str]:
     return list(dict.fromkeys(logic_ids))
 
 
+def split_numeric_ids(values: Optional[Sequence[str]], label: str) -> List[str]:
+    if not values:
+        return []
+    ids: List[str] = []
+    for value in values:
+        for item in value.split(","):
+            item = item.strip()
+            if not item:
+                continue
+            if not NUMERIC_ID_RE.match(item):
+                raise UserError(f"Invalid {label} {item!r}; only digits are allowed.")
+            ids.append(item)
+    return list(dict.fromkeys(ids))
+
+
 def resolve_scope(scope: str) -> str:
     return SCOPE_ALIASES.get(scope, scope)
 
@@ -242,12 +273,25 @@ def build_where_clause(alias: str, pending: bool, logic_ids: Sequence[str], sinc
     return " and ".join(clauses)
 
 
-def build_sql(config: SourceConfig, pending: bool, logic_ids: Sequence[str], since_today: bool, limit: int) -> str:
+def build_sql(
+    config: SourceConfig,
+    pending: bool,
+    logic_ids: Sequence[str],
+    since_today: bool,
+    limit: int,
+    package_ids: Sequence[str] = (),
+    plan_ids: Sequence[str] = (),
+) -> str:
     if config.source == "hawk":
         namespace = table_namespace(config.table)
         publish_plan_table = f"{namespace}.t_edition_publish_plan" if namespace else "t_edition_publish_plan"
         package_table = f"{namespace}.t_package" if namespace else "t_package"
         where_clause = build_where_clause("tha", pending, logic_ids, since_today)
+        # lxcloud truncates at 100 rows, so business filters have to run in SQL, not after the fetch.
+        if package_ids:
+            where_clause += f" and tepp.Fpackage_id in ({','.join(package_ids)})"
+        if plan_ids:
+            where_clause += f" and tha.Fplan_id in ({','.join(plan_ids)})"
         sql = (
             "select tha.*, "
             "tepp.Fpackage_id as Fplan_package_id, "
@@ -261,6 +305,8 @@ def build_sql(config: SourceConfig, pending: bool, logic_ids: Sequence[str], sin
             f"where {where_clause} order by tha.Fmodify_time desc"
         )
     else:
+        if package_ids or plan_ids:
+            raise UserError("--package-id/--plan-id apply to --source hawk only; t_approval has no publish plan join.")
         where_clause = build_where_clause("", pending, logic_ids, since_today)
         sql = f"select * from {config.table} where {where_clause} order by Fmodify_time desc"
     if limit > 0:
@@ -268,10 +314,117 @@ def build_sql(config: SourceConfig, pending: bool, logic_ids: Sequence[str], sin
     return sql
 
 
-def lxcloud_headers() -> Dict[str, str]:
-    token = os.environ.get("LXCLOUD_BEARER_TOKEN", "").strip()
+_CREDENTIALS: Optional[Credentials] = None
+
+
+def jwt_claims(token: str) -> Tuple[str, Optional[int]]:
+    """Read sub/exp from a JWT without verifying it; returns ("", None) when unreadable."""
+    parts = token.split()[-1].split(".") if token else []
+    if len(parts) != 3:
+        return "", None
+    payload = parts[1] + "=" * (-len(parts[1]) % 4)
+    try:
+        claims = json.loads(base64.urlsafe_b64decode(payload))
+    except (ValueError, binascii.Error):
+        return "", None
+    if not isinstance(claims, Mapping):
+        return "", None
+    exp = claims.get("exp")
+    return str(claims.get("sub") or ""), int(exp) if isinstance(exp, (int, float)) else None
+
+
+def token_is_usable(token: str) -> bool:
     if not token:
-        raise UserError("Missing LXCLOUD_BEARER_TOKEN. Export it locally; do not paste it into chat or commit it.")
+        return False
+    _, exp = jwt_claims(token)
+    if exp is None:
+        return True  # opaque tokens cannot be checked locally; let the request decide
+    return exp - 120 > time.time()
+
+
+def read_session_snapshot(path: Path) -> Credentials:
+    """Read the stable lxcloud token and stable bianque cookie from a get-browser-session snapshot."""
+    if not path.is_file():
+        return Credentials()
+    try:
+        snapshot = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return Credentials()
+    token = ""
+    for origin in snapshot.get("origins", []):
+        if str(origin.get("origin", "")).startswith(LXCLOUD_ORIGIN):
+            for item in origin.get("localStorage", []):
+                if item.get("name") == "token" and item.get("value"):
+                    token = str(item["value"])
+    cookies: Dict[str, str] = {}
+    for cookie in snapshot.get("cookies", []):
+        if cookie.get("domain") == BIANQUE_COOKIE_DOMAIN and cookie.get("name"):
+            cookies[str(cookie["name"])] = str(cookie.get("value", ""))
+    subject, _ = jwt_claims(token)
+    return Credentials(token=token, cookie="; ".join(f"{k}={v}" for k, v in cookies.items()), oa_user=subject)
+
+
+def refresh_session_snapshot(path: Path, timeout: int) -> None:
+    """Refresh the snapshot via get-browser-session; secrets land in the 0600 file, never in output."""
+    script = Path(BROWSER_SESSION_SCRIPT)
+    if not script.is_file():
+        raise UserError(f"Browser session script not found: {script}. Export LXCLOUD_BEARER_TOKEN and BIANQUE_COOKIE instead.")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    print(f"Refreshing browser session snapshot for {LXCLOUD_ORIGIN} ...", file=sys.stderr)
+    completed = subprocess.run(
+        ["node", str(script), f"--export-session={path}", f"--url={LXCLOUD_ORIGIN}/", "--success-text=none"],
+        capture_output=True,
+        text=True,
+        timeout=max(timeout, 180),
+    )
+    if completed.returncode != 0:
+        raise UserError(
+            "Browser session export failed. Run get-browser-session with --ensure against "
+            f"{LXCLOUD_ORIGIN}/ and retry."
+        )
+
+
+def resolve_credentials(args: argparse.Namespace) -> Credentials:
+    """Environment first, then the local browser-session snapshot, refreshing it only when stale."""
+    global _CREDENTIALS
+    if _CREDENTIALS is not None:
+        return _CREDENTIALS
+    token = os.environ.get("LXCLOUD_BEARER_TOKEN", "").strip()
+    cookie = os.environ.get("BIANQUE_COOKIE", "").strip()
+    subject, _ = jwt_claims(token)
+    if not (token and cookie) and not args.no_browser_session:
+        path = Path(args.session_file).expanduser()
+        snapshot = read_session_snapshot(path)
+        if not token_is_usable(snapshot.token) or not snapshot.cookie:
+            refresh_session_snapshot(path, args.timeout)
+            snapshot = read_session_snapshot(path)
+        token = token or snapshot.token
+        cookie = cookie or snapshot.cookie
+        subject = subject or snapshot.oa_user
+    _CREDENTIALS = Credentials(token=token, cookie=cookie, oa_user=subject)
+    return _CREDENTIALS
+
+
+def resolve_user_name(args: argparse.Namespace) -> str:
+    """OA account decides instance permission, so prefer the token subject over the local user."""
+    return args.user_name or resolve_credentials(args).oa_user or getpass.getuser()
+
+
+def offline_token_available(args: argparse.Namespace) -> bool:
+    if os.environ.get("LXCLOUD_BEARER_TOKEN", "").strip():
+        return True
+    if args.no_browser_session:
+        return False
+    return bool(read_session_snapshot(Path(args.session_file).expanduser()).token)
+
+
+def lxcloud_headers(args: argparse.Namespace) -> Dict[str, str]:
+    token = resolve_credentials(args).token
+    if not token:
+        raise UserError(
+            "No lxcloud credential. Export LXCLOUD_BEARER_TOKEN, or drop --no-browser-session so the "
+            "local browser session can provide it."
+        )
     if not token.lower().startswith("bearer "):
         token = "Bearer " + token
 
@@ -296,10 +449,12 @@ def query_lxcloud(args: argparse.Namespace, config: SourceConfig, pending: bool,
         logic_ids=logic_ids,
         since_today=(not args.all_dates and pending),
         limit=args.limit,
+        package_ids=split_numeric_ids(args.package_id, "package id"),
+        plan_ids=split_numeric_ids(args.plan_id, "plan id"),
     )
     payload = {
         "db_type": config.db_type,
-        "user_name": args.user_name,
+        "user_name": resolve_user_name(args),
         "sql": sql,
         "query_type": args.query_type,
         "query_role": args.query_role,
@@ -309,7 +464,7 @@ def query_lxcloud(args: argparse.Namespace, config: SourceConfig, pending: bool,
     if args.print_sql:
         print(f"[SQL][{config.scope}/{config.source}] {sql}", file=sys.stderr)
 
-    response = requests.post(args.lxcloud_url, headers=lxcloud_headers(), json=payload, timeout=args.timeout)
+    response = requests.post(args.lxcloud_url, headers=lxcloud_headers(args), json=payload, timeout=args.timeout)
     response.raise_for_status()
     body = response.json()
     return rows_from_lxcloud_response(body)
@@ -380,6 +535,12 @@ def collect_records(args: argparse.Namespace, pending: bool = True) -> List[Appr
     if logic_ids:
         wanted = set(logic_ids)
         records = [record for record in records if record.logic_id in wanted]
+    package_ids = set(split_numeric_ids(args.package_id, "package id"))
+    if package_ids:
+        records = [record for record in records if record.package_id in package_ids]
+    plan_ids = set(split_numeric_ids(args.plan_id, "plan id"))
+    if plan_ids:
+        records = [record for record in records if record.plan_id in plan_ids]
     return records
 
 
@@ -441,16 +602,36 @@ def load_targets(args: argparse.Namespace) -> Dict[str, Target]:
     return targets
 
 
-def bianque_headers() -> Dict[str, str]:
-    cookie = os.environ.get("BIANQUE_COOKIE", "").strip()
+def bianque_headers(args: argparse.Namespace) -> Dict[str, str]:
+    cookie = resolve_credentials(args).cookie
     if not cookie:
-        raise UserError("Missing BIANQUE_COOKIE. Export it locally; do not paste it into chat or commit it.")
+        raise UserError(
+            "No bianque cookie. Export BIANQUE_COOKIE, or drop --no-browser-session so the local "
+            "browser session can provide it."
+        )
     return {
         "accept": "application/json, text/plain, */*",
         "content-type": "application/x-www-form-urlencoded",
         "cookie": cookie,
         "origin": "https://stable-bianque.lexinfintech.com",
     }
+
+
+def callback_outcome(response_text: str) -> Tuple[bool, str]:
+    """Bianque answers HTTP 200 even when the Dubbo call fails, so the body decides."""
+    try:
+        body = json.loads(response_text)
+    except ValueError:
+        return False, "unparsable response"
+    data = body.get("data") if isinstance(body, Mapping) else None
+    if not isinstance(data, Mapping):
+        return False, "no data in response"
+    if data.get("errcode") not in (0, "0"):
+        return False, f"errcode={data.get('errcode')}"
+    result = data.get("result")
+    if isinstance(result, Mapping) and result.get("result") not in (0, "0", None):
+        return False, f"result={result.get('result')} {result.get('res_info', '')}".strip()
+    return True, ""
 
 
 def invoke_callback(args: argparse.Namespace, record: ApprovalRecord, route: CallbackRoute, target: Target) -> Tuple[bool, str]:
@@ -467,9 +648,10 @@ def invoke_callback(args: argparse.Namespace, record: ApprovalRecord, route: Cal
         "comment": route.comment,
         "stringFlag": "false",
     }
-    response = requests.post(args.bianque_url, headers=bianque_headers(), data=data, timeout=args.timeout)
+    response = requests.post(args.bianque_url, headers=bianque_headers(args), data=data, timeout=args.timeout)
     response.raise_for_status()
-    return True, response.text
+    ok, reason = callback_outcome(response.text)
+    return ok, response.text if ok else f"{reason}: {response.text}"
 
 
 def format_record(record: ApprovalRecord, include_route: bool, index: Optional[int] = None) -> Dict[str, str]:
@@ -551,8 +733,11 @@ def validate_approve_safety(args: argparse.Namespace, records: Sequence[Approval
     logic_ids = split_logic_ids(args.logic_id)
     if not records:
         raise UserError("No pending approval records matched the query.")
-    if args.confirm and not logic_ids and not args.select and not args.allow_bulk:
-        raise UserError("Refusing bulk approval without --logic-id. Pass --allow-bulk if this is intentional.")
+    narrowed = bool(logic_ids or args.package_id or args.plan_id)
+    if args.confirm and not narrowed and not args.select and not args.allow_bulk:
+        raise UserError(
+            "Refusing bulk approval without --logic-id/--package-id/--plan-id. Pass --allow-bulk if this is intentional."
+        )
     if args.confirm and len(records) > 1 and not args.allow_bulk:
         raise UserError("Refusing to approve multiple records without --allow-bulk.")
     if args.confirm and len(records) > args.max_approve:
@@ -615,6 +800,11 @@ def command_approve(args: argparse.Namespace) -> int:
 
     print("\nCallback results:")
     print_rows(results, args.output)
+    if any(row["status"] != "sent" for row in results):
+        print(
+            "\nSome callbacks failed. Provider addresses drift after redeploys: re-check the stable "
+            "instance with query-app-instances, then pass --target <scope>.<route_key>=ip:port."
+        )
 
     if not args.skip_verify:
         verify_after_callbacks(args, records)
@@ -622,8 +812,8 @@ def command_approve(args: argparse.Namespace) -> int:
 
 
 def verify_after_callbacks(args: argparse.Namespace, records: Sequence[ApprovalRecord]) -> None:
-    if args.input_json and not os.environ.get("LXCLOUD_BEARER_TOKEN"):
-        print("\nVerification skipped: --input-json was used and LXCLOUD_BEARER_TOKEN is not set.")
+    if args.input_json and not offline_token_available(args):
+        print("\nVerification skipped: --input-json was used and no lxcloud credential is available.")
         return
 
     print("\nVerification:")
@@ -636,8 +826,13 @@ def verify_after_callbacks(args: argparse.Namespace, records: Sequence[ApprovalR
     original_source = args.source
     original_logic_id = args.logic_id
     original_all_dates = args.all_dates
+    original_package_id = args.package_id
+    original_plan_id = args.plan_id
     try:
         args.all_dates = True
+        # Records are already pinned by logic_id here; re-filtering would drop rows whose join is empty.
+        args.package_id = None
+        args.plan_id = None
         for (scope, source), logic_ids in by_source.items():
             args.scope = scope
             args.source = source
@@ -652,6 +847,8 @@ def verify_after_callbacks(args: argparse.Namespace, records: Sequence[ApprovalR
         args.source = original_source
         args.logic_id = original_logic_id
         args.all_dates = original_all_dates
+        args.package_id = original_package_id
+        args.plan_id = original_plan_id
 
     print_rows(verify_rows, args.output)
 
@@ -660,6 +857,8 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--scope", choices=SCOPE_CHOICES, default="domestic", help="approval region; 'overseas' is an alias of 'mexico'")
     parser.add_argument("--source", choices=["hawk", "process", "all"], default="hawk", help="approval source")
     parser.add_argument("--logic-id", action="append", help="logic id to query or approve; repeat or comma-separate")
+    parser.add_argument("--package-id", action="append", help="filter by package id; repeat or comma-separate (hawk source only)")
+    parser.add_argument("--plan-id", action="append", help="filter by publish plan id; repeat or comma-separate (hawk source only)")
     parser.add_argument("--all-dates", action="store_true", help="do not restrict pending queries to today")
     parser.add_argument("--limit", type=int, default=100, help="maximum rows per source query")
     parser.add_argument("--input-json", help="read rows from a saved lxcloud response instead of querying lxcloud")
@@ -668,7 +867,14 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--lxcloud-url", default=DEFAULT_LXCLOUD_URL)
     parser.add_argument("--query-type", default="single")
     parser.add_argument("--query-role", default="masterbackup")
-    parser.add_argument("--user-name", default=os.environ.get("LXCLOUD_USER_NAME", getpass.getuser()))
+    parser.add_argument("--user-name", default=os.environ.get("LXCLOUD_USER_NAME"), help="OA account for lxcloud; defaults to the token subject")
+    parser.add_argument("--session-file", default=DEFAULT_SESSION_FILE, help="get-browser-session snapshot used when credentials are not in the environment")
+    parser.add_argument(
+        "--no-browser-session",
+        action="store_true",
+        default=os.environ.get("LXCLOUD_DISABLE_BROWSER_SESSION") == "1",
+        help="never read or refresh the browser session snapshot; require credentials in the environment",
+    )
     parser.add_argument("--timeout", type=int, default=30)
 
 

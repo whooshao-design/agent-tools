@@ -1,8 +1,8 @@
 ---
 name: handle-stable-hawk-approval
-description: 安全查询和处理 stable/测试环境米霍克与流程引擎审批。Use when 用户要求查看 stable 待审批、自动通过测试审批、处理米霍克 t_hawk_approval、处理流程引擎 t_approval、按业务字段或序号选择审批记录并调用回调、优化 /home/joney/tools/hawk 下旧审批脚本流程；只适用于 stable/测试环境，线上/生产审批不使用。
+description: 安全查询和处理 stable/测试环境米霍克与流程引擎审批。Use when 用户要求查看 stable 待审批、审批某个乐包的测试环境发布、自动通过测试审批、处理米霍克 t_hawk_approval、处理流程引擎 t_approval、按乐包 ID/发布计划 ID/序号选择审批记录并调用回调、处理墨西哥或印尼测试环境审批、优化 /home/joney/tools/hawk 下旧审批脚本流程；只适用于 stable/测试环境，线上/生产审批不使用。
 metadata:
-  version: 1.1.1
+  version: 1.2.0
 ---
 
 # handle-stable-hawk-approval
@@ -19,9 +19,24 @@ MCP 优先、脚本兜底。只读查询优先复用 `query-mysql-data` / `mysql
 - 默认只查询或 dry-run。没有用户明确要求执行，且没有 `approve --confirm`，不要发送审批回调。
 - 确认执行时优先使用 `--select` 让用户按序号选择，或使用 `--logic-id` 单条处理；多条处理必须显式使用 `--allow-bulk`。
 - 不在 skill、脚本、命令示例或回复中写入 Bearer token、Cookie、JSESSIONID、真实 IP 清单。
-- 凭据只从本地环境变量读取：`LXCLOUD_BEARER_TOKEN`、可选 `LXCLOUD_COOKIE`、`BIANQUE_COOKIE`。
+- 凭据由脚本在进程内解析（env → 本地浏览器会话快照），不打印明文、不写入回复；细节见下一节。
 - 回调目标 IP:Port 必须由用户当次提供，或来自本地不入库配置 `~/.config/hawk-stable-approval/targets.json`。
 - 执行后必须复查审批状态；如果无法复查，最终回复要明确说明。
+
+## 凭据获取
+
+脚本自己解析凭据，正常不需要手工导出：
+
+1. 环境变量 `LXCLOUD_BEARER_TOKEN`、`BIANQUE_COOKIE`（可选 `LXCLOUD_COOKIE`、`LXCLOUD_MID`）。
+2. 缺失时读本地快照 `~/.cache/agent-tools-session/stable-lxcloud.json`（0600，由 `get-browser-session` 生成）。
+3. 快照不存在、或其中 token 已按 JWT `exp` 判定过期时，才对 `https://stable-lxcloud.oa.fenqile.com/` 调一次 `--export-session` 刷新。
+
+两个容易踩的点：
+
+- **stable 与线上是两个 origin**：`~/.cache/agent-tools-session/main.json` 里只有 `lxcloud.oa.fenqile.com` 的 token，对 stable 无效，必须对 stable-lxcloud 单独 export。
+- **Cookie 是 profile 级的**：同一次 export 会顺带带出 `stable-bianque.lexinfintech.com` 的 `JSESSIONID`，回调不用再单独取。
+
+`user_name` 默认取 token 里的 `sub`（OA 账号）而不是本机用户名，避免本机账号与 OA 账号不一致时被误判无实例权限；`--user-name` 或 `LXCLOUD_USER_NAME` 可覆盖。`--no-browser-session`（或 `LXCLOUD_DISABLE_BROWSER_SESSION=1`）强制只用环境变量。
 
 ## 审批来源
 
@@ -37,6 +52,8 @@ MCP 优先、脚本兜底。只读查询优先复用 `query-mysql-data` / `mysql
 海外每个地区是独立应用、独立库、独立实例，不能混用。`--scope overseas` 保留为 `mexico` 的别名。
 
 查询待处理记录时固定筛选 `Fapproval_state = 10`。默认只查当天 `Fmodify_time >= CURDATE()`；需要处理历史待审批时才加 `--all-dates`。
+
+lxcloud 单次查询最多返回 100 行且是**静默截断**，所以按乐包或计划筛选必须用 `--package-id` / `--plan-id`（SQL 端下推到 `t_edition_publish_plan` 上），不要拉全量回来再肉眼找。这两个参数只对 `--source hawk` 有效，`t_approval` 没有发布计划可 join。
 
 列表默认展示业务字段：`biz`、`package_id`、`package_name`、`plan_id`、`applicant`、`approval_operator`、`publish_type`、`publish_mode`、`summary`、回调 `route/target`。用户无需提前知道 `logic_id`；它只是回调接口需要的唯一标识。
 
@@ -56,12 +73,12 @@ MCP 优先、脚本兜底。只读查询优先复用 `query-mysql-data` / `mysql
 
 ## 推荐流程
 
-1. 明确范围：`domestic`、`mexico` 还是 `indonesia`，`hawk`、`process` 还是 `all`，是否指定 `logic_id`。用户说“海外”而没指明国家时要问清楚，不要默认墨西哥。
-2. 查询待审批并 dry-run：
+1. 明确范围：`domestic`、`mexico` 还是 `indonesia`，`hawk`、`process` 还是 `all`。用户说“海外”而没指明国家时要问清楚，不要默认墨西哥。
+2. 查询待审批并 dry-run。用户给的通常是乐包 ID，直接用 `--package-id` 定位，不要让用户提供 `logic_id`：
 
 ```bash
 python3 /home/joney/projects/ai/agent-tools/skills/lexin/handle-stable-hawk-approval/scripts/stable_approval_cli.py \
-  list --scope domestic --source hawk --print-sql
+  list --scope mexico --source hawk --package-id <package_id> --print-sql
 ```
 
 3. 需要执行时，优先用交互选择，让用户按 `no` 列选择记录：
@@ -74,8 +91,10 @@ python3 /home/joney/projects/ai/agent-tools/skills/lexin/handle-stable-hawk-appr
   --confirm
 ```
 
-4. 已知 `logic_id` 时也可以直接单条执行；如果确实要批量处理，必须显式加 `--allow-bulk`，并保留默认 `--max-approve 20` 或设置更小上限。
-5. 执行后检查脚本 `Verification` 区域，确认状态不再是 `10`；失败项逐条说明原因。
+4. `--logic-id`、`--package-id`、`--plan-id` 都算显式收窄，可直接单条执行；命中多条时仍必须显式加 `--allow-bulk`，并保留默认 `--max-approve 20` 或设置更小上限。
+5. 执行后检查脚本 `Verification` 区域，确认状态不再是 `10`；失败项逐条说明原因。回调失败或 `errcode != 0` 时先怀疑目标实例地址漂移，用 `query-app-instances` 复核后用 `--target` 覆盖。
+
+Bianque 即使 Dubbo 调用失败也返回 HTTP 200，脚本按响应体里的 `errcode` 和 `result.result` 判定成功，不要只看 HTTP 状态码。
 
 ## 本地目标配置
 
@@ -124,6 +143,13 @@ python3 /home/joney/projects/ai/agent-tools/skills/lexin/handle-stable-hawk-appr
   approve --scope domestic --source hawk --logic-id <logic_id>
 ```
 
+按乐包 ID 定位单条，默认仍是 dry-run：
+
+```bash
+python3 /home/joney/projects/ai/agent-tools/skills/lexin/handle-stable-hawk-approval/scripts/stable_approval_cli.py \
+  approve --scope mexico --source hawk --package-id <package_id>
+```
+
 按业务字段列表选择，默认仍是 dry-run：
 
 ```bash
@@ -158,3 +184,7 @@ python3 /home/joney/projects/ai/agent-tools/skills/lexin/handle-stable-hawk-appr
 2. `执行情况`：说明是 dry-run 还是已确认执行；已执行时列成功/失败。
 3. `复查结果`：给出审批状态是否已离开 `10`。
 4. `使用命令`：只展示脱敏命令，不包含 Cookie、token 或真实 IP。
+
+## 参考
+
+`/home/joney/tools/hawk/approval.py`、`approval-overseas.py` 是本 skill 的前身。它们的行为对照和已知缺陷记录在 `references/legacy-approval-scripts.md`；再遇到有人翻出旧脚本时先看那份说明，不要直接跑。
