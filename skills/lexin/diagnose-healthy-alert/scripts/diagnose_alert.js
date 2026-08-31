@@ -24,6 +24,10 @@ const DEFAULT_BASELINE_STEP = '300s';
 // log-query time window has to be shifted before it is handed to a log tool.
 const LOG_TZ_OFFSET_HOURS = 8;
 const WEBSHELL_PROFILE = '/home/joney/.cache/lexiao-browser-profile';
+// Every browser launch costs 30-40s. The token is already stored in the browser
+// profile, so caching it in a 0600 file next to it adds no new exposure and
+// removes that cost from every follow-up query in the same investigation.
+const TOKEN_CACHE_FILE = path.join(os.homedir(), '.cache', 'healthy-alert-token.json');
 
 // PromQL builtins that must not be mistaken for the alert metric name.
 const PROMQL_FUNCTIONS = new Set([
@@ -82,6 +86,7 @@ Options:
   --app              App name, only used with --code-hint-only
   --format           table|json, default table
   --token            Bearer token. Also supports env HEALTHY_METRIC_TOKEN
+  --no-token-cache   Do not read or write ~/.cache/healthy-alert-token.json
   --profile          Browser profile with Healthy login state
   --tool-dir         Local Playwright tool dir, defaults to ~/tools/lexiao-browser
 `);
@@ -200,10 +205,43 @@ async function extractAuthFromProfile(args, baseUrl, alertId) {
   }
 }
 
+function readTokenCache(baseUrl, args) {
+  if (args['no-token-cache']) return null;
+  try {
+    const entry = JSON.parse(fs.readFileSync(TOKEN_CACHE_FILE, 'utf8'))[baseUrl];
+    if (entry && entry.token) return { token: entry.token, ticket: entry.ticket || '', fromCache: true };
+  } catch (error) {
+    // no usable cache yet
+  }
+  return null;
+}
+
+function writeTokenCache(baseUrl, auth, args) {
+  if (args['no-token-cache']) return;
+  let all = {};
+  try {
+    all = JSON.parse(fs.readFileSync(TOKEN_CACHE_FILE, 'utf8'));
+  } catch (error) {
+    all = {};
+  }
+  all[baseUrl] = { token: auth.token, ticket: auth.ticket || '', cachedAt: Math.floor(Date.now() / 1000) };
+  try {
+    fs.mkdirSync(path.dirname(TOKEN_CACHE_FILE), { recursive: true });
+    fs.writeFileSync(TOKEN_CACHE_FILE, JSON.stringify(all), { mode: 0o600 });
+    fs.chmodSync(TOKEN_CACHE_FILE, 0o600);
+  } catch (error) {
+    // caching is best effort, never fail the query because of it
+  }
+}
+
 async function resolveAuth(args, baseUrl, alertId) {
   const token = args.token || process.env.HEALTHY_METRIC_TOKEN;
   if (token) return { token, ticket: args.ticket || '' };
-  return extractAuthFromProfile(args, baseUrl, alertId);
+  const cached = readTokenCache(baseUrl, args);
+  if (cached) return cached;
+  const fresh = await extractAuthFromProfile(args, baseUrl, alertId);
+  writeTokenCache(baseUrl, fresh, args);
+  return fresh;
 }
 
 function authHeaders(auth, args) {
@@ -474,12 +512,14 @@ function buildAccessHint(event, args) {
       'node /home/joney/projects/ai/agent-tools/skills/lexin/java-server-diagnostics/scripts/container_log_check.js \\',
       `  --app=${app} --env=${event.env || 'prod'} --ip=${ip} \\`,
       `  --profile=${WEBSHELL_PROFILE} \\`,
-      '  --log-mode=forensics --keyword="<from L3>" --files=warn.log \\',
-      `  --from="${from}" --to="${to}" --context=1`,
+      '  --log-mode=forensics --keyword="<from L3>" \\',
+      '  --files=warn.log,info.log --include-rotated --context=2 \\',
+      `  --from="${from}" --to="${to}"`,
     ]
     : [
       `# VM/KVM: java_app_diag or bastion to ${ip}`,
-      `grep "<from L3>" /home/product/logs/${app}_logs/warn.log`,
+      `grep -B2 -A2 "<from L3>" /home/product/logs/${app}_logs/warn.log`,
+      `# also grep info_YYYYMMDDHH.0.log for the same traceId: storage keys are logged at INFO`,
       `# window ${from} ~ ${to}`,
     ];
   return { origins: tags.origins || '-', container, ip, app, from, to, traceIds, command };
@@ -495,7 +535,9 @@ function renderAccessHint(hint) {
   ];
   if (hint.traceIds.length) lines.push(`traceId         ${hint.traceIds.join(', ')}`);
   lines.push('  ! --files must match the log level at the report site (log.warn -> warn.log, not error.log)');
-  lines.push('  ! keep --context>=1: the root cause is usually the ERROR line right before the match');
+  lines.push('  ! keep --context>=2: the root cause is usually the ERROR line right before the match');
+  lines.push('  ! info.log rotates hourly -> --include-rotated, or matchedFiles comes back empty');
+  lines.push('  ! matchedFiles=[] means no file matched (rotation/name), not \"keyword absent\"');
   lines.push('command');
   for (const item of hint.command) lines.push(`  ${item}`);
   return lines.join('\n');
@@ -637,9 +679,19 @@ async function main() {
 
   const baseUrl = resolveBaseUrl(args);
   const alertId = resolveAlertId(args.alert);
-  const auth = await resolveAuth(args, baseUrl, alertId);
+  let auth = await resolveAuth(args, baseUrl, alertId);
 
-  const detail = await requestJson(`${baseUrl}/api/n9e/alert-show-detail/${alertId}`, auth, args);
+  const detailUrl = `${baseUrl}/api/n9e/alert-show-detail/${alertId}`;
+  let detail;
+  try {
+    detail = await requestJson(detailUrl, auth, args);
+  } catch (error) {
+    if (!auth.fromCache) throw error;
+    // A cached token can be expired or revoked; fall back to the browser once.
+    auth = await extractAuthFromProfile(args, baseUrl, alertId);
+    writeTokenCache(baseUrl, auth, args);
+    detail = await requestJson(detailUrl, auth, args);
+  }
   const list = (detail.dat && detail.dat.list) || [];
   if (!list.length) throw new Error(`Alert ${alertId} returned an empty event list`);
 

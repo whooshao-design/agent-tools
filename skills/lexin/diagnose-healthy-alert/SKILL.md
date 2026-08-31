@@ -84,6 +84,9 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/diagnose-healthy-alert/scr
   此时 `firing_points` 只能读作"至少 N 次"。
 - L3 代码线索默认输出，`--no-code-hint` 关闭；`--code-hint-only --metric <m> --app <a>` 纯本地推导，不联网。
 - `--code-root`：扫描候选仓库的根目录，默认 `/home/joney/projects`。
+- token 缓存在 `~/.cache/healthy-alert-token.json`（权限 0600），避免同一次排查里
+  每条命令都重起浏览器（每次 30~40 秒）；缓存失效会自动回退浏览器刷新并重写。
+  `--no-token-cache` 关闭，删除该文件即清空。
 - L5 访问路径默认输出：脚本按 tags `origins` 判断容器还是 VM，直接给出可执行的日志命令，
   并把 UTC 告警时间换算成服务器本地时间（UTC+8）写进 `--from/--to`；`--log-pad` 调补白，默认 `10m`。
 - `--format json`：结构化输出，便于二次处理。
@@ -111,9 +114,37 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/diagnose-healthy-alert/scr
 - **代码基线**：结论里必须声明仓库路径、分支和末次提交日期，并提示线上版本可能与本地不同。
   本地找不到仓库时，如实报"代码基线缺失"并给出 gitlab 地址，**不要凭指标名猜语义**。
 
+## L5 日志取证
+
+只读检索，直接执行，不征求确认，不预设实例数或时间窗上限。优先 `java_app_diag` MCP；
+不可用时按 `java-server-diagnostics` 的兜底规则改用 `bastion` MCP（命令须明确只读）。
+容器（tags `origins=k8s`）用 `container_log_check.js --ip=<pod_ip>`，堡垒机 `go` 跳不进 Pod IP。
+
+四条影响结论正确性的规则：
+
+- **一次拿全**：单次取证约 60~90 秒（起浏览器 + WebShell + gotty），第一次就带
+  `--files=warn.log,info.log --include-rotated --context=2`，不要先只查 warn.log 再回头补 info.log。
+  脚本生成的命令已是这个口径。
+- **根因在前一行**：埋点行往往只说"结果为空"，同 traceId 的上一条 ERROR 才是根因，所以 `--context>=2`。
+  埋点用 `log.warn` 时日志在 `warn.log` 不在 `error.log`，别沿用"只看 error.log"的快检口径。
+- **区分两种空结果**：`matchedFiles: []` 是没有文件被扫到（轮转、文件名或 `--files` 写错），
+  `matchedFiles` 有值而 `matchedEvents: 0` 才是文件里确实没这个关键词。
+  把前者当后者，会误判成"代码没打这条日志"而去改关键词，白跑几轮。
+- **多实例交叉验证**：L2 基线窗口报出多个实例时至少查两个。业务主键相同说明是一条固定坏数据
+  被反复重试，主键不同才是系统性问题——这一步直接决定结论和修复方向。
+
+日志轮转规律、调用方字段、WebShell profile 等操作细节见 `references/log-forensics.md`。
+
 ## L5.5 外部状态层
 
-只在日志暴露了具体业务主键（ID、cache key、任务号）时进入，按这个顺序查：
+只在日志暴露了具体业务主键（ID、cache key、任务号）时进入。
+
+**先翻日志，再啃代码**：真实的存储 key、field、命中与否通常已经打在同一条链路的 INFO 行里
+（`key=hawk:offline-package:prod, field=7035408_3467_46560`、`exact redis hit`）。
+先从 L5 已经取回的日志里 grep `key=`、`field=`，拿不到再回代码推导构造逻辑——
+反过来做会多花好几轮，而且推导出的 key 未必是运行时真正用的那个。
+
+按这个顺序查：
 
 | 顺序 | 查什么 | 用哪个 skill | 为什么排这个位置 |
 |---|---|---|---|
@@ -134,6 +165,12 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/diagnose-healthy-alert/scr
 - **Hippo 查不到 key 不等于查询失败**。`@HippoConfigProperty` 有 `defaultValue`，
   未配置就是默认值生效。查不到时回代码读默认值和判空写法
   （如 `!BooleanUtils.isFalse(X)` 表示只有显式 false 才关闭），再下"走哪条分支"的结论。
+  先看 `scannedNamespaces`：为空说明**应用没定位到**（appId 写法或 env 下无 cluster），
+  该换 `--app-keyword` 重找应用；有值而 `hitCount=0` 才是这个 key 确实没配置。
+- **MySQL 的 `--db-type` 是 lxcloud 实例键，不是逻辑库名**。拿分片配置里的 logicTable
+  前缀（如 `HawkDecisionDB`）当实例键会返回 `SQL error`。按 `query-mysql-data` 的要求，
+  先从应用的运行时数据源配置反查实例名和物理 schema 再写 SQL。
+  从代码取 Hippo key 名的检索式见 `references/metric-to-code.md`。
 
 ## 定性分类
 
@@ -159,22 +196,6 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/diagnose-healthy-alert/scr
 - 报告结构：告警画像 → 逐层证据 → 定性结论 → 建议动作（谁来做、改哪里）。
 - 不输出 token、ticket、Cookie、完整登录跳转参数。
 - `receiver`、`app_owner` 等人员字段可在终端回复中保留，但不要写入外发文档或外部服务。
-- L5 是只读日志检索，直接执行，不征求确认，不预设实例数或时间窗上限。
-  走堡垒机同样直接查：优先 `java_app_diag` MCP，不可用时按 `java-server-diagnostics`
-  的兜底规则改用 `bastion` MCP（命令须明确只读）。
-- 埋点用 `log.warn` 上报时，日志不在 `error.log` 里。先按埋点的日志级别决定查哪个文件，
-  不要沿用"只看 error.log"的默认快检口径（`warn.log` 收 WARN 及以上）。
-- 埋点那行日志往往只说"结果为空"，**真正的根因在它前一行**（同 traceId 的 ERROR）。
-  取证查询固定带 `--context=1` 以上，只看 match 行会漏掉根因。
-- `warn.log` 按天轮转（当天的还在 `warn.log` 里），`info.log` 按**小时**轮转。
-  查一小时前的 INFO 必须加 `--include-rotated`，否则 `matchedFiles` 为空，
-  看起来像"没打这条日志"，实际只是文件已滚到 `info_YYYYMMDDHH.0.log`。
-- 同一条链路的 INFO 日志常常直接打印出真实的存储 key 和 field
-  （如 `query exact redis. key=..., field=...`），比从代码推导更快也更准。
-- 目标是容器（tags `origins=k8s`）时，堡垒机 `go` 跳不进 Pod IP、宿主机通常也无权限，
-  直接用 `container_log_check.js --ip=<pod_ip>`；它的 WebShell 登录态在
-  `/home/joney/.cache/lexiao-browser-profile`，必须显式传 `--profile`，
-  否则报 `LOGIN_REQUIRED` 而实际只是选错 profile。
 - 代码检索超过 3 轮仍未定位点位时，可委派 `Explore` 子代理，默认不委派。
 
 ## 未覆盖

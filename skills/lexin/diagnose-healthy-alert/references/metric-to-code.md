@@ -19,6 +19,19 @@
 5. 读点位上下文，提取三样：触发条件 / 配套日志关键词 / 返回行为
 ```
 
+## 1.1 从代码取 Hippo key 名
+
+代码里出现 `ExecutorHippoConfigConstants.xxx()` 这类开关调用时，一条命令带出 key 和默认值：
+
+```bash
+rg -n -B4 '<CONSTANT_NAME>\s*[;=]' --glob '*.java'
+# -> @HippoConfigProperty(key = "enable_snapshot_lazy_load_offline", defaultValue = BOOLEAN_TRUE_STR)
+#    public static Boolean ENABLE_SNAPSHOT_LAZY_LOAD_OFFLINE;
+```
+
+不要先搜方法名再搜常量名，那是两轮。拿到后还要读判空写法：
+`!BooleanUtils.isFalse(X)` 表示只有显式配成 false 才关闭，未配置即默认开启。
+
 ## 2. 实测案例：告警 16343328
 
 指标 `fql_fk_server_hawk_decision_executor_simulate_nodeRoute_counter`，
