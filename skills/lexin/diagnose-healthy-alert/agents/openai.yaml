@@ -1,0 +1,6 @@
+interface:
+  display_name: "Diagnose Healthy Alert"
+  short_description: "从雷神告警 ID 排查告警原因并给出定性结论"
+  default_prompt: "使用 $diagnose-healthy-alert 排查指定雷神告警的原因。"
+policy:
+  allow_implicit_invocation: true

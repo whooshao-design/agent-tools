@@ -108,6 +108,7 @@
 | `inspect-healthy-metrics` | 只读查看雷神指标上报状态、最后样本和注册辅助信息 | `browser_session` |
 | `inspect-healthy-jvm-dashboard` | 只读查看雷神 JVM/G1 看板，整理变量、面板、PromQL 和页面快照 | `healthy`, `browser_session` |
 | `register-healthy-metrics` | 查询、注册和复查 Healthy/雷神指标 | `browser_session` |
+| `diagnose-healthy-alert` | 从雷神告警排查原因：事件、规则、指标回放、埋点代码到日志的证据链 | `browser_session` |
 
 ## skills/cicd — 构建与发布
 
