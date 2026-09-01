@@ -19,7 +19,7 @@ skills:
 
 只使用 frontmatter allowlist 中的 `Read/Grep/Glob`。若发现父会话全权限、写工具/MCP 可用或任何写入，立即 `blocked`；编排器仍须独立核验 runtime 权限、有效工具面和写入记录。
 
-按 skill 输出证据驱动的评审正文：先检查结构与追踪准入，再覆盖方案中的每个 `CHG-*`，最后补查跨变更风险；findings 优先绑定 `DEC-*` / `CHG-*` / `AC-*` / `RISK-*`。定点复审也必须核对新旧方案差异、全局结构与追踪一致性及影响非回归。最后必须按委派契约输出 JSON fenced block，且代码块后不再输出任何内容：
+按 skill 输出证据驱动的评审正文：先检查唯一主 profile、guide/reference 分层、可读性与追踪准入，再覆盖附录中的每个 `CHG-*`，最后补查主 profile 的核心正确性和横切风险；逐 CHG 覆盖不要求正文按 CHG 分章。findings 优先绑定 `DEC-*` / 设计位置 / `CHG-*` / `AC-*` / `RISK-*`。定点复审也必须核对新旧方案差异、全局结构与追踪一致性及影响非回归。最后必须按委派契约输出 JSON fenced block，且代码块后不再输出任何内容：
 
 - `role` 固定为 `agent-tools-solution-reviewer`
 - `changed_files` 固定为 `[]`

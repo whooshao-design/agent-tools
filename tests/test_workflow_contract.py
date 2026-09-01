@@ -89,7 +89,7 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertIn("G={mode: waived,W:{ref,fingerprint}}", text)
         self.assertNotIn("可直接转 `dev-build-change` 并记录跳过风险", text)
 
-    def test_solution_template_is_conclusion_first_and_delta_driven(self):
+    def test_solution_template_uses_one_core_shell_and_chg_appendix(self):
         template = (
             WORKFLOW
             / "dev-design-solution/references/solution-template.md"
@@ -98,46 +98,105 @@ class WorkflowContractTest(unittest.TestCase):
         headings = (
             "## 0. 一页结论",
             "## 1. 背景与现状",
-            "### 3.4 变更地图",
-            "## 4. 详细设计",
+            "## 3. 方案选择",
+            "## 4. 目标技术设计",
+            "## 附录 C：CHG 变更清单与追踪矩阵",
         )
         positions = [template.index(heading) for heading in headings]
         self.assertEqual(sorted(positions), positions)
 
         for token in (
+            "主 profile",
+            "只使用一个 `profiles/*.md`",
+            "guide-level 机制导读",
+            "reference-level 契约",
             "CHG-001",
             "新增 / 修改 / 删除 / 保持不变",
-            "#### 当前行为与证据",
-            "#### 本次调整",
-            "#### 调整后行为与不变量",
-            "明确保持不变的相邻逻辑",
+            "AC → 设计正文 → CHG → 验证信号 → 发布/回滚",
+            "本附录承担交付完整性，不控制正文叙事",
         ):
             self.assertIn(token, template)
 
-        for old_heading in (
-            "### 4.1 模块改动",
-            "### 4.2 接口设计",
-            "### 7.2 模块职责与调用关系",
+        for forbidden in (
+            "骨架 A：机制轴",
+            "骨架 B：变更轴",
+            "### 0.3 变更摘要",
+            "### 4.1 CHG-001",
+            "### 4.1 方案项一",
+            "### 6.4 Redis 存储设计",
         ):
-            self.assertNotIn(old_heading, template)
+            self.assertNotIn(forbidden, template)
 
-    def test_solution_structure_contract_is_mece_and_traceable(self):
+    def test_solution_profiles_and_routing_stay_in_sync(self):
+        skill_dir = WORKFLOW / "dev-design-solution"
+        routing = (skill_dir / "references/template-routing.md").read_text(
+            encoding="utf-8"
+        )
+        skill = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
+        prompt = (skill_dir / "agents/openai.yaml").read_text(encoding="utf-8")
+        contract = (
+            WORKFLOW / "references/solution-structure-contract.md"
+        ).read_text(encoding="utf-8")
+        profiles = (
+            "mechanism-architecture",
+            "migration-remediation",
+            "contract-evolution",
+            "data-state-consistency",
+        )
+
+        for profile in profiles:
+            self.assertTrue(
+                (skill_dir / f"references/profiles/{profile}.md").is_file()
+            )
+            for text in (routing, skill, contract):
+                self.assertIn(profile, text)
+
+        for reference in (
+            "design-dimensions.md",
+            "readability-and-writing.md",
+            "visualization-routing.md",
+        ):
+            self.assertTrue((skill_dir / "references" / reference).is_file())
+            self.assertIn(reference, skill)
+
+        for basis in (
+            "legacy-tech-spec-solution-design-template.md",
+            "template-system-optimization.md",
+            "diagram-practices-assessment.md",
+            "readability-practices-assessment.md",
+        ):
+            self.assertTrue(
+                (skill_dir / "references/design-basis" / basis).is_file()
+            )
+
+        self.assertIn("只选择一个主 profile", routing)
+        self.assertIn("把 CHG 留作交付追踪", prompt)
+        self.assertNotIn("按 DEC/CHG 组织权威正文", prompt)
+
+    def test_solution_structure_contract_is_profiled_and_traceable(self):
         contract = (
             WORKFLOW / "references/solution-structure-contract.md"
         ).read_text(encoding="utf-8")
 
         for token in (
-            "导航视图与权威正文",
-            "每个父章节只能选择一个划分维度",
-            "同级章节必须处于相同抽象层级",
+            "核心壳、主 profile 与横切维度",
+            "每份正式方案只选择一个主 profile",
+            "三层阅读与权威正文",
+            "guide → reference",
+            "交付颗粒度不等于设计叙事颗粒度",
             "内容唯一归属",
-            "每个 `AC-*` 至少映射一个 `CHG-*`",
+            "设计完整性和交付完整性分别验证",
+            "AC → DEC/目标设计正文 → CHG → 验证信号 → 发布/回滚",
             "孤儿变更",
-            "变更地图与详细设计的 CHG 集合必须完全一致",
-            "正文目标不超过约 300 行",
+            "全称断言必须可复现",
+            "30 秒扫描",
+            "5 分钟理解",
+            "约 300 行",
             "超过约 450 行",
         ):
             self.assertIn(token, contract)
+
+        self.assertNotIn("机制轴或变更轴，二选一", contract)
 
     def test_solution_review_enforces_structure_without_style_policing(self):
         skill = (WORKFLOW / "dev-review-solution/SKILL.md").read_text(
@@ -149,18 +208,22 @@ class WorkflowContractTest(unittest.TestCase):
 
         for token in (
             "先做结构与追踪准入",
-            "按 CHG 逐项评审",
+            "按附录 CHG 逐项评审交付完整性",
             "不得只抽查部分 CHG 后给出整体通过",
-            "`层级错位` / `结构重叠` / `覆盖缺口` / `孤儿变更`",
+            "逐 CHG 覆盖不要求正文按 CHG 分章",
+            "`profile 误选` / `正文清单化`",
             "纯标题偏好、个人文风或不影响理解的措辞不升级为问题",
-            "`AC-* → CHG-* → 验证/发布`",
+            "`AC → 设计正文 → CHG → 验证信号 → 发布/回滚`",
         ):
             self.assertIn(token, skill)
 
-        self.assertIn("AC→CHG→验证/发布", template)
+        self.assertIn("AC→设计→CHG→验证/发布", template)
         self.assertIn("只有影响决策、实施或验证时才记录", template)
         self.assertIn("## 3. CHG 逐项评审覆盖", template)
         self.assertIn("DEC-001 / CHG-001 / AC-001 / RISK-001", template)
+        self.assertIn("### 4.2 分层阅读与信息密度", template)
+        self.assertIn("30 秒扫描", template)
+        self.assertIn("双读者测试", template)
 
         headings = (
             "## 0. 一页评审结论",

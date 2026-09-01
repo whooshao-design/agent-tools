@@ -1,6 +1,6 @@
 interface:
   display_name: "独立评审技术方案"
-  short_description: "独立评审方案结构、增量设计、技术完整性与准入风险"
-  default_prompt: "使用 $dev-review-solution 绑定 R/S/B：先核对结构与追踪准入，再逐项评审全部 CHG，最后补查跨变更风险；findings 绑定 DEC/CHG/AC，给出唯一结论与安全复审范围。"
+  short_description: "独立评审方案路由、可读性、技术完整性与准入风险"
+  default_prompt: "使用 $dev-review-solution 绑定 R/S/B：先核对唯一主 profile、分层可读性和追踪准入，再逐项评审附录中的全部 CHG，最后补查核心正确性与横切风险。"
 policy:
   allow_implicit_invocation: true

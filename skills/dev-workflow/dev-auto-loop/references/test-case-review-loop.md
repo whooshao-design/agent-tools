@@ -8,7 +8,8 @@
 - 正式复核必须由与全部清单 producer 身份不相交的只读 reviewer 执行；身份、输入指纹或结果信封校验失败时不解释领域结论，按 `formal_reviewer_unavailable` 处理
 - 测试清单 `C` 必须标明它对应的 `R/S/B`，不能只引用方案文件名
 - 成功评审以新的不可变 `approval-record-v1` 记录完整审批元组 `(R,S,C,B)`；顶层 `review.md` 只作展示或指针，只有当前产物与审批记录精确匹配才能进入交付闭环
-- 本段没有 `有条件通过`，也没有自动接受 finding 的路径
+- 本段没有 `有条件通过`；用户针对精确 finding 与 `(R,S,C,B)` 作出的明确授权，按 `dev-review-test-cases` §5 计为该 finding 的关闭证据，agent 不得自动接受 finding
+- 停止时须区分两种终态：`budget_exhausted`（预算耗尽、未收敛）与经授权或表述层出口达成的 `通过`（已收敛）；交付状态中必须可分辨
 
 ## 独立预算
 

@@ -1,6 +1,6 @@
 interface:
   display_name: "dev-design-solution"
-  short_description: "产出结论前置、变更清晰且可追踪的技术方案"
-  default_prompt: "使用 $dev-design-solution 基于稳定 R/B 收敛方案 S：结论前置，分离现状与新增/修改/删除/不变项，按 DEC/CHG 组织权威正文，并建立 AC 到变更和验证的追踪。"
+  short_description: "按场景路由生成简洁、完整且可追踪的技术方案"
+  default_prompt: "使用 $dev-design-solution 先判断是否需要正式方案并选择一个主 profile，再按机制解释目标设计，把 CHG 留作交付追踪。"
 policy:
   allow_implicit_invocation: true
