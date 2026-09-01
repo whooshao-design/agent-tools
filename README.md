@@ -88,6 +88,7 @@
 | Skill | 说明 | 配套 MCP |
 |---|---|---|
 | `test-dubbo-api` | 通过 bianque 服务模拟器调用和编排 Dubbo 接口测试 | `dubbo_test` |
+| `query-dubbo-registry` | 通过服务名查提供它的应用名，及 Dubbo/FSOF 注册中心只读查询 | `browser_session` |
 
 ### 数据与配置
 
@@ -109,6 +110,7 @@
 | `inspect-healthy-jvm-dashboard` | 只读查看雷神 JVM/G1 看板，整理变量、面板、PromQL 和页面快照 | `healthy`, `browser_session` |
 | `register-healthy-metrics` | 查询、注册和复查 Healthy/雷神指标 | `browser_session` |
 | `diagnose-healthy-alert` | 从雷神告警排查原因：事件、规则、指标回放、埋点代码到日志的证据链 | `browser_session` |
+| `inspect-app-call-topology` | 只读排查应用 FSOF/Dubbo 上下游调用关系，异常下钻到实例与时间点，输出自包含 HTML 报告 | `browser_session` |
 
 ## skills/cicd — 构建与发布
 

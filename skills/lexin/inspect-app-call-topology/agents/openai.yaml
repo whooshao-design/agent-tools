@@ -1,0 +1,6 @@
+interface:
+  display_name: "inspect-app-call-topology"
+  short_description: "只读排查应用的 FSOF/Dubbo 上下游调用关系并输出 HTML 报告"
+  default_prompt: "使用 $inspect-app-call-topology 排查应用的上下游调用关系"
+policy:
+  allow_implicit_invocation: true

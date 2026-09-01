@@ -2,7 +2,7 @@
 name: query-oa-gateway-interface
 description: 查询 OA 网关 URL 与后端接口映射，并回代码仓库追踪实现链路。Use when 用户给出前端请求地址、rc_oa_gateway 路径、mihawk/gateway OA 页面请求，要求查询对应的 FSOF/Dubbo interface、method、version、真实后端应用、实现类、VO 参数、DAO 或 SQL；适用于“页面请求对应后端接口”“前端地址映射后端”“query_page_list 网关规则查询”“当前仓库搜不到接口时定位应用”等只读排查。
 metadata:
-  version: 1.1.1
+  version: 1.2.0
 ---
 
 # query-oa-gateway-interface
@@ -78,7 +78,19 @@ service/gateway interface
    - `domain`、`url`：多用于确认前端入口，只作为辅助。
    - `company_name`、`url_manager`、`operator`：用于人工归属和权限线索，不作为代码定位主依据。
 
-2. 用 `interface_name` 反推包和仓库。例：
+2. **用注册中心直接查提供方应用（权威，优先于下面所有推断）。**
+   `query-dubbo-registry` 查 Dubbo/FSOF 注册中心，服务名支持短名模糊匹配：
+
+```bash
+node /home/joney/projects/ai/agent-tools/skills/lexin/query-dubbo-registry/scripts/query_dubbo_registry.js \
+  --service=<网关返回的 interface_name>
+```
+
+   - 网关的 `lsf_app_name` 与注册中心结果不一致时以注册中心为准，并说明差异（网关配置可能滞后）。
+   - 返回多个提供方应用（分机构、分环境独立部署）时如实列出全部候选，再用网关的 `interface_version`、`group` 收敛。
+   - 注册中心查不到，才继续往下用包名推断，并明确标注结论是推断而非查证。
+
+3. 用 `interface_name` 反推包和仓库（注册中心查不到时的兜底，包名和应用名经常对不上，不要当作结论）。例：
 
 ```text
 com.fenqile.rc_comm.hawk.decision.manage.service.gateway.ElementGatewayService
@@ -86,7 +98,7 @@ com.fenqile.rc_comm.hawk.decision.manage.service.gateway.ElementGatewayService
 
 优先提取业务段 `hawk.decision.manage`，映射到类似 `server_hawk_decision_manage` 的仓库；`executor`、`dispatcher`、`task` 等包名也按同样方式映射。
 
-3. 在本地项目根全局搜索：
+4. 在本地项目根全局搜索：
 
 ```bash
 rg -n "com\\.fenqile\\..*XxxGatewayService|interface XxxGatewayService|class XxxGatewayServiceImpl|methodName" \
@@ -95,7 +107,7 @@ rg -n "com\\.fenqile\\..*XxxGatewayService|interface XxxGatewayService|class Xxx
 rg --files /home/joney/projects | rg 'XxxGatewayService\.java$'
 ```
 
-4. 如果网关返回 `lsf_app_name` 或能推断 artifactId，再搜应用配置：
+5. 如果网关返回 `lsf_app_name` 或能推断 artifactId，再搜应用配置：
 
 ```bash
 rg -n "application.name|lsf_app_name|dubbo.application.name|artifactId|XxxGatewayService" \
@@ -104,14 +116,14 @@ rg -n "application.name|lsf_app_name|dubbo.application.name|artifactId|XxxGatewa
 
 重点看 `src/main/resources/app.properties`、`pom.xml`、`dubbo-provider.xml`、`META-INF/spring/*.xml`。
 
-5. 本地没有仓库时，使用可用的跨仓库搜索/GitLab 搜索完整 `interface_name`；完整类名优先，其次接口简单类名，最后才搜 method。最终回复要说明“本地未发现仓库，定位依据来自网关字段/跨仓库搜索结果”。
+6. 本地没有仓库时，使用可用的跨仓库搜索/GitLab 搜索完整 `interface_name`；完整类名优先，其次接口简单类名，最后才搜 method。最终回复要说明“本地未发现仓库，定位依据来自网关字段/跨仓库搜索结果”。
 
 ## 失败处理
 
 - 网关返回 401/登录页：使用 `get-browser-session` 刷新 `gateway.oa.fenqile.com` 登录态后重试。
 - 网关返回空结果：依次尝试 path 变体；再用前端项目关键字、接口名、方法名或系统名查询；最后说明已尝试的查询条件。
-- 本地搜不到接口：按“跨仓库定位”先确认真实后端应用；必要时用本地仓库索引、跨仓库搜索或让用户指定仓库。
-- 代码链路出现多个实现：按 Dubbo provider 配置、Spring bean、包名、网关返回 app 或版本筛选；无法唯一确认时列候选和判断依据。
+- 本地搜不到接口：先用 `query-dubbo-registry` 查注册中心确认真实后端应用，再按“跨仓库定位”其余步骤处理。
+- 代码链路出现多个实现：按注册中心返回的应用、Dubbo provider 配置、Spring bean、包名、版本筛选；无法唯一确认时列候选和判断依据。
 
 ## 输出格式
 
