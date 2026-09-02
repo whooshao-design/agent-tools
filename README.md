@@ -82,6 +82,7 @@
 | `handle-stable-hawk-approval` | 安全处理 stable 测试环境米霍克和流程引擎审批 | `mysql_readonly`, `dubbo_test` |
 | `query-hawk-field-reference` | 查询米霍克字段被乐包、策略节点和规则引用的关系 | `browser_session` |
 | `query-oa-gateway-interface` | 查询前端 URL 映射的后端接口和代码链路 | `browser_session` |
+| `start-local-frontend` | 米霍克 OA 前端本地启动、whistle 网关切预发布/项目环境（IP 动态发现）与页面访问 | `browser_session` |
 
 ### 接口调用
 

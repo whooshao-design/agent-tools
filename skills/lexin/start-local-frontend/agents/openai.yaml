@@ -1,0 +1,6 @@
+interface:
+  display_name: "Start Local Frontend"
+  short_description: "米霍克 OA 前端本地开发：门禁、启动、网关切换、页面访问"
+  default_prompt: "使用 $start-local-frontend 启动米霍克 OA 前端本地开发环境并把网关切到目标环境。"
+policy:
+  allow_implicit_invocation: true
