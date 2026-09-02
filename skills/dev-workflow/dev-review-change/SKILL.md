@@ -51,7 +51,7 @@ metadata:
 
 正式评审必须由 `agent-tools-change-reviewer` 或满足同一契约的独立 agent 执行，并遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/delegation-contract.md`。身份、只读、写入、工具面和结果结构的准入只以该契约为准；任何一项无法由运行时事实证明时，不得形成准入事实。编排器冻结 `G`、`change_revision`、diff 和验证证据，只传原始任务、冻结输入及上一轮待复核 findings，不传实现者的推理过程或预期结论。
 
-代码改动的 `producer_agent_refs[]` 必须完整；根 agent 没有可信 runtime ref 时，agent 代码改动必须交给可追踪 producer subagent 产出。
+代码改动的 `producer_agent_refs[]` 必须完整且可稳定标识；根 agent 直接产出时使用会话级 ref 并在执行记录中说明其强度限制，不构成审批阻塞（见 `delegation-contract.md` §1）。
 
 ### 2. 先拿证据再下结论
 优先基于可见证据评审，例如：

@@ -35,7 +35,7 @@ metadata:
 
 - 在允许路径和工具内创建或修改产物，完成后由编排器把实际 runtime `agent_ref` 加入 `producer_agent_refs[]`
 - 从 `dev-build-change` 派发代码任务时，开发执行清单遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/dev-build-change/references/development-checklist.md`；每个信封只消费一个已定义 `DEV-*`，后端不得自行拆分、合并、改写来源或扩展范围
-- 根 agent 没有平台可验证的 runtime ref 时，需要正式评审的 agent 产物必须交给可追踪 producer subagent 创建；不能把角色名或会话描述充当 producer 身份
+- `producer_agent_refs[]` 必须可稳定标识、可重新指认：subagent 用平台返回的实例 ID，根 agent 直接产出时用稳定的会话级 ref 并记录其强度限制；不能把角色名或会话描述充当 producer 身份。producer ref 的强度不是审批前置条件，reviewer 侧的平台可验证性才是（见 `delegation-contract.md` §1）
 - 多个 producer 并行写入时，必须能证明文件写集不相交，或为每个任务使用隔离 worktree；无法证明时串行
 - 隔离 worktree 的结果由编排器按依赖顺序吸收，不让两个 agent 直接竞争同一文件
 

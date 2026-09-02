@@ -70,7 +70,7 @@ metadata:
 
 - 正式评审必须由 `agent-tools-solution-reviewer` 或满足同一契约的独立 agent 执行，并遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/delegation-contract.md`；身份、只读、写入、工具面和结果结构的准入只以该契约为准
 - 编排器先冻结 `(R,S,B)` 和输入指纹，再只传原始需求、待评方案、必要代码证据与上一轮待复核 findings；不传设计方的推理过程或预期结论
-- 方案的 `producer_agent_refs[]` 必须完整；根 agent 没有可信 runtime ref 时，agent 生成的方案必须交给可追踪 producer subagent 产出
+- 方案的 `producer_agent_refs[]` 必须完整且可稳定标识；根 agent 直接产出时使用会话级 ref 并在执行记录中说明其强度限制，不构成审批阻塞（见 `delegation-contract.md` §1）
 - 编排器在 reviewer 停止后按委派契约校验运行记录；任何一项无法由运行时事实证明时，不得形成正式领域结论
 - 不直接继承方案中的推荐结论，重新核对关键事实和约束
 - 区分可验证事实、设计假设、已接受约束与个人偏好

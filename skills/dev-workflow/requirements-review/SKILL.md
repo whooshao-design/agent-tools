@@ -29,7 +29,7 @@ metadata:
 
 需求身份、内容指纹和风险授权遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/artifact-identity.md`。无法稳定标识评审对象，或关键业务规则缺失到无法判断时，结论为 `材料不足`，不得自行补造规则。
 
-正式评审必须由 `agent-tools-requirements-reviewer` 或满足同一契约的独立 agent 执行，并遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/delegation-contract.md`。身份、只读、写入、工具面和结果结构的准入只以该契约为准；任何一项无法由运行时事实证明时，不得形成正式结论。纯用户或外部原始需求的 producer 列表可以为空；根 agent 没有可信 runtime ref 时，agent 生成的需求必须先交给可追踪 producer subagent 产出。
+正式评审必须由 `agent-tools-requirements-reviewer` 或满足同一契约的独立 agent 执行，并遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/delegation-contract.md`。身份、只读、写入、工具面和结果结构的准入只以该契约为准；任何一项无法由运行时事实证明时，不得形成正式结论。纯用户或外部原始需求的 producer 列表可以为空；根 agent 直接产出时使用可稳定标识的会话级 ref 并记录其强度限制，不构成审批阻塞（见 `delegation-contract.md` §1）。
 
 ## Workflow
 
