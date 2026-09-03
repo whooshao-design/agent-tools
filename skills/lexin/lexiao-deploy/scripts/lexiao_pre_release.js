@@ -239,7 +239,16 @@ async function clickRowButton(page, rowNeedle, buttonText) {
       .filter(visible)
       .filter((el) => norm(el.innerText || el.textContent).includes(norm(rowNeedle)))
       .sort((a, b) => norm(a.innerText || a.textContent).length - norm(b.innerText || b.textContent).length);
-    const row = rows[0];
+    // 应用名互为前缀时（process-engine 是 process-engine-ec/-batch/-exp… 的前缀），
+    // includes + 取最短会命中别的应用行（实测取到 process-engine-ec），点不到目标行的按钮。
+    // 注意 norm 会删除全部空白，边界判断必须在保留空格的原始文本上做。
+    const raw = (el) => String(el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+    const needleRaw = String(rowNeedle).trim();
+    const esc = needleRaw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const wordRe = new RegExp('(^|\\s)' + esc + '(\\s|$)');
+    const exact = rows.filter((el) => wordRe.test(raw(el)));
+    const picked = exact.length ? exact : rows;
+    const row = picked[0];
     if (!row) return { clicked: false, reason: 'row-not-found', rowNeedle };
     const rowText = String(row.innerText || row.textContent || '').replace(/\s+/g, ' ').trim();
     const button = Array.from(row.querySelectorAll('button,a,[role="button"]')).filter(visible)
@@ -549,6 +558,16 @@ async function waitContainer(page, versionId, orderId, orderDetailId, env, timeo
   return { outcome: 'timeout', last };
 }
 
+function pendingTargets(root) {
+  const vm = (root.kvm_deployment_detail_list || [])
+    .filter((t) => t.publish_status_desc !== '已发布')
+    .map((t) => ({ type: 'vm', id: t.machine_ip, status: t.publish_status_desc }));
+  const container = (root.deployment_order_detail_list || [])
+    .filter((t) => t.publish_status_desc !== '已发布')
+    .map((t) => ({ type: 'container', id: t.order_detail_id, status: t.publish_status_desc }));
+  return [...vm, ...container];
+}
+
 async function deployOne(page, url, versionId, appName, orderId, targetType, targetIp, deploymentId, env, allowPublished = false) {
   const before = await latestDetails(page, versionId, orderId, env);
   const vmTargets = before.root.kvm_deployment_detail_list || [];
@@ -587,7 +606,11 @@ async function deployOne(page, url, versionId, appName, orderId, targetType, tar
     const deployClick = await clickRowButton(page, target.machine_ip, '部署');
     const confirm = deployClick.clicked ? await confirmIfNeeded(page) : null;
     const wait = deployClick.clicked ? await waitKvm(page, versionId, orderId, target.machine_ip, env) : null;
-    return { app_name: appName, order_id: orderId, env, selected_type: 'vm', target, deployClick, confirm, wait, final: (await latestDetails(page, versionId, orderId, env)).root };
+    const vmFinal = (await latestDetails(page, versionId, orderId, env)).root;
+    const vmRemaining = pendingTargets(vmFinal);
+    // deploy-one 只部署一个目标；把该发布单下仍未发布的其它目标显式回带，
+    // 否则调用方看到 wait=success 会误以为整个应用已完成（实测漏过 6 台虚机）。
+    return { app_name: appName, order_id: orderId, env, selected_type: 'vm', target, deployClick, confirm, wait, remaining_targets: vmRemaining, deployment_complete: vmRemaining.length === 0, final: vmFinal };
   }
 
   const target = deploymentId
@@ -609,7 +632,9 @@ async function deployOne(page, url, versionId, appName, orderId, targetType, tar
     body: JSON.stringify(body),
   });
   const wait = await waitContainer(page, versionId, orderId, target.order_detail_id, env);
-  return { app_name: appName, order_id: orderId, env, selected_type: 'container', target, publish, wait, final: (await latestDetails(page, versionId, orderId, env)).root };
+  const cFinal = (await latestDetails(page, versionId, orderId, env)).root;
+  const cRemaining = pendingTargets(cFinal);
+  return { app_name: appName, order_id: orderId, env, selected_type: 'container', target, publish, wait, remaining_targets: cRemaining, deployment_complete: cRemaining.length === 0, final: cFinal };
 }
 
 async function containerLogin(page, url, appName, env, podNeedle) {
