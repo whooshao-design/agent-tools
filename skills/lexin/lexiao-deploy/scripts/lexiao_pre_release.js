@@ -156,7 +156,22 @@ async function gotoLexiao(page, url, env = 'pre') {
   await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
   await page.waitForTimeout(1000);
   const envClick = await selectEnvTab(page, env);
-  return { envClick };
+  // 应用表格是懒渲染的：networkidle 之后行可能还没挂上 DOM。
+  // 滚动触发渲染，并等待行数连续两次不变，避免只读到前几行。
+  let prev = -1;
+  let stable = 0;
+  for (let i = 0; i < 20 && stable < 2; i += 1) {
+    await page.evaluate(() => window.scrollBy(0, 900));
+    await page.waitForTimeout(600);
+    const count = await page.evaluate(
+      () => document.querySelectorAll('tr,.el-table__row').length,
+    );
+    if (count === prev && count > 0) stable += 1; else stable = 0;
+    prev = count;
+  }
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.waitForTimeout(500);
+  return { envClick, rowCount: prev };
 }
 
 async function visibleDialogs(page) {
@@ -259,6 +274,11 @@ async function confirmIfNeeded(page, timeoutMs = 20000) {
 
 async function listApps(page, url, versionId, env) {
   await gotoLexiao(page, url, env);
+  // 权威应用清单：DOM 里哪一格是应用名不能靠命名前缀猜（历史实现假设以 server 开头，
+  // 会漏掉 process-engine-* 等应用），改以该接口返回的 app_name 集合为准。
+  const detail = await fetchJson(page,
+    `https://lexiao-api.oa.fenqile.com/oa/lexiao/get_version_publish_details.json?version_id=${versionId}&env=${env}&demand_id=0`);
+  const appNameSet = new Set((detail.json?.result_rows || []).map((r) => r.app_name || r.appName).filter(Boolean));
   const domRows = await page.evaluate(() => {
     const norm = (text) => String(text || '').replace(/\s+/g, ' ').trim();
     const visible = (el) => {
@@ -289,7 +309,9 @@ async function listApps(page, url, versionId, env) {
 
   const apps = domRows.map((row) => {
     const cells = row.cells;
-    const appName = cells.find((cell) => /^server[-_a-zA-Z0-9]+$/.test(cell)) || '';
+    const appName = cells.find((cell) => appNameSet.has(cell))
+      || cells.find((cell) => /^[a-z][a-z0-9]*([-_][a-z0-9]+)+$/i.test(cell))
+      || '';
     const orderIndex = cells.findIndex((cell) => cell === appName) - 1;
     const publishOrder = maybeNumber(cells[orderIndex]) ?? maybeNumber(cells.find((cell) => /^\d+$/.test(cell)));
     const pipeline = pipelineRows.find((item) => pipelineMatchesApp(item, appName)) || null;
@@ -527,10 +549,33 @@ async function waitContainer(page, versionId, orderId, orderDetailId, env, timeo
   return { outcome: 'timeout', last };
 }
 
-async function deployOne(page, url, versionId, appName, orderId, targetType, targetIp, deploymentId, env) {
+async function deployOne(page, url, versionId, appName, orderId, targetType, targetIp, deploymentId, env, allowPublished = false) {
   const before = await latestDetails(page, versionId, orderId, env);
   const vmTargets = before.root.kvm_deployment_detail_list || [];
   const containerTargets = before.root.deployment_order_detail_list || [];
+
+  // 前置门禁：拒绝对「已发布」的陈旧发布单空转。
+  // 历史教训：传入构建前就已存在且已发布的 order_id 时，脚本照常执行、
+  // 末尾读到状态本就是「已发布」便返回 success，实际一次部署都没发生，
+  // 且制品版本号完全没变。必须先经 open-order 拿到承载新制品的发布单。
+  const allTargets = [...vmTargets, ...containerTargets];
+  const pending = allTargets.filter((t) => t.publish_status_desc !== '已发布');
+  if (allTargets.length && !pending.length && !allowPublished) {
+    throw new Error(JSON.stringify({
+      error: 'ORDER_ALREADY_PUBLISHED',
+      message: '该发布单所有目标均已是「已发布」，本次部署不会产生任何变化。'
+        + '若刚完成构建，请先用 --action=open-order 获取承载新制品的发布单；'
+        + '确需对已发布单重跑，显式加 --allow-published。',
+      app_name: appName,
+      order_id: orderId,
+      version_tag: before.root.version_tag,
+      targets: allTargets.map((t) => ({
+        id: t.order_detail_id || t.machine_ip,
+        status: t.publish_status_desc,
+      })),
+    }, null, 2));
+  }
+  const beforeVersion = before.root.version_tag;
   let selectedType = targetType === 'container' ? 'container' : 'vm';
   if (targetType === 'auto') selectedType = vmTargets.length ? 'vm' : 'container';
   if (selectedType === 'vm') {
@@ -586,7 +631,7 @@ async function containerLogin(page, url, appName, env, podNeedle) {
       const text = norm(row.innerText || row.textContent);
       if (text.includes('登录实例')) {
         const parts = text.split(/\s+/).filter(Boolean);
-        return parts.find((part) => /^server[-_a-zA-Z0-9]+-[a-z0-9]+-[a-z0-9]+$/i.test(part))
+        return parts.find((part) => /^[a-z][a-z0-9]*([-_][a-z0-9]+)+-[a-z0-9]+-[a-z0-9]+$/i.test(part))
           || parts.find((part) => /^\d+\.\d+\.\d+\.\d+$/.test(part))
           || text;
       }
@@ -649,7 +694,12 @@ async function status(page, versionId, orderIds, env) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const action = args.action || 'list-apps';
-  const url = args.url || 'https://lexiao.oa.fenqile.com/#/app-publish/51303';
+  // --version-id 必须能驱动页面地址：历史实现在只传 --version-id 时会打开硬编码的
+  // 51303 页面，却用传入的 version_id 查接口，DOM 与接口来自不同版本，结果静默错乱。
+  const url = args.url
+    || (args['version-id']
+      ? `https://lexiao.oa.fenqile.com/#/app-publish/${args['version-id']}`
+      : 'https://lexiao.oa.fenqile.com/#/app-publish/51303');
   const env = args.env || 'pre';
   const pollMs = Number(args['poll-ms'] || 30000);
   const versionId = Number(args['version-id'] || versionIdFromUrl(url));
@@ -686,7 +736,7 @@ async function main() {
       result = await openOrder(page, url, versionId, args.app, responses, env);
     } else if (action === 'deploy-one') {
       await gotoLexiao(page, url, env);
-      result = await deployOne(page, url, versionId, args.app, Number(args['order-id']), args['target-type'] || 'auto', args['target-ip'], args['deployment-id'], env);
+      result = await deployOne(page, url, versionId, args.app, Number(args['order-id']), args['target-type'] || 'auto', args['target-ip'], args['deployment-id'], env, Boolean(args['allow-published']));
     } else if (action === 'container-login') {
       result = await containerLogin(page, url, args.app, env, args.pod || args['pod-ip'] || args['container-ip']);
     } else if (action === 'status') {
