@@ -73,6 +73,7 @@
 | Skill | 说明 | 配套 MCP |
 |---|---|---|
 | `lexiao-deploy` | 乐效构建、发布和验收流程 | `lexiao` |
+| `lexiao-hippo-publish-authorize` | 在乐效版本里登记需随版本发布的 hippo namespace | - |
 | `query-app-instances` | 通过乐效只读查询应用各环境 VM 和容器实例地址 | `browser_session` |
 
 ### 米霍克 / OA

@@ -1,0 +1,6 @@
+interface:
+  display_name: "lexiao-hippo-publish-authorize"
+  short_description: "在乐效版本里登记需要随版本发布的 hippo namespace，并回读校验"
+  default_prompt: "使用 $lexiao-hippo-publish-authorize 查看或登记本次需求的 hippo 发布授权"
+policy:
+  allow_implicit_invocation: true
