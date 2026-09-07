@@ -43,8 +43,10 @@ node $SCRIPT open                   # 4. 打印访问地址，并探测本地实
 ### doctor（启动前置门禁，全部来自 web_mihawk_oa/AGENTS.md 的实测结论）
 
 - Node 必须 16.16.0：检查 `$HOME/.nvm/versions/node/v16.16.0/bin`（node-sass@7 在 Node 18+ 必定编译失败）。
-- 内存硬门禁：冷启动前 `MemAvailable >= 6 GiB` 且 `SwapFree >= 2 GiB`（读 /proc/meminfo），
+- 内存硬门禁：冷启动前 `MemAvailable >= 6 GiB` 且 `SwapFree >= 0.5 GiB`（读 /proc/meminfo），
   不足时拒绝并给出实测数字。依据：webpack 常驻约 1.6 GiB，2026-08 曾在低内存下把 WSL 打挂。
+  Swap 门禁 2026-09-07 由 2 GiB 降为 0.5 GiB：三次实测在 MemAvailable ≥ 7 GiB、SwapFree 0.8~1.7 GiB 下启动，
+  swap 均未增长、内存压力为 0，风险主要由 MemAvailable 决定。
 - `/proc/pressure/{memory,io}` 的 full avg10 > 5% 时警告，不与 Maven/生产构建并行。
 - 8116 端口检查：已监听时输出占用 PID、`/proc/<pid>/cwd`，判断是否本项目实例；
   **绝不自动杀进程，绝不漂移到其他端口**；非本项目占用或本项目实例无响应都判 FAIL，交人工处理。

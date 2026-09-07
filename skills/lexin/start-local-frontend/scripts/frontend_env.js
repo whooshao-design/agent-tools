@@ -44,7 +44,9 @@ const DEFAULT_PRJ_APP = 'server_hawk_decision_manage';
 const PROBE_PATH = '/rc_oa_gateway/hawk_decision/alarm/rule/detail.json?alarm_rule_id=1';
 // 冷启动资源硬门禁（依据 AGENTS.md：2026-08-10 webpack 常驻 1.6GiB 曾把 WSL 打挂）
 const MIN_MEM_AVAILABLE_GIB = 6;
-const MIN_SWAP_FREE_GIB = 2;
+// 2026-09-07 由 2 降为 0.5：三次实测（MemAvailable 7.0/8.2/7.1 GiB、SwapFree 0.8~1.7 GiB）启动后 swap 均未增长、
+// 内存压力为 0。真正的风险驱动是 MemAvailable（事故现场是 1.5 GiB + swap 耗尽），swap 只需留一点余量防抖
+const MIN_SWAP_FREE_GIB = 0.5;
 const MAX_PSI_FULL_AVG10 = 5;
 
 function usage() {
@@ -414,7 +416,7 @@ async function runDoctor() {
         else add('FAIL', 'node', `${node16} 版本异常: ${ver || (v.stderr || '').trim()}`);
     }
 
-    // 内存硬门禁（冷启动）：MemAvailable >= 6 GiB 且 SwapFree >= 2 GiB
+    // 内存硬门禁（冷启动）：MemAvailable >= 6 GiB 且 SwapFree >= 0.5 GiB
     const mem = readMeminfo();
     const memText = `MemAvailable=${mem.memAvailableGiB.toFixed(2)} GiB, SwapFree=${mem.swapFreeGiB.toFixed(2)} GiB`
         + `（门禁: >= ${MIN_MEM_AVAILABLE_GIB} GiB / >= ${MIN_SWAP_FREE_GIB} GiB）`;
