@@ -205,6 +205,15 @@ function normalizeLxcloudDbType(raw) {
   if (['credit', 'creditm', 'creditmdb', 'rc_credit_ms_db'].includes(lowered)) {
     return 'CreditmDB';
   }
+  if (['postreal', 'post-real', 'post_real', 'postrealdb'].includes(lowered)) {
+    return 'PostrealDB';
+  }
+  if (['strategypfm', 'strategy-pfm', 'strategy_pfm', 'strategypfmdb'].includes(lowered)) {
+    return 'StrategypfmDB';
+  }
+  if (['creditpfm', 'credit-pfm', 'credit_pfm', 'creditpfmdb'].includes(lowered)) {
+    return 'CreditpfmDB';
+  }
   return value;
 }
 
@@ -447,7 +456,7 @@ async function main() {
       configuredInstances: Object.keys(config.instances || {}),
       lxcloudEndpoint: LXCLOUD_SQL_ENDPOINT,
       lxcloudDbTypePolicy: 'no static allowlist; non-empty values up to 128 characters without control characters',
-      lxcloudKnownDbTypes: ['ProcesstestDB', 'ProcessmanageDB', 'HawkDecisionDB', 'CreditmDB'],
+      lxcloudKnownDbTypes: ['ProcesstestDB', 'ProcessmanageDB', 'HawkDecisionDB', 'CreditmDB', 'PostrealDB', 'StrategypfmDB', 'CreditpfmDB'],
       lxcloudAuthConfigured: Boolean(process.env.LXCLOUD_AUTHORIZATION || process.env.LXCLOUD_BEARER_TOKEN),
       lxcloudBrowserSessionScript: BROWSER_SESSION_SCRIPT,
       lxcloudBrowserSessionScriptExists: fs.existsSync(BROWSER_SESSION_SCRIPT),

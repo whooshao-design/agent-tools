@@ -28,6 +28,18 @@ test('normalizes only explicit instance aliases and does not guess from a broad 
   assert.equal(normalizeLxcloudDbType('process_engine_db'), 'process_engine_db');
 });
 
+test('normalizes the newly registered PostrealDB and StrategypfmDB aliases', () => {
+  assert.equal(normalizeLxcloudDbType('postreal'), 'PostrealDB');
+  assert.equal(normalizeLxcloudDbType('post-real'), 'PostrealDB');
+  assert.equal(normalizeLxcloudDbType('PostrealDB'), 'PostrealDB');
+  assert.equal(normalizeLxcloudDbType('strategypfm'), 'StrategypfmDB');
+  assert.equal(normalizeLxcloudDbType('strategy-pfm'), 'StrategypfmDB');
+  assert.equal(normalizeLxcloudDbType('StrategypfmDB'), 'StrategypfmDB');
+  assert.equal(normalizeLxcloudDbType('creditpfm'), 'CreditpfmDB');
+  assert.equal(normalizeLxcloudDbType('credit-pfm'), 'CreditpfmDB');
+  assert.equal(normalizeLxcloudDbType('CreditpfmDB'), 'CreditpfmDB');
+});
+
 test('requires a concrete and safe lxcloud db_type', () => {
   assert.throws(() => validateLxcloudDbType(''), /先从目标项目的运行时数据源配置中确认/);
   assert.throws(() => validateLxcloudDbType(true), /先从目标项目的运行时数据源配置中确认/);

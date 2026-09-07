@@ -2,7 +2,7 @@
 name: query-mysql-data
 description: 查询和验证公司内网 MySQL 数据，支持测试/stable 本地只读实例和线上 lxcloud SQL 查询。Use when 用户要求只读查询 MySQL、查看表结构或样例记录、验证数据库数据；未明确实例时必须优先从目标项目运行时数据源代码反查实例与逻辑库，线上 db_type 不使用静态白名单，可复用浏览器 session 获取 lxcloud token/Cookie，最终必须输出 SQL 和查询结果。
 metadata:
-  version: 2.5.0
+  version: 2.7.1
 ---
 
 # query-mysql-data
@@ -138,23 +138,27 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/script
 
 node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js \
   --cookies \
-  --show-secrets \
   --domain=lxcloud.oa.fenqile.com \
   --url=https://lxcloud.oa.fenqile.com/
 ```
 
-只在本地 shell 中把 Cookie 临时设置给查询脚本：
+以上 Cookie 检查保持默认脱敏，不能把脱敏结果当成可用凭据。不要单独执行明文导出命令；
+自动化场景仅允许本地进程在内存中消费 Cookie。若用户选择从已有安全来源手动提供，
+只在其本地 shell 中隐藏输入并临时设置给查询脚本，不通过聊天传递：
 
 ```bash
 read -r -s LXCLOUD_COOKIE
 export LXCLOUD_COOKIE
 ```
 
+查询结束执行 `unset LXCLOUD_COOKIE`；不要将值写入仓库、日志或命令参数。
+
 参数说明：
 
 - `--db-type <instance>`：lxcloud 实例配置键，接受任意经授权实例，不等于 schema/database 名。
-- 已知别名仅作输入归一化：`process-test -> ProcesstestDB`、`process-manage -> ProcessmanageDB`、`hawk/mihawk -> HawkDecisionDB`、`credit/creditm -> CreditmDB`。
+- 已知别名仅作输入归一化：`process-test -> ProcesstestDB`、`process-manage -> ProcessmanageDB`、`hawk/mihawk -> HawkDecisionDB`、`credit/creditm -> CreditmDB`、`postreal/post-real -> PostrealDB`、`strategypfm/strategy-pfm -> StrategypfmDB`、`creditpfm/credit-pfm -> CreditpfmDB`。
 - 不提供模糊的 `process` 别名，避免把流程管理库误路由到流程测试实例。
+- `PostrealDB`（贷后实例，逻辑库形如 `post_loan_order_NN_db` 分库，另有 `orch_meta_db`）、`StrategypfmDB`（策略/challenger 订单实例，`challenger_order_NN_NN_db` 大量分库）和 `CreditpfmDB`（授信/风控实例，含 `credit_order_db`、`credit_user_db`、`orch_meta_db` 及大量 `rc_challeger_data_NN_NN_db` 分库）都是分库线上实例：业务数据查询必须带业务键定位到具体分库，不要对整实例做无界扫描；允许按下文流程进行有明确范围的元信息查询。具体分库号仍按“实例定位”从代码分库路由确认。别名只归一化实例名，逻辑库不靠别名猜。
 - `--query-role` 默认 `masterbackup`。
 - `--query-type` 默认 `single`。
 - `--user-name` 可显式覆盖，也可用 `LXCLOUD_USER_NAME`；未提供时优先从 token 或 lxcloud 浏览器会话识别实际 OA 账号，最后才回退当前系统用户。
