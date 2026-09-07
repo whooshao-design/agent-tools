@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 from devtools_mcp.common import (
     bounded_int,
@@ -43,7 +44,7 @@ def _run_browser(args: list[str], timeout: int = 120, max_chars: int = 12000) ->
     return command_result_text(result, max_chars=max_chars)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True))
 def browser_doctor() -> str:
     """检查本地 Playwright/Chromium/profile 环境是否可用。"""
     return _run_browser(["--doctor"], timeout=60)
@@ -65,7 +66,7 @@ def browser_page_snapshot(url: str, profile: str = "", success_text: str = "none
     return _run_browser(_browser_args(url, profile, success_text, login_pattern), timeout=90)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False))
 def browser_click_text(
     url: str,
     text: str,
@@ -85,7 +86,7 @@ def browser_click_text(
     return _run_browser(args, timeout=timeout)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False))
 def browser_click_button(
     url: str,
     text: str,
@@ -126,7 +127,7 @@ def renew_session(url: str, profile: str = "", success_text: str = "none") -> st
     return _run_browser(args, timeout=90)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False))
 def export_session(url: str, export_path: str, profile: str = "", success_text: str = "none") -> str:
     """访问目标页面并把该 profile 的 Cookie 与 localStorage 导出为本地 JSON 快照（权限 0600）。
 

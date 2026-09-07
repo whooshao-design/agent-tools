@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 from devtools_mcp.common import DEFAULT_BROWSER_PROFILE, bounded_int, command_result_text, error_text, run_command, skill_path
 
@@ -51,7 +52,7 @@ def _run(args: list[str], timeout: int = 180, max_chars: int = 30000) -> str:
     return command_result_text(run_command(["python3", *args], timeout=timeout), max_chars=max_chars)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False))
 def dubbo_call(
     service: str,
     method: str,
@@ -78,7 +79,7 @@ def dubbo_call(
     return _run(args, timeout=bounded_int(timeout_seconds, 120, 5, 600) + 30)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True))
 def dubbo_dry_run(
     service: str,
     method: str,

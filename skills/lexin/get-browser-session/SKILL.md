@@ -2,7 +2,7 @@
 name: get-browser-session
 description: 获取、检查、续期和复用 WSL Playwright/Chromium 浏览器登录态与网页 session（底层会话层，供其他 skill 复用）。Use when 需要访问要求登录的内网页面、检查或定时续期浏览器 profile 登录态、打开浏览器让用户完成 SSO/OTP 登录、复用已保存 profile 做页面自动化，或按默认脱敏方式查看 session Cookie/localStorage token。
 metadata:
-  version: 1.7.0
+  version: 1.7.1
 ---
 
 # Get Browser Session
@@ -211,8 +211,9 @@ Use `--show-secrets` only for a downstream local process that consumes the value
    `/home/joney/.cache/healthy-dashboard-profile`（Healthy）。用
    `browser_session.js --check --profile=<abs> --url=<目标站点>` 逐个确认，
    `sessionState=READY` 即可用。
-3. **确认目标 host**：返回 `passport.lexincloud.com` 或 `trust.oa.fenqile.com`
-   才是真的需要重新登录。
+3. **确认实际状态**：综合 `sessionState`、登录表单/标记、重定向 host 与 HTTP 状态。
+   `passport.lexincloud.com` 或 `trust.oa.fenqile.com` 是常见线索，不是登录失效的唯一条件；
+   同源登录页也可能需要登录。`PROXY_INTERCEPTED`、`FORBIDDEN`、`UPSTREAM_ERROR` 分别按网络、权限、上游问题处理，不能一律重登。
 
 不要在第 1 步失败后就去拉起 headed 浏览器重新登录——历史上多次"登录不上"实际都是
 路径未展开或选错 profile。

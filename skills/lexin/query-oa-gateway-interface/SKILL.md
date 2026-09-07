@@ -2,7 +2,7 @@
 name: query-oa-gateway-interface
 description: 查询 OA 网关 URL 与后端接口映射，并回代码仓库追踪实现链路。Use when 用户给出前端请求地址、rc_oa_gateway 路径、mihawk/gateway OA 页面请求，要求查询对应的 FSOF/Dubbo interface、method、version、真实后端应用、实现类、VO 参数、DAO 或 SQL；适用于“页面请求对应后端接口”“前端地址映射后端”“query_page_list 网关规则查询”“当前仓库搜不到接口时定位应用”等只读排查。
 metadata:
-  version: 1.2.0
+  version: 1.2.1
 ---
 
 # query-oa-gateway-interface
@@ -12,6 +12,12 @@ metadata:
 只读查询 OA 网关配置，把前端 URL 映射到后端 `interface_name + method`，再在本地代码仓库中追踪接口定义、实现、业务逻辑、DAO 和 mapper SQL。它不负责修改网关规则、发布应用、压测接口或调用真实业务写接口。
 
 MCP 优先、浏览器会话兜底。优先使用 `browser_session` MCP 访问 `https://gateway.oa.fenqile.com/`；登录态不可用时使用 `get-browser-session` skill 刷新登录态。不要要求用户在聊天中提供 Cookie、ticket、token 或密码；如果用户已经贴出 Cookie，也不要复用、保存或输出。
+
+`browser_session.fetch_with_session` 只支持 GET，不能传入 `method=POST`。下述已知只读 POST 查询使用
+`get-browser-session` 的 BrowserContext `--request` 脚本入口：通过进程环境 `BROWSER_SESSION_REQUEST_JSON`
+传入 `method`、`headers`、UTF-8 表单体的 `bodyBase64`，运行
+`node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js --request --url=<下述查询端点>`。
+先读该 skill 的请求参数约定；浏览器管理 Cookie，不导出凭据，也不把该入口用于真实业务写接口。
 
 ## 核心约束
 

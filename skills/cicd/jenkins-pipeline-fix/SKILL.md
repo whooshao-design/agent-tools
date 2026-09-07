@@ -1,280 +1,90 @@
 ---
 name: jenkins-pipeline-fix
-description: 诊断或修复 Jenkins 流水线失败。支持 mode=diagnose/fix-tests/fix-build/auto，从 Jenkins URL 或当前 git 项目推断流水线，读取构建阶段、consoleText、编译错误和测试报告；默认只读诊断，只有用户明确要求修复时才改代码，只有明确要求时才提交或推送。
+description: 诊断或修复 Jenkins 流水线失败。根据构建 URL 或当前 Git 仓库定位阶段、console 与测试报告；默认只读诊断，用户要求修复时才改代码，提交和推送分别遵循已有授权。
 metadata:
-  version: 2.0.0
+  version: 2.1.0
 ---
 
 # Jenkins 流水线诊断与修复
 
-## 工具优先级
+## 定位与执行范围
 
-已注册 `jenkins` MCP 时，优先使用其工具完成本 skill 的查询与操作；MCP 不可用或未注册时，再按下文的脚本/HTTP 方式兜底。两者底层能力一致。
+MCP 优先、脚本/HTTP 兜底。使用 `jenkins` MCP 查询；本 skill 不触发部署，不默认重跑 Jenkins 构建。
 
+| 参数 | 默认 | 规则 |
+|---|---|---|
+| mode | auto | diagnose / fix-tests / fix-build / auto |
+| job_url | 从上下文推断 | 用户指定的构建优先 |
+| wait | true | 运行中可等待；用户只问当前状态时立即交付 |
+| fix | false | “修复/让它过”才允许改代码；“为什么失败”只诊断 |
+| push | false | 提交、推送均需相应授权，不能由 auto 模式开启 |
 
-## 核心原则
+`auto` 根据用户任务和失败阶段选择；已授权的修复不重复确认。新增权限、超出任务的业务行为变更或
+缺少决定性信息时才请求补充。其他失败阶段也先查证根因，不因为标签不在固定列表就提前结束分析。
 
-- **默认只诊断**：没有明确说"修"、"改"、"让它过"时，不修改代码。
-- **先定位，后修复**：先判断失败阶段和根因，再决定是否进入修复流程。
-- **参数化执行**：用 `mode`、`job_url`、`wait`、`fix`、`push` 控制行为，减少用户输入。
-- **最小改动**：只修改与本次失败直接相关的代码或测试。
-- **本地验证**：有修改必须运行最小有效验证；只有用户明确要求时才提交或推送。
+## 固定构建身份
 
-## 参数
+1. 有具体构建 URL 时直接使用，例如
+   `https://devops-jenkins.oa.fenqile.com/job/<pipeline>/<number>/`。
+2. 未给 URL 时用 `infer_feature_pipeline(repo_dir=...)` 从当前 Git 仓库推断
+   `feature-pipeline-<project>-<branch>`；不存在时再查流水线名称或向用户获取缺失信息。
+3. 仅有 job 根路径时，首次 `get_build_status` 可用 `build=lastBuild`。
+   取得返回的数字 `number` 与 `url` 后固定该构建。后续阶段、console、测试报告与等待
+   都传同一数字 build，或同一具体构建 URL，不能继续跟随会变化的 `lastBuild`。
+4. 用户要求“最新构建”时也记录本次解析的数字；如果明确切换目标，标明新旧构建，不能混用证据。
 
-| 参数 | 默认值 | 含义 |
-| --- | --- | --- |
-| `mode` | `auto` | `diagnose` 只读排查；`fix-tests` 修失败单测；`fix-build` 修编译/打包失败；`auto` 按用户语义和失败阶段判断 |
-| `job_url` | `auto` | Jenkins 构建 URL；为空时从当前 git 项目推断 |
-| `wait` | `true` | 构建运行中时是否轮询等待完成 |
-| `fix` | `false` | 是否允许改代码；`auto` 只有用户明确要求修复时才设为 true |
-| `push` | `false` | 是否允许提交或推送；永远不能自动开启 |
+## 查询与认证
 
-### 自然语言映射
+使用以下 MCP 工具，均绑定上一节固定的构建：
 
-- "排查这个 Jenkins 失败：<url>" -> `mode=diagnose job_url=<url> fix=false push=false`
-- "这个流水线为什么失败" -> `mode=diagnose job_url=auto fix=false push=false`
-- "帮我修这次流水线失败单测" -> `mode=fix-tests job_url=auto wait=true fix=true push=false`
-- "帮我修编译失败" -> `mode=fix-build job_url=auto wait=true fix=true push=false`
-- "修好并推上去" -> 只有这类明确语义才允许 `push=true`
+- `get_build_status`：result、building、number、url、timestamp、duration。
+- `get_pipeline_stages`：定位实际首个失败阶段；区分 FAILED 与上游失败造成的跳过。
+- `get_console_summary`：错误摘要。摘要缺少根因时再读取完整 console 的相关窗口。
+- `get_testng_summary`：失败用例与报告；没有 TestNG 报告时检查该仓库真实测试布局和 console。
 
-`auto` 模式规则：如果用户没有明确要求修复，退回 `diagnose`。如果用户明确要求修复，但失败阶段不是单测或编译失败，先诊断并说明需要人工确认。
+MCP 从本地环境或 `mcp/devtools-mcp/.env` 读取 `JENKINS_COOKIE` 或
+`JENKINS_USER` + `JENKINS_TOKEN` / `JENKINS_API_TOKEN`。
+401/403 先区分未登录与当前账号无权限；可复用 `get-browser-session` 的已登录请求。
+不要要求用户把认证值贴到聊天，不在命令参数或日志输出凭据。
 
-## 输入与流水线地址
+HTTP 兜底使用同一具体构建根 `<BUILD_URL>`：
 
-优先使用用户给的完整 Jenkins URL：
+| 证据 | 路径 |
+|---|---|
+| 状态 | `<BUILD_URL>/api/json?tree=result,building,displayName,number,url,timestamp,duration` |
+| 阶段 | `<BUILD_URL>/wfapi/` |
+| 日志 | `<BUILD_URL>/consoleText` |
+| TestNG | `<BUILD_URL>/testngreports/api/json` |
 
-```text
-https://devops-jenkins.oa.fenqile.com/job/<pipeline_name>/<build_number>/
-```
+普通请求限时 30 秒，console 可 60 秒。需要本地证据文件时使用 `mktemp -d` 独立目录，
+不要共用固定 `/tmp/jenkins_log.txt`。报告引用文件路径并只摘录相关、已脱敏的日志。
 
-未提供 URL 时，从当前 git 项目推断：
+## 等待与诊断
 
-```bash
-PROJECT=$(git remote get-url origin 2>/dev/null | sed 's/.*\///; s/\.git//')
-BRANCH=$(git branch --show-current)
-JENKINS_URL="https://devops-jenkins.oa.fenqile.com/job/feature-pipeline-${PROJECT}-${BRANCH}/"
-curl -s --max-time 10 "${JENKINS_URL}lastBuild/api/json?tree=number,result,building" 2>/dev/null
-```
+`building=true` 且需要等待时，每 30–60 秒检查同一构建，期间保持可中断和用户进度反馈。
+默认等待预算 30 分钟；用户明确要求等到结束时按其终止条件持续推进。预算用尽时报告仍在运行，
+不能把未知状态判为失败。不要执行阻塞整轮的长 shell 循环。`wait=false` 时只报告当前状态。
 
-如果返回 404 或项目不在 git 仓库中，请用户提供完整流水线 URL 或流水线名称 + 构建号。
+按证据区分 checkout/权限、依赖或编译、单测、质量扫描、部署/上传等根因。
+保留失败阶段、关键异常链、受影响模块与修复建议；诊断请求到此交付，不进入改代码流程。
 
-## Jenkins API
+## 修复与验证
 
-| 用途 | URL |
-| --- | --- |
-| 构建状态 | `<JOB_URL>/api/json?tree=result,building,displayName,number` |
-| 最新构建 | `<JOB_URL>/lastBuild/api/json?tree=result,building,displayName,number` |
-| 阶段状态 | `<JOB_URL>/wfapi/` 或 `<JOB_URL>/lastBuild/wfapi/` |
-| 全量日志 | `<JOB_URL>/consoleText` 或 `<JOB_URL>/lastBuild/consoleText` |
-| TestNG 报告 | `<JOB_URL>/lastBuild/testngreports/api/json` |
+仅当用户要求修复时：
 
-所有 `curl` 默认加 `--max-time 30`；拉 `consoleText` 可用 `--max-time 60`。
+1. 阅读失败用例、实现和仓库构建约定；可复现时先用最小命令复现。
+2. 区分实现错误、过期断言、兼容要求和环境缺失。不能为了变绿而修改正确断言，
+   也不能把需要真实环境的集成测试机械改为 mock。
+3. 单测修复按实际 Surefire/TestNG/suite 规则运行目标用例；示例
+   `mvn test -pl <module> -Dtest=<Class>#<method>` 仅在仓库支持该发现方式时使用。
+4. 编译修复优先受影响模块，必要时 `mvn -pl <module> -am compile`；按失败命令重验。
+5. 只有新变化、失败或相关风险需要时扩大回归。保留用户已有改动。
 
-返回 403 时，提示用户提供 Jenkins Cookie 或 API Token，并在 curl 中加 `-b '<COOKIE>'` 或认证 header。不要在最终回复中输出完整 Cookie。
+本地通过不代表远端 Jenkins 已通过。用户已授权提交/推送/重跑时继续完成相应步骤并验证新构建；
+否则交付本地结果，不把修复请求推定为外部写入授权。
 
-## 工作流程
+## 输出
 
-### 1. 确定执行模式
-
-1. 解析用户是否提供 `mode/job_url/wait/fix/push`。
-2. 未显式提供时按自然语言映射推断。
-3. 如果用户只问原因、排查、为什么失败：`mode=diagnose fix=false push=false`。
-4. 如果用户要求修复：`fix=true`，但 `push` 仍默认 false。
-5. 明确告诉用户当前采用的模式，例如：`mode=diagnose, wait=true, fix=false, push=false`。
-
-### 2. 获取构建状态
-
-```bash
-curl -s --max-time 30 '<JOB_URL>/api/json?tree=result,building,displayName,number' | python3 -m json.tool
-```
-
-如果使用的是 job 根路径而非具体 build 路径，改用：
-
-```bash
-curl -s --max-time 30 '<JOB_URL>/lastBuild/api/json?tree=result,building,displayName,number' | python3 -m json.tool
-```
-
-构建仍在运行且 `wait=true` 时，每分钟轮询，默认最多 30 分钟：
-
-```bash
-for i in $(seq 1 30); do
-  curl -s --max-time 30 '<JOB_URL>/lastBuild/api/json?tree=result,building,displayName,number' > /tmp/jenkins_last_build.json
-  python3 - <<'PY'
-import json
-data = json.load(open('/tmp/jenkins_last_build.json'))
-print(f"build={data.get('displayName')} building={data.get('building')} result={data.get('result')}")
-PY
-  python3 - <<'PY' && break || true
-import json, sys
-data = json.load(open('/tmp/jenkins_last_build.json'))
-sys.exit(0 if not data.get('building') else 1)
-PY
-  sleep 60
-done
-```
-
-如果 `wait=false` 且构建仍在运行，只报告当前状态并结束。
-
-### 3. 读取阶段并定位首个失败点
-
-```bash
-curl -s --max-time 30 '<JOB_URL>/lastBuild/wfapi/' | python3 -c "
-import json, sys
-data = json.load(sys.stdin)
-for s in data.get('stages', []):
-    status = s.get('status','?')
-    error = s.get('error','')
-    name = s.get('name','?')
-    print(f'{name}: {status}' + (f' | {error.get(\"message\",\"\")}' if error else ''))
-"
-```
-
-优先关注**第一个 FAILED 阶段**。后续 FAILED 阶段常常是被上游失败连带跳过。
-
-| 失败阶段 | 典型根因 | 默认动作 |
-| --- | --- | --- |
-| `CHECKOUT` | 分支不存在、代码冲突、权限问题 | 诊断并给出分支/仓库检查建议 |
-| `ARTIFACT` | 编译失败、依赖缺失、打包失败 | `diagnose` 只报告；`fix-build` 才改代码 |
-| `UT-DEFAULT` | 单元测试失败 | `diagnose` 只报告；`fix-tests` 才改代码 |
-| `SAFETY-CHECK` | 安全扫描或质量门禁 | 诊断并建议转相应安全/质量流程 |
-| 其他阶段 | 部署、上传、通知等问题 | 结合日志诊断，默认不改代码 |
-
-### 4. 拉取日志并分类
-
-```bash
-curl -s --max-time 60 '<JOB_URL>/lastBuild/consoleText' > /tmp/jenkins_log.txt
-
-# 编译错误
-grep '\[ERROR\]' /tmp/jenkins_log.txt | grep -v 'Help 1' | grep -v 'stack trace' | grep -v 'Re-run' | grep -v 'MavenExecutionException' | head -80
-
-# 测试失败摘要
-grep -E 'Tests run:.*Failures:.*Errors:' /tmp/jenkins_log.txt | grep -v 'Failures: 0' | tail -10
-
-# 业务异常总结
-grep '构建过程发生业务异常' /tmp/jenkins_log.txt || true
-```
-
-诊断模式到这里即可输出结论：失败阶段、关键日志、根因判断、建议动作。不要修改代码。
-
-## 修复模式
-
-只有 `fix=true` 时进入本节。
-
-### fix-tests：修失败单测
-
-先获取结构化测试报告：
-
-```bash
-curl -s --max-time 30 '<JOB_URL>/lastBuild/testngreports/api/json' | python3 -c "
-import json, sys
-data = json.load(sys.stdin)
-print(f\"Tests: {data.get('total', 0)}, Failures: {data.get('failCount', 0)}, Skipped: {data.get('skipCount', 0)}\")
-for pkg in data.get('package', []):
-    if pkg.get('fail', 0) > 0:
-        print(f\"Package: {pkg['name']}, Failures: {pkg['fail']}, Total: {pkg['totalCount']}\")
-"
-```
-
-如果 TestNG API 不可用，从日志提取：
-
-```bash
-grep -E 'FAILED:|FAILURE|Tests run:.*Failures:.*Errors:' /tmp/jenkins_log.txt | head -80
-```
-
-定位测试和源码：
-
-```bash
-find . -path '*/src/test/*' -name '<TestClassName>.java'
-find . -path '*/src/main/*' -name '<ClassName>.java'
-```
-
-判断标准：
-
-| 情况 | 判断依据 | 修复方向 |
-| --- | --- | --- |
-| 新功能添加字段但旧测试未更新 | 测试数据缺字段，代码预期新字段 | 修改测试数据或断言 |
-| 旧数据兼容问题 | 旧数据缺字段但业务要求默认值 | 修改代码兼容旧数据 |
-| 代码 bug | 断言合理，代码返回错误 | 修改代码 |
-| 测试期望过时 | 业务逻辑已变更，测试仍按旧行为断言 | 修改测试 |
-| 环境问题 | 依赖 Redis/DB/外部资源不可用 | mock 外部依赖或标注环境问题 |
-
-验证：
-
-```bash
-mvn test -pl <module> -Dtest=<TestClassName>#<methodName> -q
-```
-
-必要时再运行受影响模块的 `mvn test` 或 `mvn compile`。
-
-### fix-build：修编译/打包失败
-
-常见模式：
-
-- `cannot find symbol: class Xxx`：新文件未加入 git、包路径错误、依赖模块未编译。
-- `cannot find symbol: method xxx`：方法签名变更后调用方未同步。
-- `package ... does not exist`：依赖缺失或 pom 配置错误。
-- `Compilation failure`：语法错误或泛型/注解处理错误。
-
-修复前先在本地复现：
-
-```bash
-mvn compile -q
-```
-
-多模块项目优先定位失败模块，再运行：
-
-```bash
-mvn -pl <module> -am compile -q
-```
-
-只修改导致编译失败的最小代码或配置。修复后重复相同命令验证。
-
-## 提交与推送
-
-默认不提交、不推送。只有用户明确要求时才执行：
-
-```bash
-git status --short
-git add <changed-files>
-git commit -m "fix: 修复 Jenkins 流水线失败"
-git push
-```
-
-提交前必须确认：
-
-- 已说明修改的是代码问题还是测试问题。
-- 已运行最小验证且通过。
-- `git status` 中没有无关文件。
-- 不包含 Cookie、Token、日志大文件或本地临时文件。
-
-## 输出格式
-
-诊断模式：
-
-```text
-模式: diagnose
-流水线: <JOB_URL>
-结果: FAILURE/UNSTABLE/...
-首个失败阶段: <stage>
-关键证据:
-- <日志/阶段证据>
-根因判断:
-- <判断>
-建议:
-- <下一步>
-```
-
-修复模式：
-
-```text
-模式: fix-tests/fix-build
-流水线: <JOB_URL>
-根因: <代码问题/测试问题/环境问题/编译问题>
-修改:
-- <文件>: <改动摘要>
-验证:
-- <命令>: 通过/失败
-提交/推送:
-- 未执行 / 已按用户要求执行
-```
+给出固定构建 URL/编号、状态、失败阶段、关键证据、根因与下一步。
+有修复时追加实际变更、验证命令和结果、未覆盖内容、提交/推送/远端重跑状态。
+不要只报“已修复”，也不要把未执行的远端构建写成通过。

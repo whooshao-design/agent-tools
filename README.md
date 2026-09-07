@@ -1,7 +1,7 @@
 # agent-tools
 
 个人 agent 工具仓库（skill + MCP），Claude Code 和 Codex 共用的单一事实源。
-两个工具的 skill 目录是指向本仓库的符号链接，MCP 注册直接指向本仓库源码——仓库内改动即双端生效。
+两个工具的 skill 目录是指向本仓库的符号链接。MCP 注册需分别配置；已注册到本仓库的服务在重启后读取源码改动。skill 安装不等于 MCP 已注册或已认证。
 
 维护约定见 [AGENTS.md](AGENTS.md)。
 
@@ -127,11 +127,16 @@
 
 | 位置 | 说明 |
 |---|---|
-| `mcp/devtools-mcp/` | 研发工具链只读 MCP 集合（Python 包 `devtools_mcp`）：gitlab、jenkins、java_app_diag、browser_session、mysql_readonly、dubbo_test、redis_query、sonarqube、lexiao、healthy、observability、k8s_readonly、mq_readonly、artifact_repo、config_registry、cross_repo_search |
+| `mcp/devtools-mcp/` | 查询为主、部分工具支持写入的 MCP 集合（Python 包 `devtools_mcp`）：gitlab、jenkins、java_app_diag、browser_session、mysql_readonly、dubbo_test、redis_query、sonarqube、lexiao、healthy、observability、k8s_readonly、mq_readonly、artifact_repo、config_registry、cross_repo_search |
 | `mcp/bastion-mcp/` | 堡垒机 SSH 只读通道 MCP（`config.json` 本地化，不入 git） |
 | `mcp/third-party-mcp/` | 第三方通用 MCP wrapper/remote 配置：Context7 最新库文档、GitHub 只读上下文、MarkItDown 文档转 Markdown、Sonatype 依赖情报 |
 
 ## 安装
+
+双端只读复查入口：`python3 bin/toolchain_audit.py`（摘要）或加 `--json`（脱敏明细）。
+它核对配置、共享链接、缺失环境变量与模型窗口覆盖，不联网，也不证明业务 API 权限或运行时全部加载状态。
+常规 PR 评审使用 `dev-review-change` 的建议审查分支；只有正式准入才要求审批记录。
+浏览器专项可使用 Microsoft `playwright-cli`，入口见 `verify-browser-qa`；内网登录态仍由 `get-browser-session` 管理。
 
 ```bash
 git clone git@github.com:whooshao-design/agent-tools.git ~/projects/ai/agent-tools

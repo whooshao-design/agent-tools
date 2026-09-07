@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 from devtools_mcp.common import command_result_text, error_text, run_command, skill_path
 
@@ -23,7 +24,7 @@ def healthy_read_board(board_id: int, profile: str = "/home/joney/.cache/healthy
     return _run([f"--board={board_id}", "--read", f"--profile={profile}"], timeout=180)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False))
 def healthy_apply_hawk_read_through(board_id: int, profile: str = "/home/joney/.cache/healthy-dashboard-profile") -> str:
     """向指定大盘应用已沉淀的 hawk-read-through 面板模板。会先回读备份再写入。"""
     if not board_id:

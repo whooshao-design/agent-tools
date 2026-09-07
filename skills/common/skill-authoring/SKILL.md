@@ -2,7 +2,7 @@
 name: skill-authoring
 description: Use when 需要在 agent-tools 仓库中创建新 skill、修改 skill 分类，或检查现有 skill 是否符合仓库约定（frontmatter、路径、分类、双端安装）。
 metadata:
-  version: 1.1.0
+  version: 1.1.1
 ---
 
 # skill-authoring
@@ -83,12 +83,12 @@ cd /home/joney/projects/ai/agent-tools && python3 install.py
 
 确认输出中新 skill 在 claude 和 codex 两端均为 `linked`；新会话中确认 skill 出现在可用列表。
 
-### 6. 提交
+### 6. 交付
 
-更新 `README.md` 对应分类表格，然后 git commit + push。
+更新 `README.md` 对应分类表格，汇报变更与验证结果。只有用户要求提交或推送时才执行相应 Git 操作；创建或修改 skill 本身不授权推送。
 
 ## 修改与下线
 
 - 改既有 skill：直接在仓库改，符号链接即时生效（新会话）。
 - 版本号规则：需要追踪内容变化时升 `metadata.version`（修文案 patch、加能力 minor、重写 major）；不要为了版本号破坏系统校验兼容性。
-- 下线 skill：从仓库删除目录、删两端符号链接、在 README 移除条目；若有替代者，在提交信息中注明由谁承接。
+- 下线 skill：先核对调用方、双端安装与替代能力，再按用户要求停用或移除对应入口，保留可恢复备份；只有明确要求删除源码时才删除仓库目录。同步 README，说明替代者和恢复方法。

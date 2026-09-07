@@ -1,6 +1,10 @@
 # devtools-mcp
 
-研发工具链本地只读 MCP 集合（Python 包 `devtools_mcp`），按域分组：
+研发工具链本地 MCP 集合（Python 包 `devtools_mcp`），查询为主；部署、构建、Dubbo 调用、大盘更新和浏览器点击可能写入外部状态，必须按用户任务范围执行，不能由 server 名称推断只读。
+
+这些明确有写入能力的工具提供 MCP `readOnlyHint=false`、`destructiveHint=true`、`idempotentHint=false` 提示。annotation 只帮助客户端与模型辨别行为，不是授权或安全隔离；业务参数约束仍由底层脚本执行。
+
+按域分组：
 
 **CI/CD 与代码质量**
 

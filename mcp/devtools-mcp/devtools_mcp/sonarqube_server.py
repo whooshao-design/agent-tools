@@ -65,7 +65,10 @@ def _sonarqube_get(base_url: str, path: str, query: dict[str, object], profile: 
         with urlopen(request, timeout=60) as response:
             body = response.read().decode("utf-8", errors="replace")
             limit = bounded_int(max_chars, 100000, 1000, 500000)
-            return body[:limit]
+            if len(body) > limit:
+                return error_text("SonarQube response exceeds output limit; reduce the page size",
+                                  truncated=True, max_chars=limit, response_chars=len(body))
+            return body
     except HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
         return error_text("SonarQube request failed", status=exc.code, url=url, body=body[:1000])
@@ -100,8 +103,9 @@ def list_sonarqube_issues(
     branch: str = "",
     pull_request: str = "",
     profile: str = "",
+    page: int = 1,
 ) -> str:
-    """查询 SonarQube issue 列表，默认只查新代码周期 BLOCKER/CRITICAL。"""
+    """分页查询 SonarQube issue，默认新代码周期 BLOCKER/CRITICAL。按 paging.total 继续传 page。"""
     project = _project_key(issue_url, project_key)
     if not project:
         return error_text("project_key or issue_url with id= is required")
@@ -110,6 +114,7 @@ def list_sonarqube_issues(
         "resolved": resolved,
         "severities": severities,
         "ps": bounded_int(limit, 100, 1, 500),
+        "p": bounded_int(page, 1, 1, 10000),
         "branch": branch,
         "pullRequest": pull_request,
     }

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 from devtools_mcp.common import DEFAULT_BROWSER_PROFILE, bounded_int, command_result_text, error_text, run_command, skill_path
 
@@ -16,7 +17,7 @@ def _run_node(script: str, args: list[str], timeout: int = 900, max_chars: int =
     return command_result_text(run_command(["node", script, *args], timeout=timeout), max_chars=max_chars)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True))
 def lexiao_project_status(url: str, app: str, profile: str = DEFAULT_BROWSER_PROFILE) -> str:
     """查询乐效项目环境目标应用行状态。"""
     if not url or not app:
@@ -24,7 +25,7 @@ def lexiao_project_status(url: str, app: str, profile: str = DEFAULT_BROWSER_PRO
     return _run_node(PROJECT_SCRIPT, ["--action=status", f"--url={url}", f"--app={app}", f"--profile={profile}"], timeout=120)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False))
 def lexiao_project_deploy(
     url: str,
     app: str,
@@ -46,7 +47,7 @@ def lexiao_project_deploy(
     return _run_node(PROJECT_SCRIPT, args, timeout=bounded_int(build_timeout_seconds, 900, 30, 3600) + bounded_int(deploy_timeout_seconds, 900, 30, 3600) + 60)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True))
 def lexiao_list_apps(url: str, env: str = "pre", profile: str = "") -> str:
     """列出乐效预发布/灰度页面应用、发布顺序和流水线制品状态。"""
     if not url:
@@ -57,7 +58,7 @@ def lexiao_list_apps(url: str, env: str = "pre", profile: str = "") -> str:
     return _run_node(PRE_SCRIPT, args, timeout=120)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False))
 def lexiao_branch_integrate(url: str, profile: str = "") -> str:
     """触发乐效分支集成。仅适用于受支持的预发布流程。"""
     if not url:
@@ -68,7 +69,7 @@ def lexiao_branch_integrate(url: str, profile: str = "") -> str:
     return _run_node(PRE_SCRIPT, args, timeout=180)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False))
 def lexiao_build_app(url: str, app: str, app_id: str = "", project_id: str = "", env: str = "pre", profile: str = "", timeout_seconds: int = 900) -> str:
     """触发并等待乐效目标应用构建完成。"""
     if not url or not app:
@@ -83,7 +84,7 @@ def lexiao_build_app(url: str, app: str, app_id: str = "", project_id: str = "",
     return _run_node(PRE_SCRIPT, args, timeout=bounded_int(timeout_seconds, 900, 60, 3600) + 60)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False))
 def lexiao_build_many(url: str, apps: str, env: str = "pre", profile: str = "", timeout_seconds: int = 900) -> str:
     """触发并等待多个乐效目标应用构建完成，apps 用逗号分隔。"""
     if not url or not apps:
@@ -94,7 +95,7 @@ def lexiao_build_many(url: str, apps: str, env: str = "pre", profile: str = "", 
     return _run_node(PRE_SCRIPT, args, timeout=bounded_int(timeout_seconds, 900, 60, 3600) + 60)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False))
 def lexiao_open_order(url: str, app: str, env: str = "pre", profile: str = "") -> str:
     """打开目标应用部署详情，必要时创建新发布单，并返回 order_id。"""
     if not url or not app:
@@ -105,7 +106,7 @@ def lexiao_open_order(url: str, app: str, env: str = "pre", profile: str = "") -
     return _run_node(PRE_SCRIPT, args, timeout=180)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False))
 def lexiao_deploy_one(
     url: str,
     app: str,
@@ -138,7 +139,7 @@ def lexiao_deploy_one(
     return _run_node(PRE_SCRIPT, args, timeout=bounded_int(timeout_seconds, 900, 60, 3600) + 60)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True))
 def lexiao_deployment_status(url: str, order_ids: str, env: str = "pre", profile: str = "") -> str:
     """查询乐效发布单状态。order_ids 用逗号分隔。"""
     if not url or not order_ids:

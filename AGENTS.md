@@ -15,13 +15,13 @@ agent-tools/
 │   ├── dev-workflow/    # 研发阶段主线与编排（11）
 │   ├── dev-quality/     # 开发质量增强：评审/验证维度 + 编码规范（5）
 │   ├── cicd/            # 通用构建、流水线与质量门禁（2）
-│   └── lexin/           # 乐信业务和内网平台访问（13）
+│   └── lexin/           # 乐信业务和内网平台访问（以 install.py --list 为准）
 ├── agents/
 │   ├── claude/          # Claude Code 只读独立评审 subagents
 │   └── codex/           # Codex 只读独立评审 agents
 ├── hooks/               # SubagentStop 结构化结果守卫及测试
 ├── mcp/
-│   ├── devtools-mcp/    # 研发工具链只读 MCP 集合（Python 包 devtools_mcp，16 个 server）
+│   ├── devtools-mcp/    # 研发工具链 MCP（16 个 server；查询为主，部分工具可写）
 │   ├── bastion-mcp/     # 堡垒机 SSH 通道 MCP（config.json 本地化）
 │   └── third-party-mcp/ # 第三方通用 MCP wrapper/remote 配置（Context7、GitHub、MarkItDown、Sonatype）
 ├── install.py           # 符号链接安装脚本（claude + codex 双目标）
@@ -42,7 +42,7 @@ python3 install.py --with-subagents --uninstall
 
 - 符号链接已实测可用：Claude Code（2026-06 验证）与 Codex 都能发现 skill 目录下的符号链接。
   早期"符号链接不可靠"的结论已过时。
-- ❌ Plugin System（`~/.claude/plugins/local/` 手动注册）依然不可行，不要尝试。
+- 本仓库使用符号链接分发；不要手动修改 `~/.claude/plugins/local/` 或插件缓存来注册插件。需要插件打包时按当前客户端官方 CLI 与 manifest 约定另行实施，不沿用历史手工注册方式。
 - `--with-subagents` 只合并 owner 为 `agent-tools-subagent-result-v1` 的 `SubagentStop` handler，
   不覆盖其他 settings/hooks；Codex 的 hook 信任由用户在 `/hooks` 中审查，安装器不代替确认。
 - settings/hooks JSON 本身是符号链接时安装器会拒绝写入，避免破坏 dotfiles 管理关系。

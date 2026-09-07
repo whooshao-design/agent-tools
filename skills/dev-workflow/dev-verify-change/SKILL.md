@@ -2,7 +2,7 @@
 name: dev-verify-change
 description: Use when 代码改动已完成，需要围绕本次变更做最小必要验证，并决定是否需要扩大验证范围。
 metadata:
-  version: 1.6.0
+  version: 1.6.1
 ---
 
 # dev-verify-change

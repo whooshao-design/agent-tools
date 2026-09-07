@@ -5,7 +5,7 @@
 | 项目 | 内容 |
 |---|---|
 | 验证轮次 | Round 1 |
-| gate context `G` | approved: `T=(R,S,C,B)` / direct: `D=<task-ref>` / waived: `W=<waiver-id>` |
+| gate context `G` | approved: `T=(R,S,C,B)` / direct: `D={ref,fingerprint}` / waived: `W={ref,fingerprint}`；D/W 指向不可变记录 |
 | 审批 / direct 任务 / waiver 引用 | |
 | change revision | <repo-snapshot-v1 身份> |
 | DEV 执行状态 | <Done / Skipped 依据；未完成或未归属写集> |

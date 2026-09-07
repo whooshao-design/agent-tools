@@ -1,8 +1,8 @@
 ---
 name: lexiao-deploy
-description: 乐效中部署和验收应用的流程技能。Use when 需要 open a Lexiao demand/version page, integrate branches, build an application, create or reuse a pre-release/gray publish order, deploy a project-environment artifact, or deploy exactly one pre-release/gray target with VM/KVM priority, then verify publish status, pipeline/artifact health, publish logs, target-server logs, and triage errors with next-step choices. Supports 项目环境/prj、预发布单机、显式灰度单目标 deployment; reserve OA、线上 rollout paths for future extension.
+description: 在乐效需求/版本中集成分支、构建、部署并验收项目环境、预发布或用户明确指定的灰度应用。默认每应用一个目标，支持显式灰度全目标；部署后核验制品与实例日志。不用于 OA/线上部署或独立日志查询。
 metadata:
-  version: 1.2.4
+  version: 1.2.5
 ---
 
 # Lexiao Deploy
@@ -88,7 +88,7 @@ For multiple apps, split the work into two phases: branch integration and build 
 5. Deploy exactly one pre-release target. For explicit gray/all-target deploys, use the All-target gray scheduling rules above instead of stopping after one target:
    - Prefer one VM/KVM row. Only choose a container target when no VM/KVM exists or the user explicitly asks for container.
    - Click only the selected machine row's `部署` button. Do not click `批量部署`.
-   - After this one target is verified, stop and ask whether to continue to the next app or next machine. Do not continue automatically across apps.
+   - After this target is verified, continue through the applications and target count already authorized by the user, following publish-order batches and the sequential gate above. Ask only when expanding to additional applications/targets or when the gate requires a new risk decision.
 6. Verification:
    - Poll Lexiao page/API for the selected machine while checking target-server diagnostics through `java-server-diagnostics`.
    - Treat Lexiao page/API publish status as auxiliary progress only. The deployment health conclusion must come primarily from target-server or container-instance logs observed during the deployment window.
@@ -142,7 +142,7 @@ Keep the final report short and evidence-based:
 
 Add separate sections before operating on higher environments:
 
-- `灰度`: include batch/canary strategy, traffic validation, monitoring windows, and rollback criteria.
+- Additional gray strategies beyond the supported target scheduling above require their own traffic validation, monitoring windows, and rollback criteria.
 - `OA`: include approval gates, OA-specific health checks, and rollback criteria.
 - `线上`: include release approval, blast-radius controls, monitoring dashboards, customer-impact checks, and rollback/stop conditions.
 

@@ -2,7 +2,7 @@
 name: verify-browser-qa
 description: Use when 需要对页面、浏览器交互或部署结果做专项验收，并收集可视化证据，但这类检查不是本次验证的日常主入口。
 metadata:
-  version: 1.0.0
+  version: 1.1.0
 ---
 
 # verify-browser-qa
@@ -55,6 +55,14 @@ metadata:
 - `verify-browser-qa` 只在需要浏览器 / 页面专项确认时补充介入
 - 它增强的是页面验收能力，不替代主验证阶段的范围判断与结论收敛
 - 若页面专项已完成，验证结论仍应回收到 `dev-verify-change` 的整体结果中
+
+## 本地执行入口
+
+- 本地或公开页面可用 Microsoft `playwright-cli`，先读 `playwright-cli --help` 与 `playwright-cli --help open`。
+  使用独立命名会话 `-s=<task>`；结束时只关闭该会话，不调用影响其他任务的 `close-all` / `kill-all`。
+- 公司内网登录页继续使用 `get-browser-session` 的 profile、直连策略与凭据保护；不要把登录态复制到通用 CLI 或复用正在占用的 profile。
+- CLI 可执行任意页面操作，不代表只读或已获业务写权限。提交、发布、删除等仍以本次用户授权为界。
+- 已有项目 Playwright 测试优先复用；CLI 用于探索与复现，不能把一次点击成功当成完整端到端回归。
 
 ## 关注证据
 
