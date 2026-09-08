@@ -46,7 +46,7 @@ namespace 归到分组时，角色接口里的 namespace 名要写成 `<groupPat
 报 `ASSIGN_ROLE_PERMISSION_DENIED`，说明当前账号根本没有这个应用的 Hippo 权限，脚本会把 `appOwners` 一起返回，
 此时必须停下来告知用户去向应用负责人申请权限，不要反复重试或换路径绕过。
 
-本 skill 不回滚、不删除配置。未授权时不发布；用户明确说“可以发布”“授权发布”“修改并发布”等同义表达后，可以在保存草稿并回读校验后自动发布目标 key。纯查询实际生效值使用 `query-hippo-config`；登录态失效使用 `get-browser-session`。
+本 skill 不回滚配置。删除配置项只走 `delete-item`：用户在当前对话明确授权后，先 `status` 取 `currentStateToken`，再 `delete-item --delete-authorization=explicit --expected-current-token=<token>` 删除单个草稿项；加 `--publish --publish-authorization=explicit` 才按 key 粒度发布该删除（载荷 `type=delete`，与 Hippo 发布弹窗一致），发布后校验 active release 只少了目标 key。未授权时不发布；用户明确说“可以发布”“授权发布”“修改并发布”等同义表达后，可以在保存草稿并回读校验后自动发布目标 key。纯查询实际生效值使用 `query-hippo-config`；登录态失效使用 `get-browser-session`。
 
 `browser_session` MCP 优先用于登录态预检；由于该 MCP 只允许 GET，新增、修改和授权发布必须使用本 skill 的预置脚本。不要临时编写 Hippo PUT/POST 工具。
 
@@ -94,6 +94,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/configure-hippo/scripts/hi
 - `plan`：读取 `--value-file`，计算 `create/update/noop` 及并发保护 token，不写入。
 - `upsert`：新增或修改一个草稿项；相同内容自动 `noop`；默认不发布，只有显式授权参数齐全时才发布目标 key。
 - `verify`：只读确认草稿等于文件，并报告 active release 是否也等于文件。
+- `delete-item`：删除一个草稿项并可选发布该删除；需要 `--delete-authorization=explicit` 与本次 `status` 的 token；目标不在草稿中时报 `TARGET_ITEM_MISSING`；非 pre 环境同样要 `--allow-non-pre`；删除前后校验非目标项、active release 未被误动。
 - `namespace-status`：只读查看应用类型、目标 namespace 在各 env 是否已存在、namespace 分组和新建权限。
 - `namespace-plan`：校验名称、备注、格式和加密组合，计算 `operation` 与并发保护 token，不写入。
 - `namespace-create`：用户明确授权后新建 namespace，并回读校验非目标 namespace、空配置项和无 release。
@@ -288,6 +289,9 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/script
 - `CONCURRENT_DRAFT_CHANGED`：重新运行 `plan`，不要复用旧 token。
 - `ACTIVE_RELEASE_CHANGED`：草稿可能已保存，但有人并发发布；立即停止，回读当前状态并向用户报告，不能自动回滚或再次写入。
 - `NON_TARGET_ITEM_CHANGED`：立即停止并报告并发修改；不要覆盖其它 key。
+- `DELETE_AUTHORIZATION_REQUIRED` / `EXPECTED_TOKEN_REQUIRED_FOR_DELETE`：删除缺少明确授权或本次 `status` 的 token；不要删除。
+- `TARGET_ITEM_MISSING` / `ACTIVE_KEY_MISSING`：草稿里没有该 key，或 active release 里没有该 key（无需发布删除）；先核对目标。
+- `DRAFT_DELETE_READBACK_TIMEOUT` / `PUBLISH_DELETE_READBACK_TIMEOUT`：删除或发布请求已发出但回读仍看到该 key；停止并人工核对，不要重复删除。
 - `PUBLISH_AUTHORIZATION_REQUIRED`：用户没有明确授权发布，或脚本缺少 `--publish-authorization=explicit`；不要发布。
 - `EXPECTED_TOKEN_REQUIRED_FOR_PUBLISH`：发布缺少本次 `plan` 的 `currentStateToken`；重新运行 `plan` 后再决定是否发布。
 - `PUBLISH_REQUIRES_APPROVAL`：该环境需要走 Hippo 审批流；脚本不会绕过审批直接发布，向用户报告审批要求。

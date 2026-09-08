@@ -28,6 +28,7 @@ const COMMANDS = new Set([
   'plan',
   'upsert',
   'verify',
+  'delete-item',
   'namespace-status',
   'namespace-plan',
   'namespace-create',
@@ -50,6 +51,8 @@ const NAMESPACE_ROLE_TYPES = { modify: 'ModifyNamespace', release: 'ReleaseNames
 // Hippo 通常已经把创建者自动加上，这里做兜底，也覆盖“换人创建”的情况。
 const DEFAULT_NAMESPACE_GRANT_USERS = ['joneyshao'];
 const PUBLISH_AUTHORIZATION_VALUE = 'explicit';
+// 删除配置项同样要用户在当前对话明确授权；删除只动草稿，发布删除才影响运行期。
+const DELETE_AUTHORIZATION_VALUE = 'explicit';
 const CREATE_AUTHORIZATION_VALUE = 'explicit';
 const GRANT_AUTHORIZATION_VALUE = 'explicit';
 // 与 Hippo 页面 valdr 约束保持一致：名称只能是字母数字下划线且不超过 64 字符
@@ -500,6 +503,56 @@ function summarizeReleaseSelectedItem(item) {
   };
 }
 
+// 删除项的 key 粒度发布载荷，与 Hippo 发布弹窗（release-modal-directive）对 isDeleted 项的编码一致：
+// { id, key, oldValue: 上次发布值, newValue: null, type: 'delete' }。
+function releaseDeletedItem(target, targetItem, active) {
+  assert(hasOwn(active.configurations, target.key), 'ACTIVE_KEY_MISSING',
+    '目标 key 不在 active release 中，无需发布删除');
+  // 与 load_namespace 返回的已删除行一致：已删除项来自上次发布快照，id 为 0，newValue 为空串（不是 null）。
+  return {
+    id: 0,
+    key: target.key,
+    oldValue: String(active.configurations[target.key] ?? ''),
+    newValue: '',
+    type: 'delete',
+  };
+}
+
+function summarizeReleaseDeletedItem(item) {
+  return { key: item.key, type: item.type, oldValueSha256: sha256(item.oldValue) };
+}
+
+// 删除草稿项后的预期草稿差异：active 里有该 key 则它变成"待发布的删除"，否则从差异里消失。
+function diffKeysAfterDelete(beforeDiffKeys, target, activeConfig) {
+  const result = new Set(beforeDiffKeys);
+  if (hasOwn(activeConfig, target.key)) result.add(target.key);
+  else result.delete(target.key);
+  return [...result].sort();
+}
+
+function deleteOptions(args, summarized) {
+  assert(String(args['delete-authorization'] || '') === DELETE_AUTHORIZATION_VALUE,
+    'DELETE_AUTHORIZATION_REQUIRED',
+    '删除必须由用户在当前对话中明确授权，并传 --delete-authorization=explicit');
+  assert(args['expected-current-token'], 'EXPECTED_TOKEN_REQUIRED_FOR_DELETE',
+    '删除必须携带本次 status 返回的 currentStateToken', {
+      currentStateToken: summarized.currentStateToken,
+    });
+  assert(String(args['expected-current-token']) === summarized.currentStateToken,
+    'CONCURRENT_DRAFT_CHANGED', '目标配置状态已变化，请重新运行 status 取 token');
+  const publish = flagEnabled(args.publish);
+  if (publish) {
+    assert(String(args['publish-authorization'] || '') === PUBLISH_AUTHORIZATION_VALUE,
+      'PUBLISH_AUTHORIZATION_REQUIRED', '发布删除必须传 --publish-authorization=explicit');
+  }
+  return {
+    publish,
+    releaseTitle: String(args['release-title'] || `${formatReleaseTimestamp()}-release`),
+    releaseComment: String(args['release-comment'] || `codex delete ${summarized.summary.target}`),
+    isEmergencyPublish: flagEnabled(args['emergency-publish']),
+  };
+}
+
 function formatReleaseTimestamp(date = new Date()) {
   const pad = (value) => String(value).padStart(2, '0');
   return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}`
@@ -805,7 +858,7 @@ function resolveRuntime(args, command) {
   if (namespace) {
     assert(namespace.name, 'NAMESPACE_NAME_REQUIRED', `${command} 必须传 --namespace=<namespace 名>`);
   }
-  if (command === 'upsert' && env !== SITE_UNGUARDED_WRITE_ENVS[site]) {
+  if ((command === 'upsert' || command === 'delete-item') && env !== SITE_UNGUARDED_WRITE_ENVS[site]) {
     assert(args['allow-non-pre'], 'NON_PRE_WRITE_REJECTED',
       `写入 ${env} 必须由用户明确指定环境并传 --allow-non-pre`);
   }
@@ -909,6 +962,7 @@ async function serviceInfo(page) {
       releaseServiceReady: Boolean(releaseService),
       createItemReady: typeof service.create_item === 'function',
       updateItemReady: typeof service.update_item === 'function',
+      deleteItemReady: typeof service.delete_item === 'function',
       publishReady: Boolean(releaseService) && typeof releaseService.publish === 'function',
       createItemArity: typeof service.create_item === 'function' ? service.create_item.length : null,
       updateItemArity: typeof service.update_item === 'function' ? service.update_item.length : null,
@@ -1365,6 +1419,109 @@ async function waitForPublishedState(page, target, paths, desired, timeoutMs = 1
   fail('PUBLISH_READBACK_TIMEOUT', '发布后 active release 未得到目标配置值');
 }
 
+async function deleteDraftItem(page, target, targetItem) {
+  assert(targetItem && targetItem.id !== undefined && targetItem.id !== null, 'TARGET_ITEM_ID_MISSING',
+    '待删除的配置项缺少 id');
+  return page.evaluate(async ({ appId, env, cluster, namespaceName, itemId }) => {
+    const candidates = [
+      document.documentElement,
+      document.body,
+      document.querySelector('#wrapper'),
+      document.querySelector('.apollo-container'),
+    ].filter(Boolean);
+    const injector = candidates.map((element) => {
+      try {
+        return window.angular.element(element).injector();
+      } catch (_) {
+        return null;
+      }
+    }).find(Boolean);
+    if (!injector) throw new Error('Angular injector unavailable');
+    const configService = injector.get('ConfigService');
+    if (typeof configService.delete_item !== 'function') throw new Error('ConfigService.delete_item unavailable');
+    try {
+      await configService.delete_item(appId, env, cluster, namespaceName, itemId);
+    } catch (error) {
+      // $q reject 会把 $http 响应对象整个抛出来；只带回状态与服务端消息，不带配置值。
+      const data = error && typeof error === 'object' ? error.data : null;
+      return {
+        operation: 'delete',
+        itemId,
+        rejected: true,
+        status: error && typeof error === 'object' ? error.status ?? null : null,
+        message: data && typeof data === 'object' ? String(data.message || data.msg || '').slice(0, 300)
+          : String(data || error).slice(0, 300),
+      };
+    }
+    return { operation: 'delete', itemId };
+  }, {
+    appId: target.appId,
+    env: target.env,
+    cluster: target.cluster,
+    namespaceName: target.namespaceName,
+    itemId: targetItem.id,
+  });
+}
+
+async function waitForDraftItemRemoved(page, target, paths, timeoutMs = 10000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const latest = await readState(page, paths);
+    if (!latest.items.some((candidate) => String(candidate.key) === target.key)) return latest;
+    await page.waitForTimeout(500);
+  }
+  fail('DRAFT_DELETE_READBACK_TIMEOUT', '删除后回读草稿仍包含目标 key');
+}
+
+async function waitForActiveKeyRemoved(page, target, paths, timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const latest = await readState(page, paths);
+    const active = parseActive(latest.active);
+    if (!hasOwn(active.configurations, target.key)) return latest;
+    await page.waitForTimeout(500);
+  }
+  fail('PUBLISH_DELETE_READBACK_TIMEOUT', '发布后 active release 仍包含目标 key');
+}
+
+async function publishDeletionAndVerify(page, target, paths, targetItem, beforeActive, options) {
+  if (!hasOwn(beforeActive.configurations, target.key)) {
+    return {
+      publishAttempted: false,
+      publishSkipped: true,
+      publishSkipReason: 'active release does not contain the key',
+      published: false,
+    };
+  }
+  const selectedItem = releaseDeletedItem(target, targetItem, beforeActive);
+  const release = await publishDraft(page, target, selectedItem, options);
+  const afterState = await waitForActiveKeyRemoved(page, target, paths);
+  const afterSummarized = summarizeState(target, paths, afterState);
+  const changedKeys = activeConfigChangedKeys(beforeActive.configurations, afterSummarized.active.configurations);
+  assert(changedKeys.length === 1 && changedKeys[0] === target.key,
+    'NON_TARGET_ACTIVE_CONFIG_CHANGED', '发布删除后 active release 出现非目标 key 变化', {
+      changedKeys,
+      targetKey: target.key,
+    });
+  return {
+    publishAttempted: true,
+    published: true,
+    releaseTitle: options.releaseTitle,
+    releaseCommentSha256: sha256(options.releaseComment),
+    emergencyPublish: options.isEmergencyPublish,
+    releaseSelectedItem: summarizeReleaseDeletedItem(selectedItem),
+    activeChangedKeys: changedKeys,
+    activeReleaseKeyBefore: beforeActive.release?.releaseKey || null,
+    activeReleaseKeyAfter: afterSummarized.active.release?.releaseKey || null,
+    activeReleaseIdBefore: beforeActive.release?.id ?? null,
+    activeReleaseIdAfter: afterSummarized.active.release?.id ?? null,
+    activeKeysAfter: Object.keys(afterSummarized.active.configurations).sort(),
+    afterDraftDiffKeys: afterSummarized.summary.draftDiffKeys,
+    otherDraftKeysLeftUnpublished: afterSummarized.summary.draftDiffKeys.filter((key) => key !== target.key),
+    publishResult: release,
+  };
+}
+
 async function publishDraft(page, target, selectedItem, options) {
   const result = await page.evaluate(async ({
     appId,
@@ -1421,16 +1578,29 @@ async function publishDraft(page, target, selectedItem, options) {
         };
       }
     }
-    const release = await releaseService.publish(
-      appId,
-      env,
-      cluster,
-      namespaceName,
-      releaseTitle,
-      releaseComment,
-      isEmergencyPublish,
-      releaseSelectedItems,
-    );
+    let release;
+    try {
+      release = await releaseService.publish(
+        appId,
+        env,
+        cluster,
+        namespaceName,
+        releaseTitle,
+        releaseComment,
+        isEmergencyPublish,
+        releaseSelectedItems,
+      );
+    } catch (error) {
+      // $q reject 抛的是 $http 响应对象；只带回状态码与服务端消息，不带配置值。
+      const data = error && typeof error === 'object' ? error.data : null;
+      return {
+        approvalRequired: false,
+        rejected: true,
+        status: error && typeof error === 'object' ? error.status ?? null : null,
+        message: data && typeof data === 'object' ? String(data.message || data.msg || '').slice(0, 300)
+          : String(data || error).slice(0, 300),
+      };
+    }
     return {
       approvalRequired: false,
       id: release?.id ?? null,
@@ -1451,6 +1621,10 @@ async function publishDraft(page, target, selectedItem, options) {
     releaseComment: options.releaseComment,
     isEmergencyPublish: options.isEmergencyPublish,
     releaseSelectedItems: [selectedItem],
+  });
+  assert(!result.rejected, 'PUBLISH_REJECTED', 'Hippo 拒绝发布', {
+    status: result.status,
+    message: result.message,
   });
   assert(!result.approvalRequired, 'PUBLISH_REQUIRES_APPROVAL',
     '该环境发布需要走 Hippo 审批流，脚本不会绕过审批直接发布', {
@@ -1524,6 +1698,9 @@ function helpText() {
   hippo_draft_config.js plan --app-id=<app> --namespace=<ns> --key=<key> --value-file=<file>
   hippo_draft_config.js upsert --app-id=<app> --namespace=<ns> --key=<key> --value-file=<file>
   hippo_draft_config.js verify --app-id=<app> --namespace=<ns> --key=<key> --value-file=<file>
+  hippo_draft_config.js delete-item --app-id=<app> --namespace=<ns> --key=<key>
+      --delete-authorization=explicit --expected-current-token=<status token>
+      [--publish --publish-authorization=explicit] [--allow-non-pre]
   hippo_draft_config.js namespace-status --app-id=<app> --namespace=<new ns>
   hippo_draft_config.js namespace-plan --app-id=<app> --namespace=<new ns> --comment=<10-64 字符备注>
   hippo_draft_config.js namespace-create --app-id=<app> --namespace=<new ns> --comment=<备注>
@@ -1543,6 +1720,11 @@ Overseas: env prefixes are per site, mx -> mxyw_pre/mxyw_prod, id -> ynyw_prod (
   so its default env is ynyw_prod and every id write needs --allow-non-pre).
   --env=prod --hippo-site=mx resolves to mxyw_prod; a full env such as mxyw_pre routes to its site by itself.
 Use --hippo-site=stable with explicit envs such as pdwl_pre when navtree shows a stable env prefix.
+Delete: delete-item removes one draft item (ConfigService.delete_item) after the user explicitly
+authorizes it; it needs the status token, refuses when the key is absent from the draft, and verifies
+that other items and the active release are untouched. With --publish it releases only that key as a
+type=delete entry (same key-granular payload the Hippo UI sends) and verifies the active release lost
+exactly that key. Without --publish the running config is unchanged.
 Safety: upsert saves a draft by default. Publishing requires --publish, --publish-authorization=explicit,
 and the current plan token via --expected-current-token. Publish selects only the target key.
 Stable is the exception: on the stable site upsert publishes the target key automatically after the
@@ -1590,6 +1772,18 @@ function runSelfTest() {
   assert(normalizeEnv(undefined, 'mx') === 'mxyw_pre', 'SELF_TEST_FAILED', '墨西哥缺省环境应为 mxyw_pre');
   assert(normalizeEnv(undefined, 'id') === 'ynyw_prod', 'SELF_TEST_FAILED', '印尼缺省环境应为 ynyw_prod');
   assert(SITE_UNGUARDED_WRITE_ENVS.id === null, 'SELF_TEST_FAILED', '印尼不应存在免保护写入环境');
+  const delTarget = { key: 'k1' };
+  const delActive = { configurations: { k1: 'v1', k2: 'v2' } };
+  const delItem = releaseDeletedItem(delTarget, { id: 7 }, delActive);
+  assert(delItem.type === 'delete' && delItem.id === 0 && delItem.oldValue === 'v1' && delItem.newValue === '',
+    'SELF_TEST_FAILED', '删除发布载荷计算失败');
+  assert(JSON.stringify(diffKeysAfterDelete(['k3'], delTarget, delActive.configurations)) === JSON.stringify(['k1', 'k3']),
+    'SELF_TEST_FAILED', '删除后草稿差异（active 含 key）计算失败');
+  assert(JSON.stringify(diffKeysAfterDelete(['k1', 'k3'], delTarget, { k2: 'v2' })) === JSON.stringify(['k3']),
+    'SELF_TEST_FAILED', '删除后草稿差异（active 不含 key）计算失败');
+  let delFailed = null;
+  try { releaseDeletedItem(delTarget, { id: 7 }, { configurations: { k2: 'v2' } }); } catch (error) { delFailed = error.code; }
+  assert(delFailed === 'ACTIVE_KEY_MISSING', 'SELF_TEST_FAILED', 'active 不含 key 时应拒绝发布删除');
   assert(resolveSite('墨西哥') === 'mx' && resolveSite('kredito') === 'id',
     'SELF_TEST_FAILED', '海外站点别名解析失败');
   assert(resolveSite('mxyw_prod') === 'mx' && resolveSite('ynyw_prod') === 'id',
@@ -2090,8 +2284,8 @@ async function runBrowserCommand(command, args) {
 
     const state = await readState(browser.page, runtime.paths);
     const summarized = summarizeState(runtime.target, runtime.paths, state);
-    assert(!flagEnabled(args.publish) || command === 'upsert', 'PUBLISH_COMMAND_INVALID',
-      '只有 upsert 支持 --publish；plan/verify/status 不会发布');
+    assert(!flagEnabled(args.publish) || command === 'upsert' || command === 'delete-item',
+      'PUBLISH_COMMAND_INVALID', '只有 upsert/delete-item 支持 --publish；plan/verify/status 不会发布');
     const access = await readNamespaceAccess(browser.page, runtime.target);
     const accessSummary = {
       roleNamespace: access.roleNamespace,
@@ -2099,6 +2293,95 @@ async function runBrowserCommand(command, args) {
       hasReleasePermission: access.hasReleasePermission,
     };
     if (command === 'status') return { command, ...summarized.summary, ...accessSummary };
+
+    if (command === 'delete-item') {
+      const options = deleteOptions(args, summarized);
+      const pendingDeletion = !summarized.targetItem && hasOwn(summarized.active.configurations, runtime.target.key);
+      if (pendingDeletion) {
+        // 草稿行已经删掉、active 里还有：只剩"发布这次删除"这一步。
+        assert(options.publish, 'TARGET_ITEM_MISSING',
+          '目标 key 的草稿已删除但尚未发布；补发布请加 --publish --publish-authorization=explicit');
+        await assertNamespaceWriteAccess(browser.page, runtime.target, access, {
+          requireModify: false,
+          requirePublish: true,
+        });
+        const publishResult = await publishDeletionAndVerify(
+          browser.page,
+          runtime.target,
+          runtime.paths,
+          null,
+          summarized.active,
+          options,
+        );
+        return {
+          command,
+          ...summarized.summary,
+          ...accessSummary,
+          operation: 'delete',
+          draftItemDeleted: false,
+          draftAlreadyDeleted: true,
+          nonTargetActiveConfigurationsUnchanged: true,
+          ...publishResult,
+        };
+      }
+      assert(summarized.targetItem, 'TARGET_ITEM_MISSING', '目标 key 在草稿中不存在，无可删除项');
+      await assertNamespaceWriteAccess(browser.page, runtime.target, access, {
+        requireModify: true,
+        requirePublish: options.publish,
+      });
+      const beforeOthers = itemMap(state.items, runtime.target.key);
+      const expectedDiff = diffKeysAfterDelete(summarized.summary.draftDiffKeys, runtime.target,
+        summarized.active.configurations);
+      const mutation = await deleteDraftItem(browser.page, runtime.target, summarized.targetItem);
+      assert(!mutation.rejected, 'DELETE_ITEM_REJECTED', 'Hippo 拒绝删除配置项', {
+        status: mutation.status,
+        message: mutation.message,
+        itemId: mutation.itemId,
+      });
+      const afterState = await waitForDraftItemRemoved(browser.page, runtime.target, runtime.paths);
+      const afterSummarized = summarizeState(runtime.target, runtime.paths, afterState);
+      const unchanged = releaseUnchanged(summarized.active, afterSummarized.active);
+      assert(unchanged.releaseKey && unchanged.configurations && unchanged.releaseId,
+        'ACTIVE_RELEASE_CHANGED', '删除草稿期间 active release 发生变化；停止后续写入并人工核对', unchanged);
+      assert(mapsEqual(beforeOthers, itemMap(afterState.items, runtime.target.key)), 'NON_TARGET_ITEM_CHANGED',
+        '删除草稿期间发现非目标配置项变化；停止后续写入并人工核对');
+      assert(JSON.stringify(afterSummarized.summary.draftDiffKeys) === JSON.stringify(expectedDiff),
+        'UNEXPECTED_DRAFT_DIFF', '删除后的草稿差异 key 不符合预期', {
+          expected: expectedDiff,
+          actual: afterSummarized.summary.draftDiffKeys,
+        });
+      const base = {
+        command,
+        ...summarized.summary,
+        ...accessSummary,
+        operation: mutation.operation,
+        draftItemDeleted: true,
+        deletedItemId: mutation.itemId,
+        deletedValueSha256: sha256(String(summarized.targetItem.value ?? '')),
+        otherItemsUnchanged: true,
+        activeReleaseUnchangedBeforePublish: true,
+        remainingDraftKeys: afterState.items.map((item) => String(item.key)).sort(),
+      };
+      if (!options.publish) {
+        return {
+          ...base,
+          afterDraftDiffKeys: afterSummarized.summary.draftDiffKeys,
+          activeReleaseKeyUnchanged: true,
+          activeConfigurationsUnchanged: true,
+          publishAttempted: false,
+          published: false,
+        };
+      }
+      const publishResult = await publishDeletionAndVerify(
+        browser.page,
+        runtime.target,
+        runtime.paths,
+        summarized.targetItem,
+        afterSummarized.active,
+        options,
+      );
+      return { ...base, nonTargetActiveConfigurationsUnchanged: true, ...publishResult };
+    }
 
     const desired = readDesired(args);
     const plan = planChange(runtime.target, summarized, desired,
@@ -2277,6 +2560,9 @@ if (require.main === module) {
 
 module.exports = {
   activeConfigChangedKeys,
+  deleteOptions,
+  diffKeysAfterDelete,
+  releaseDeletedItem,
   appOwnersFrom,
   buildNamespacePaths,
   buildPaths,
