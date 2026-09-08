@@ -174,6 +174,27 @@ async function gotoLexiao(page, url, env = 'pre') {
   return { envClick, rowCount: prev };
 }
 
+// 从 pipeline_job_url 提取 Jenkins 构建号（/job/<name>/<N>/）。
+// 构建是否真的触发过，唯一可靠判据是构建号跃迁：pipeline_status_desc / artifact_status_desc
+// 对上一轮已成功的应用本来就是「执行成功 / 制作成功」，据此判完成会把「从未触发」当成「已完成」。
+function jobBuildNo(url) {
+  const match = String(url || '').match(/\/job\/[^/]+\/(\d+)\/?/);
+  return match ? Number(match[1]) : null;
+}
+
+// 等页面上没有可见弹窗再返回。批量点击多行时，前一行的确认框/提示未消散就点下一行，
+// 下一行的确认框不会出现，confirmIfNeeded 只能等到超时——实测每批固定漏掉第 2 个应用。
+async function waitDialogsCleared(page, timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs;
+  let remaining = [];
+  while (Date.now() < deadline) {
+    remaining = await visibleDialogs(page);
+    if (!remaining.length) return { cleared: true, waitedMs: timeoutMs - (deadline - Date.now()) };
+    await page.waitForTimeout(500);
+  }
+  return { cleared: false, remaining: remaining.slice(0, 2) };
+}
+
 async function visibleDialogs(page) {
   return page.evaluate(() => {
     const norm = (text) => String(text || '').replace(/\s+/g, ' ').trim();
@@ -269,8 +290,10 @@ async function confirmIfNeeded(page, timeoutMs = 20000) {
   while (Date.now() < deadline) {
     last = await visibleDialogs(page);
     const text = last.map((item) => item.text).join(' ');
-    if (/发布正在执行|部署正在执行|操作成功|发布成功|推送中|发布中/.test(text)) {
-      return { confirmed: true, reason: 'already-running-or-success', dialogs: last.slice(0, 2) };
+    const running = text.match(/发布正在执行|部署正在执行|操作成功|发布成功|推送中|发布中/);
+    if (running) {
+      // 批量场景下这里可能命中的是上一行应用的残留弹窗，回传 matchedText 便于事后分辨。
+      return { confirmed: true, reason: 'already-running-or-success', matchedText: running[0], dialogs: last.slice(0, 2) };
     }
     for (const label of ['确定', '确认']) {
       const clicked = await clickVisibleButton(page, label);
@@ -361,7 +384,7 @@ async function branchIntegrate(page, url) {
   return { openIntegration, batchClick, confirm, dialogs: await visibleDialogs(page), outcome: batchClick.clicked ? 'triggered' : 'not-triggered' };
 }
 
-async function waitBuild(page, versionId, appId, projectId, env, timeoutMs = 900000, pollMs = 30000) {
+async function waitBuild(page, versionId, appId, projectId, env, timeoutMs = 900000, pollMs = 30000, beforeBuildNo = null) {
   const deadline = Date.now() + timeoutMs;
   const snapshots = [];
   let last = null;
@@ -382,12 +405,16 @@ async function waitBuild(page, versionId, appId, projectId, env, timeoutMs = 900
       app_name: target?.app_name,
       pipeline_status_desc: target?.pipeline_status_desc,
       pipeline_job_url: target?.pipeline_job_url,
+      build_no: jobBuildNo(target?.pipeline_job_url),
+      before_build_no: beforeBuildNo,
       env_artifact_status_desc: envArtifact?.artifact_status_desc,
     };
     snapshots.push(last);
     const text = `${last.pipeline_status_desc || ''} ${last.env_artifact_status_desc || ''}`;
-    if (/失败/.test(text)) return { outcome: 'failed', last, snapshots: snapshots.slice(-12) };
-    if (last.pipeline_status_desc === '执行成功' && last.env_artifact_status_desc === '制作成功') {
+    // 状态失败只在本次构建号上才算数，否则会把上一轮的失败当成本次失败。
+    const buildAdvanced = beforeBuildNo == null || (last.build_no != null && last.build_no > beforeBuildNo);
+    if (buildAdvanced && /失败/.test(text)) return { outcome: 'failed', last, snapshots: snapshots.slice(-12) };
+    if (buildAdvanced && last.pipeline_status_desc === '执行成功' && last.env_artifact_status_desc === '制作成功') {
       return { outcome: 'success', last, snapshots: snapshots.slice(-12) };
     }
     await page.waitForTimeout(pollMs);
@@ -439,13 +466,17 @@ async function waitBuildMany(page, versionId, targets, env, timeoutMs = 900000, 
         project_name: target?.project_name ?? targetApp.pipeline?.project_name,
         pipeline_status_desc: target?.pipeline_status_desc,
         pipeline_job_url: target?.pipeline_job_url,
+        build_no: jobBuildNo(target?.pipeline_job_url),
+        before_build_no: jobBuildNo(targetApp.pipeline?.pipeline_job_url),
         env_artifact_status_desc: envArtifact?.artifact_status_desc,
       };
     });
     snapshots.push({ at: new Date().toISOString(), targets: last });
-    const failed = last.filter((item) => /失败/.test(`${item.pipeline_status_desc || ''} ${item.env_artifact_status_desc || ''}`));
+    // 只有构建号相对触发前跃迁了，状态文字才代表本次构建；否则读到的是上一轮的遗留状态。
+    const advanced = (item) => item.before_build_no == null || (item.build_no != null && item.build_no > item.before_build_no);
+    const failed = last.filter((item) => advanced(item) && /失败/.test(`${item.pipeline_status_desc || ''} ${item.env_artifact_status_desc || ''}`));
     if (failed.length) return { outcome: 'failed', failed, last, snapshots: snapshots.slice(-12) };
-    const allSuccess = last.every((item) => item.pipeline_status_desc === '执行成功' && item.env_artifact_status_desc === '制作成功');
+    const allSuccess = last.every((item) => advanced(item) && item.pipeline_status_desc === '执行成功' && item.env_artifact_status_desc === '制作成功');
     if (allSuccess) return { outcome: 'success', last, snapshots: snapshots.slice(-12) };
     await page.waitForTimeout(pollMs);
   }
@@ -457,7 +488,11 @@ async function buildApp(page, url, versionId, appName, appId, projectId, env, ti
   const before = (await listApps(page, url, versionId, env)).apps.find((item) => item.app_name === appName) || null;
   const buildClick = await clickRowButton(page, appName, '构建');
   const confirm = buildClick.clicked ? await confirmIfNeeded(page, 20000) : null;
-  const wait = appId || projectId ? await waitBuild(page, versionId, appId, projectId, env, timeoutMs, pollMs) : null;
+  if (!buildClick.clicked || !confirm?.confirmed) {
+    return { before, buildClick, confirm, wait: { outcome: 'not-triggered', reason: !buildClick.clicked ? 'build-button-not-clicked' : 'confirm-failed' } };
+  }
+  const beforeBuildNo = jobBuildNo(before?.pipeline?.pipeline_job_url);
+  const wait = appId || projectId ? await waitBuild(page, versionId, appId, projectId, env, timeoutMs, pollMs, beforeBuildNo) : null;
   return { before, buildClick, confirm, wait };
 }
 
@@ -468,8 +503,14 @@ async function buildMany(page, url, versionId, appNames, env, timeoutMs = 900000
   for (const target of targets) {
     const buildClick = await clickRowButton(page, target.app_name, '构建');
     const confirm = buildClick.clicked ? await confirmIfNeeded(page, 20000) : null;
-    clicks.push({ app_name: target.app_name, buildClick, confirm });
-    await page.waitForTimeout(1000);
+    // 等本行的确认框/提示消散再点下一行，否则下一行的确认框不会出现。
+    const cleared = await waitDialogsCleared(page, 15000);
+    clicks.push({ app_name: target.app_name, buildClick, confirm, dialogsCleared: cleared });
+  }
+  const notTriggered = clicks.filter((item) => !item.buildClick?.clicked || !item.confirm?.confirmed).map((item) => item.app_name);
+  if (notTriggered.length) {
+    // 触发失败的应用仍带着上一轮的「执行成功 / 制作成功」，进入 wait 会被当成已完成。
+    return { before: targets, all_apps_count: listed.apps.length, clicks, wait: { outcome: 'not-triggered', not_triggered: notTriggered } };
   }
   const wait = await waitBuildMany(page, versionId, targets, env, timeoutMs, pollMs);
   return { before: targets, all_apps_count: listed.apps.length, clicks, wait };

@@ -75,10 +75,11 @@ For multiple apps, split the work into two phases: branch integration and build 
    - If `批量集成分支` is disabled and the target row already shows the success statuses above, report it as "already integrated" and continue.
    - If the target row is not integrated but the button is disabled or missing, stop before build and report the blocker.
 3. Build:
+   - **Library-module prerequisite.** If the change touches a module that other apps consume by Maven coordinate (a `*-common`, `*-engine`, `*-kernel`, or any module whose artifactId appears in another repo's pom), the app build does NOT publish that jar: neither `integration-pipeline-*` nor `feature-pipeline-*` has a jar-deploy stage. Downstream apps rebuilt before the jar is republished will silently pick up the OLD jar and every later step (build success, deploy success, app startup) will still look fine. Before building any downstream app: publish the jar to Nexus (Lexiao 包管理 or the team's jar pipeline), then confirm `.../repositories/snapshots/<group path>/<artifactId>/<version>/maven-metadata.xml` shows a new `<timestamp>` / `<buildNumber>`. Only a metadata jump counts as published; the build dialog text "如依赖Jar包有变更，请先上传依赖Jar到Nexus，然后重新构建" refers to exactly this.
    - For one app, click only the target app row's `构建` button and confirm the build dialog.
    - For multiple apps, click each target app row's `构建` button first, without waiting for previous target apps to finish. Then poll the build API for all target apps together.
    - Do this even when the app row currently shows `已发布`, unless the user explicitly says not to rebuild.
-   - Build is usually slow; poll `ci_pipeline_status_batch` about every 30 seconds, not high-frequency. Continue until every target `project_id` / `app_id` has `pipeline_status_desc=执行成功` and the pre-release artifact has `artifact_status_desc=制作成功`.
+   - Build is usually slow; poll `ci_pipeline_status_batch` about every 30 seconds, not high-frequency. A build counts as complete only when ALL of: the Jenkins build number in `pipeline_job_url` (`/job/<name>/<N>/`) is greater than it was before the click, `pipeline_status_desc=执行成功`, and the pre-release artifact has `artifact_status_desc=制作成功`. Status text alone is not enough: an app built in an earlier cycle already shows 执行成功 / 制作成功 before the new build starts, so a click that never registered would be reported as done. The script records `before_build_no` / `build_no` per target and returns `outcome=not-triggered` when any row's confirm dialog was not clicked; treat that as a failure and re-trigger those apps individually.
    - Record each target's Jenkins job URL and artifact status. If any build fails, use `jenkins-pipeline-fix` when appropriate, then stop before publish unless the user asked to auto-fix and rebuild.
 4. Publish order:
    - Click only the target app row's `部署详情`.
@@ -112,7 +113,9 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/script
   --success-text=<target-app-name>
 ```
 
-Profile selection follows `get-browser-session`: explicit `--profile`, then `BROWSER_SESSION_PROFILE`, then `DEVTOOLS_BROWSER_PROFILE`, and finally `~/.cache/lexiao-browser-profile`. If an isolated writable profile is required, choose it explicitly and reuse it for the whole deployment flow. If login is required, open a headed browser and ask the user to complete SSO/MOA in the browser; never ask for passwords, OTPs, cookies, or private keys in chat.
+Profile selection follows `get-browser-session`: explicit `--profile`, then `BROWSER_SESSION_PROFILE`, then `DEVTOOLS_BROWSER_PROFILE`, and finally `~/.cache/lexiao-browser-profile`. If an isolated writable profile is required, choose it explicitly and reuse it for the whole deployment flow.
+
+Concurrency: one Chromium instance per profile directory, so every concurrent build/deploy/status task needs its own profile copy (copy a logged-in profile and delete its `SingletonLock`); sharing a profile across concurrent tasks produces silent hangs and stale reads. Keep total concurrent browser tasks at 4 or fewer: at 10 concurrent, 7 of 10 deploy clicks failed with `row-not-found`; at 5-6, progress slowed to a crawl. Each profile copy is ~700 MB, so delete the copies when the flow finishes; 17 stale copies (14 GB) were enough to trigger low-memory kills of background tasks. If login is required, open a headed browser and ask the user to complete SSO/MOA in the browser; never ask for passwords, OTPs, cookies, or private keys in chat.
 
 ## Detailed References
 
