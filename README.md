@@ -11,6 +11,7 @@
 |---|---|
 | `build-codeagent` | 执行后端 - 多后端 codeagent 处理大改动/并行子任务（被 dev-workflow 复用） |
 | `debug-systematic` | 系统化调试方法论：复现→定位→根因→验证 |
+| `convert-epub-to-markdown` | EPUB 转 Markdown，保留原件与图片，自动选择全文或分卷并校验正文 |
 | `skill-authoring` | 按仓库约定创建/维护 skill 的元技能 |
 
 ## skills/dev-workflow — 研发阶段主线与编排

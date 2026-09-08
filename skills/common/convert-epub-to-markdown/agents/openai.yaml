@@ -1,0 +1,4 @@
+interface:
+  display_name: "EPUB 转 Markdown"
+  short_description: "保留 EPUB 原件，按阅读顺序转换并校验正文，自动选择全文或分卷输出"
+  default_prompt: "使用 $convert-epub-to-markdown 把 EPUB 转为适合文档问答的 Markdown，保留原件并验证转换结果。"
