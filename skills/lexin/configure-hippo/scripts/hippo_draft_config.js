@@ -20,7 +20,7 @@ const SITE_BASE_URLS = {
 };
 const STANDARD_BASE_URL = SITE_BASE_URLS.standard;
 const STABLE_BASE_URL = SITE_BASE_URLS.stable;
-const DEFAULT_PROFILE = '/home/joney/.cache/healthy-dashboard-profile';
+const DEFAULT_PROFILE = '/home/joney/.local/state/agent-tools/browser-profiles/healthy';
 const DEFAULT_TOOL_DIR = path.join(os.homedir(), 'tools/lexiao-browser');
 const COMMANDS = new Set([
   'doctor',

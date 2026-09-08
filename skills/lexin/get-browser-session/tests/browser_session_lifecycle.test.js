@@ -149,6 +149,27 @@ test('cookie domain matching follows browser suffix boundaries', () => {
   assert.equal(cookieMatchesDomain('.fenqile.com', 'com'), false);
 });
 
+test('profile aliases and canonical paths share one cross-process lock', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-profile-alias-'));
+  const profile = path.join(directory, 'main');
+  const alias = path.join(directory, 'old-profile');
+  fs.mkdirSync(profile);
+  fs.symlinkSync(profile, alias);
+  let release;
+  try {
+    release = await acquireProfileLock(alias, { timeoutMs: 20, pollMs: 1 });
+    assert.equal(fs.existsSync(`${profile}.agent-tools.lock`), true);
+    assert.equal(fs.existsSync(`${alias}.agent-tools.lock`), false);
+    await assert.rejects(acquireProfileLock(profile, { timeoutMs: 10, pollMs: 1 }), /profile is busy/);
+    release();
+    release = await acquireProfileLock(profile, { timeoutMs: 20, pollMs: 1 });
+    await assert.rejects(acquireProfileLock(alias, { timeoutMs: 10, pollMs: 1 }), /profile is busy/);
+  } finally {
+    if (release) release();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('authenticated requests detect login redirects and upstream errors', () => {
   const targetUrl = 'https://healthy.lexincloud.com/api/status';
   const redirect = classifyRequestSession({

@@ -18,7 +18,7 @@ class BrowserSessionRequestTest(unittest.TestCase):
         if "BROWSER_SESSION_PROFILE" not in os.environ and "DEVTOOLS_BROWSER_PROFILE" not in os.environ:
             self.assertEqual(
                 common.DEFAULT_BROWSER_PROFILE,
-                str(Path.home() / ".cache" / "lexiao-browser-profile"),
+                str(Path.home() / ".local" / "state" / "agent-tools" / "browser-profiles" / "main"),
             )
 
     @patch("devtools_mcp.common.browser_session_request")

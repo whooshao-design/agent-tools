@@ -8,14 +8,14 @@
 - stable/测试/项目环境 API host：`http://stable-hippo.oa.fenqile.com`
 - 墨西哥入口与 API host：`https://hippo.oa.wowcredito.com`
 - 印尼入口与 API host：`https://hippo.oa.kredito.id`
-- 默认浏览器 profile：`/home/joney/.cache/healthy-dashboard-profile`（四个站点共用同一个 passport 登录态）
+- 默认浏览器 profile：`/home/joney/.local/state/agent-tools/browser-profiles/healthy`（四个站点共用同一个 passport 登录态）
 - 常用登录检查成功标识：页面标题 `Hippo - Dashboard`、`Hippo - 统一配置中心` 或正文包含 `Welcome`
 - 所有 `hippo.oa.*` 域名都是内网域名，必须直连；预置脚本已强制直连，手工 `curl` 要加 `--noproxy '*'`，走代理会得到 503 或代理伪造的 404
 
 通过 `browser_session` MCP 请求时使用 `fetch_with_session`，不要输出 Cookie：
 
 ```text
-profile=/home/joney/.cache/healthy-dashboard-profile
+profile=/home/joney/.local/state/agent-tools/browser-profiles/healthy
 url=<按环境选择的 API host>/<path>
 max_chars=30000
 ```

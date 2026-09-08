@@ -44,7 +44,7 @@ Options:
   --page-size      单次查询条数，默认 200
   --concurrency    批量查询并发数，默认 4
   --cookie         bianque Cookie，也可用环境变量 BIANQUE_COOKIE
-  --profile        浏览器 profile，默认取 BROWSER_SESSION_PROFILE / DEVTOOLS_BROWSER_PROFILE / ~/.cache/lexiao-browser-profile
+  --profile        浏览器 profile，默认取 BROWSER_SESSION_PROFILE / DEVTOOLS_BROWSER_PROFILE / ~/.local/state/agent-tools/browser-profiles/main
   --http-timeout   单次请求超时毫秒，默认 30000
   --retries        可重试错误的重试次数，默认 2
 `);
@@ -104,7 +104,7 @@ function resolvePaths(args) {
       args.profile
       || process.env.BROWSER_SESSION_PROFILE
       || process.env.DEVTOOLS_BROWSER_PROFILE
-      || '~/.cache/lexiao-browser-profile',
+      || '~/.local/state/agent-tools/browser-profiles/main',
     ),
     chromePath: expandHome(args.chrome || path.join(toolDir, 'browsers/chrome-linux64/chrome')),
     runtimeLibDir: expandHome(args['runtime-lib-dir'] || path.join(toolDir, 'runtime-libs/usr/lib/x86_64-linux-gnu')),

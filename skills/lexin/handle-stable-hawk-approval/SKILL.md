@@ -28,12 +28,12 @@ MCP 优先、脚本兜底。只读查询优先复用 `query-mysql-data` / `mysql
 脚本自己解析凭据，正常不需要手工导出：
 
 1. 环境变量 `LXCLOUD_BEARER_TOKEN`、`BIANQUE_COOKIE`（可选 `LXCLOUD_COOKIE`、`LXCLOUD_MID`）。
-2. 缺失时读本地快照 `~/.cache/agent-tools-session/stable-lxcloud.json`（0600，由 `get-browser-session` 生成）。
+2. 缺失时读本地快照 `~/.local/state/agent-tools/session-snapshots/stable-lxcloud.json`（0600，由 `get-browser-session` 生成）。
 3. 快照不存在、或其中 token 已按 JWT `exp` 判定过期时，才对 `https://stable-lxcloud.oa.fenqile.com/` 调一次 `--export-session` 刷新。
 
 两个容易踩的点：
 
-- **stable 与线上是两个 origin**：`~/.cache/agent-tools-session/main.json` 里只有 `lxcloud.oa.fenqile.com` 的 token，对 stable 无效，必须对 stable-lxcloud 单独 export。
+- **stable 与线上是两个 origin**：`~/.local/state/agent-tools/session-snapshots/main.json` 里只有 `lxcloud.oa.fenqile.com` 的 token，对 stable 无效，必须对 stable-lxcloud 单独 export。
 - **Cookie 是 profile 级的**：同一次 export 会顺带带出 `stable-bianque.lexinfintech.com` 的 `JSESSIONID`，回调不用再单独取。
 
 `user_name` 默认取 token 里的 `sub`（OA 账号）而不是本机用户名，避免本机账号与 OA 账号不一致时被误判无实例权限；`--user-name` 或 `LXCLOUD_USER_NAME` 可覆盖。`--no-browser-session`（或 `LXCLOUD_DISABLE_BROWSER_SESSION=1`）强制只用环境变量。

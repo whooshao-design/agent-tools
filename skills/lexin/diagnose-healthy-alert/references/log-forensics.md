@@ -42,7 +42,7 @@
 
 - 堡垒机 `go <pod_ip>` 跳不进去，返回的是命令回显串而不是执行结果，不是权限报错。
 - Pod 宿主机（乐效实例列表的 `host` 列）通常也没有登录权限，需在乐信云单独申请。
-- WebShell 登录态在 `/home/joney/.cache/lexiao-browser-profile`，**必须显式传 `--profile`**。
+- WebShell 登录态在 `/home/joney/.local/state/agent-tools/browser-profiles/main`，**必须显式传 `--profile`**。
   不传会报 `LOGIN_REQUIRED`，看起来像登录过期，实际只是选错 profile。
   按 `java-server-diagnostics` 的三步流程排查，不要直接拉起 headed 浏览器重登。
 

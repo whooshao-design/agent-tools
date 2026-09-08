@@ -113,7 +113,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/script
   --success-text=<target-app-name>
 ```
 
-Profile selection follows `get-browser-session`: explicit `--profile`, then `BROWSER_SESSION_PROFILE`, then `DEVTOOLS_BROWSER_PROFILE`, and finally `~/.cache/lexiao-browser-profile`. If an isolated writable profile is required, choose it explicitly and reuse it for the whole deployment flow.
+Profile selection follows `get-browser-session`: explicit `--profile`, then `BROWSER_SESSION_PROFILE`, then `DEVTOOLS_BROWSER_PROFILE`, and finally `~/.local/state/agent-tools/browser-profiles/main`. If an isolated writable profile is required, choose it explicitly and reuse it for the whole deployment flow.
 
 Concurrency: one Chromium instance per profile directory, so every concurrent build/deploy/status task needs its own profile copy (copy a logged-in profile and delete its `SingletonLock`); sharing a profile across concurrent tasks produces silent hangs and stale reads. Keep total concurrent browser tasks at 4 or fewer: at 10 concurrent, 7 of 10 deploy clicks failed with `row-not-found`; at 5-6, progress slowed to a crawl. Each profile copy is ~700 MB, so delete the copies when the flow finishes; 17 stale copies (14 GB) were enough to trigger low-memory kills of background tasks. If login is required, open a headed browser and ask the user to complete SSO/MOA in the browser; never ask for passwords, OTPs, cookies, or private keys in chat.
 

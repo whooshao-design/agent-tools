@@ -17,7 +17,7 @@ metadata:
 
 MCP 优先、脚本兜底：
 
-1. 先用 `browser_session.ensure_session` 复用或刷新 Healthy 登录态，默认 profile 是 `/home/joney/.cache/healthy-dashboard-profile`。
+1. 先用 `browser_session.ensure_session` 复用或刷新 Healthy 登录态，默认 profile 是 `/home/joney/.local/state/agent-tools/browser-profiles/healthy`。
 2. 用 `healthy.healthy_read_board` 只读回读大盘配置，确认 `/tmp/healthy-dashboard-{boardId}-after.json` 已生成。
 3. 用本 skill 脚本汇总变量、分区、面板、PromQL 和页面快照。
 4. 如果用户指定应用或当前仓库能识别 `application.name`，传 `--app` 和 `--env` 拉取 Prometheus 只读指标摘要；默认 `--env=prod`、`--range=1h`。
@@ -39,7 +39,7 @@ MCP 优先、脚本兜底：
 node /home/joney/projects/ai/agent-tools/skills/lexin/inspect-healthy-jvm-dashboard/scripts/inspect_dashboard.js \
   --board=11147 \
   --url=https://healthy.lexincloud.com/show/dashboard/11147 \
-  --profile=/home/joney/.cache/healthy-dashboard-profile
+  --profile=/home/joney/.local/state/agent-tools/browser-profiles/healthy
 ```
 
 如果已经有回读备份，只想离线摘要：
@@ -56,7 +56,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/inspect-healthy-jvm-dashbo
 node /home/joney/projects/ai/agent-tools/skills/lexin/inspect-healthy-jvm-dashboard/scripts/inspect_dashboard.js \
   --board=11147 \
   --url=https://healthy.lexincloud.com/show/dashboard/11147 \
-  --profile=/home/joney/.cache/healthy-dashboard-profile \
+  --profile=/home/joney/.local/state/agent-tools/browser-profiles/healthy \
   --app=server_af_field_computing_java \
   --env=prod \
   --range=1h \
@@ -68,7 +68,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/inspect-healthy-jvm-dashbo
 ```bash
 node /home/joney/projects/ai/agent-tools/skills/lexin/inspect-healthy-jvm-dashboard/scripts/inspect_dashboard.js \
   --board=11147 \
-  --profile=/home/joney/.cache/healthy-dashboard-profile \
+  --profile=/home/joney/.local/state/agent-tools/browser-profiles/healthy \
   --app=server_af_field_computing_java \
   --env=prod \
   --ident=10.27.67.10 \

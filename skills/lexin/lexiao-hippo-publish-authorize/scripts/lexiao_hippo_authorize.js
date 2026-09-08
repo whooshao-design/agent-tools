@@ -15,7 +15,7 @@ const RUNTIME_LIB_DIR = path.join(TOOL_DIR, 'runtime-libs/usr/lib/x86_64-linux-g
 const API = 'https://lexiao-api.oa.fenqile.com/oa/lexiao';
 const ADD_URL = `${API}/add_hippo_publish_authorize.json`;
 const LIST_URL = `${API}/get_hippo_publish_authorize_list.json`;
-const DEFAULT_PROFILE = '/home/joney/.cache/lexiao-browser-profile';
+const DEFAULT_PROFILE = '/home/joney/.local/state/agent-tools/browser-profiles/main';
 const DEFAULT_PAGE = 'https://lexiao.oa.fenqile.com/';
 
 function parseArgs(argv) {

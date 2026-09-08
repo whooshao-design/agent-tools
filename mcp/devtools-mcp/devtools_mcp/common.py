@@ -22,7 +22,7 @@ SKILLS_ROOT = REPO_ROOT / "skills"
 DEFAULT_BROWSER_PROFILE = (
     os.environ.get("BROWSER_SESSION_PROFILE")
     or os.environ.get("DEVTOOLS_BROWSER_PROFILE")
-    or str(Path.home() / ".cache" / "lexiao-browser-profile")
+    or str(Path.home() / ".local" / "state" / "agent-tools" / "browser-profiles" / "main")
 )
 DEFAULT_INTERNAL_ALLOWED_HOSTS = ".fenqile.com,.lexinfintech.com,.lexincloud.com,localhost,127.0.0.1"
 

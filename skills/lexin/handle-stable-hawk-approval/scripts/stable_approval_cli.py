@@ -32,7 +32,7 @@ except ImportError as exc:  # pragma: no cover - import failure is environment-s
 DEFAULT_LXCLOUD_URL = "https://stable-lxcloud.oa.fenqile.com/v1/mysql/sql-query/exec-query/"
 DEFAULT_BIANQUE_URL = "https://stable-bianque.lexinfintech.com/serviceEmulator/request"
 DEFAULT_TARGET_FILE = "~/.config/hawk-stable-approval/targets.json"
-DEFAULT_SESSION_FILE = "~/.cache/agent-tools-session/stable-lxcloud.json"
+DEFAULT_SESSION_FILE = "~/.local/state/agent-tools/session-snapshots/stable-lxcloud.json"
 BROWSER_SESSION_SCRIPT = "/home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js"
 LXCLOUD_ORIGIN = "https://stable-lxcloud.oa.fenqile.com"
 BIANQUE_COOKIE_DOMAIN = "stable-bianque.lexinfintech.com"

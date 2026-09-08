@@ -15,9 +15,9 @@ UNIT_NAME = "agent-tools-browser-session-renewal"
 SERVICE_NAME = f"{UNIT_NAME}.service"
 TIMER_NAME = f"{UNIT_NAME}.timer"
 DEFAULT_SCHEDULE = "*-*-* 11:00:00"
-MAIN_PROFILE = Path.home() / ".cache" / "lexiao-browser-profile"
-HEALTHY_PROFILE = Path.home() / ".cache" / "healthy-dashboard-profile"
-SESSION_SNAPSHOT = Path.home() / ".cache" / "agent-tools-session" / "main.json"
+MAIN_PROFILE = Path.home() / ".local" / "state" / "agent-tools" / "browser-profiles" / "main"
+HEALTHY_PROFILE = Path.home() / ".local" / "state" / "agent-tools" / "browser-profiles" / "healthy"
+SESSION_SNAPSHOT = Path.home() / ".local" / "state" / "agent-tools" / "session-snapshots" / "main.json"
 DEFAULT_BROWSER_SCRIPT = Path(__file__).resolve().with_name("browser_session.js")
 
 

@@ -2,7 +2,7 @@
 name: get-browser-session
 description: 获取、检查、续期和复用 WSL Playwright/Chromium 浏览器登录态与网页 session（底层会话层，供其他 skill 复用）。Use when 需要访问要求登录的内网页面、检查或定时续期浏览器 profile 登录态、打开浏览器让用户完成 SSO/OTP 登录、复用已保存 profile 做页面自动化，或按默认脱敏方式查看 session Cookie/localStorage token。
 metadata:
-  version: 1.7.1
+  version: 1.7.2
 ---
 
 # Get Browser Session
@@ -54,14 +54,14 @@ For WebShell pages such as `https://webshell.oa.fenqile.com/?arg=...`, use this 
 ```bash
 node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js \
   --status \
-  --profile=/home/joney/.cache/healthy-dashboard-profile \
+  --profile=/home/joney/.local/state/agent-tools/browser-profiles/healthy \
   --url=<login_pod_addr> \
   --success-text=none
 ```
 
 WebShell uses stricter readiness semantics than a generic OA page:
 
-- The default profile is `~/.codex/webshell-direct-profile` unless `--profile` is explicit.
+- The default profile is `~/.local/state/agent-tools/browser-profiles/webshell` unless `--profile` is explicit.
 - The Chromium child process runs direct by default; see "Network Policy". Global proxy settings outside the browser are untouched.
 - `READY` requires the browser to stay on `webshell.oa.fenqile.com` and expose an xterm/terminal DOM for three consecutive polls.
 - `乐空间传送门`、`ATrust`、登录页和 403 markers override transient Gotty titles and terminal elements.
@@ -99,12 +99,14 @@ Do not ask the user for passwords, OTP codes, private keys, or cookies in chat. 
 The default profile is:
 
 ```bash
-~/.cache/lexiao-browser-profile
+~/.local/state/agent-tools/browser-profiles/main
 ```
 
 Profile selection is shared across the skill and MCP tools: explicit `--profile` first, then `BROWSER_SESSION_PROFILE`, then `DEVTOOLS_BROWSER_PROFILE`, and finally the default above. Keep other skills on the same profile instead of creating a second implicit profile.
 
-WebShell defaults to the isolated profile `~/.codex/webshell-direct-profile`. To refresh it, run `--ensure --url=<login_pod_addr> --success-text=none` and complete SSO in the opened browser.
+Persistent browser state belongs outside Codex, Claude and skill source directories. Shared profiles live under `~/.local/state/agent-tools/browser-profiles/`: `main`, `healthy`, and `webshell` remain separate. These defaults use the user's home directory, not `XDG_STATE_HOME`; use the existing profile overrides for a different location. Session snapshots live in `~/.local/state/agent-tools/session-snapshots/`. Keep state directories at `0700` and snapshots at `0600`; never commit either. Moving a profile requires stopping its browser and renewal job, preserving the whole directory, and updating callers together. Do not merge Cookie databases or treat a missing old path as an expired login.
+
+WebShell defaults to the isolated profile `~/.local/state/agent-tools/browser-profiles/webshell`. To refresh it, run `--ensure --url=<login_pod_addr> --success-text=none` and complete SSO in the opened browser.
 
 `browser_session` script and MCP calls using the same profile are serialized with a cross-process lock. Other scripts and independently opened Chromium instances are outside this lock; if Chrome still reports the profile is already in use, close the competing WSL Chromium process or rerun the whole flow with a different explicit `--profile`.
 
@@ -150,12 +152,12 @@ At a daily cadence the 10-day tickets still have 10x margin, but `oa_token_id` �
 
 ```bash
 node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js \
-  --export-session=~/.cache/agent-tools-session/main.json \
+  --export-session=~/.local/state/agent-tools/session-snapshots/main.json \
   --url=https://lxcloud.oa.fenqile.com/ \
   --success-text=none
 ```
 
-The timer keeps `~/.cache/agent-tools-session/main.json` current. Downstream skills that need the lxcloud `token` may read it directly instead of launching Chromium and contending for the profile lock. `storageState` only captures localStorage for origins visited in that run, so export against the origin whose token is needed. The file holds credentials in cleartext — keep it at `0600`, never copy it into a repository, a log, or a reply.
+The timer keeps `~/.local/state/agent-tools/session-snapshots/main.json` current. Downstream skills that need the lxcloud `token` may read it directly instead of launching Chromium and contending for the profile lock. `storageState` only captures localStorage for origins visited in that run, so export against the origin whose token is needed. The file holds credentials in cleartext — keep it at `0600`, never copy it into a repository, a log, or a reply.
 
 Status checks and `--ensure` also visit the target page on demand, so a server-side sliding session can refresh its Cookie naturally. `fetch_with_session` runs inside the same BrowserContext rather than copying a Cookie header into a separate HTTP client; response `Set-Cookie` values are therefore persisted back to the profile.
 
@@ -207,8 +209,8 @@ Use `--show-secrets` only for a downstream local process that consumes the value
 1. **profile 路径是否解析正确**：脚本已统一展开 `~`，但仍建议传绝对路径。若报
    `PROFILE_NOT_FOUND`，那是路径问题而非登录问题，错误信息里会列出当前可用的 profile。
 2. **换一个 profile 试**：不同站点的登录态分布在不同 profile，常见的是
-   `~/.cache/lexiao-browser-profile`（乐效、Hippo、lxcloud、WebShell）和
-   `/home/joney/.cache/healthy-dashboard-profile`（Healthy）。用
+   `~/.local/state/agent-tools/browser-profiles/main`（乐效、Hippo、lxcloud、WebShell）和
+   `/home/joney/.local/state/agent-tools/browser-profiles/healthy`（Healthy）。用
    `browser_session.js --check --profile=<abs> --url=<目标站点>` 逐个确认，
    `sessionState=READY` 即可用。
 3. **确认实际状态**：综合 `sessionState`、登录表单/标记、重定向 host 与 HTTP 状态。

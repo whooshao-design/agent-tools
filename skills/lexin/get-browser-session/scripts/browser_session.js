@@ -12,7 +12,7 @@ const {
 
 const DEFAULT_URL = 'https://lexiao.oa.fenqile.com/#/app-publish/51303';
 const DEFAULT_SUCCESS_TEXT = '当前环境';
-const DEFAULT_WEBSHELL_PROFILE = '~/.codex/webshell-direct-profile';
+const DEFAULT_WEBSHELL_PROFILE = '~/.local/state/agent-tools/browser-profiles/webshell';
 const DEFAULT_LOGIN_PATTERN = [
   'Work Happy',
   'QR Code',
@@ -128,7 +128,7 @@ function parseArgs(argv) {
 
 function resolvePaths(args, url = DEFAULT_URL) {
   const toolDir = expandHome(args['tool-dir'] || process.env.BROWSER_SESSION_TOOL_DIR || '~/tools/lexiao-browser');
-  const defaultProfile = isWebShellUrl(url) ? DEFAULT_WEBSHELL_PROFILE : '~/.cache/lexiao-browser-profile';
+  const defaultProfile = isWebShellUrl(url) ? DEFAULT_WEBSHELL_PROFILE : '~/.local/state/agent-tools/browser-profiles/main';
   return {
     toolDir,
     profileDir: expandHome(
@@ -466,6 +466,8 @@ function removeStaleProfileLock(lockPath) {
 }
 
 async function acquireProfileLock(profileDir, options = {}) {
+  // Old-path aliases and the new location must contend for the same lock.
+  if (fs.existsSync(profileDir)) profileDir = fs.realpathSync(profileDir);
   const timeoutMs = boundedNumber(options.timeoutMs, 30000, 0, 1800000);
   const pollMs = boundedNumber(options.pollMs, 100, 5, 5000);
   const lockPath = `${profileDir}.agent-tools.lock`;

@@ -13,7 +13,7 @@ const BASE_URLS = {
 
 const DEFAULT_CLUSTER = 'Default';
 const DEFAULT_LANGUAGE = 'zh';
-const DEFAULT_PROFILE = '/home/joney/.cache/healthy-dashboard-profile';
+const DEFAULT_PROFILE = '/home/joney/.local/state/agent-tools/browser-profiles/healthy';
 const DEFAULT_TOOL_DIR = '~/tools/lexiao-browser';
 const DEFAULT_WINDOW = '30m';
 const DEFAULT_STEP = '60s';
@@ -23,7 +23,7 @@ const DEFAULT_BASELINE_STEP = '300s';
 // Alert timestamps are UTC; the app servers write logs in UTC+8, so every
 // log-query time window has to be shifted before it is handed to a log tool.
 const LOG_TZ_OFFSET_HOURS = 8;
-const WEBSHELL_PROFILE = '/home/joney/.cache/lexiao-browser-profile';
+const WEBSHELL_PROFILE = '/home/joney/.local/state/agent-tools/browser-profiles/main';
 // Every browser launch costs 30-40s. The token is already stored in the browser
 // profile, so caching it in a 0600 file next to it adds no new exposure and
 // removes that cost from every follow-up query in the same investigation.

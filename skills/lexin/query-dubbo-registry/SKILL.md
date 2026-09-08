@@ -72,7 +72,7 @@ node .../query_dubbo_registry.js --services=com.a.FooService,com.b.BarService --
 | `--page-size` | `200` | 单次查询条数 |
 | `--concurrency` | `4` | 批量查询并发数 |
 | `--cookie` | — | 也可用环境变量 `BIANQUE_COOKIE` |
-| `--profile` | — | 取 `BROWSER_SESSION_PROFILE` / `DEVTOOLS_BROWSER_PROFILE` / `~/.cache/lexiao-browser-profile` |
+| `--profile` | — | 取 `BROWSER_SESSION_PROFILE` / `DEVTOOLS_BROWSER_PROFILE` / `~/.local/state/agent-tools/browser-profiles/main` |
 | `--http-timeout` | `30000` | 单次请求超时毫秒 |
 | `--retries` | `2` | 可重试错误的重试次数 |
 

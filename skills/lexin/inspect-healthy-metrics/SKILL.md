@@ -92,7 +92,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/inspect-healthy-metrics/sc
 ```bash
 node /home/joney/projects/ai/agent-tools/skills/lexin/inspect-healthy-metrics/scripts/inspect_metrics.js \
   --env prod \
-  --profile /home/joney/.cache/healthy-dashboard-profile \
+  --profile /home/joney/.local/state/agent-tools/browser-profiles/healthy \
   --promql 'count(up)'
 ```
 

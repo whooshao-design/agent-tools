@@ -17,7 +17,7 @@ const {
 const { asBoolean, normalizeQuery } = require('./log_query');
 
 const TOOL_DIR = path.join(os.homedir(), 'tools/lexiao-browser');
-const DEFAULT_PROFILE = path.join(os.homedir(), '.codex/webshell-direct-profile');
+const DEFAULT_PROFILE = path.join(os.homedir(), '.local/state/agent-tools/browser-profiles/webshell');
 
 /** 统一展开 ~ 并转绝对路径：多处曾因未展开而落到字面量 "~" 目录，被误报为登录态失效。 */
 function resolveProfile(value, fallback) {
@@ -32,9 +32,9 @@ function resolveProfile(value, fallback) {
 function assertProfileExists(profileDir) {
   if (fs.existsSync(profileDir)) return;
   const candidates = [
-    path.join(os.homedir(), '.cache/lexiao-browser-profile'),
-    path.join(os.homedir(), '.codex/webshell-direct-profile'),
-    '/home/joney/.cache/healthy-dashboard-profile',
+    path.join(os.homedir(), '.local/state/agent-tools/browser-profiles/main'),
+    path.join(os.homedir(), '.local/state/agent-tools/browser-profiles/webshell'),
+    '/home/joney/.local/state/agent-tools/browser-profiles/healthy',
   ].filter((p) => fs.existsSync(p));
   const err = new Error(
     `PROFILE_NOT_FOUND: ${profileDir} 不存在（这不是登录态失效）。`
@@ -81,7 +81,7 @@ function usage() {
 
 Transport:
   --mode=auto|gotty|dom       Default auto
-  --profile=<browser-profile> Default ~/.codex/webshell-direct-profile
+  --profile=<browser-profile> Default ~/.local/state/agent-tools/browser-profiles/webshell
   --headed                    Show Chromium window
 
 Log query:

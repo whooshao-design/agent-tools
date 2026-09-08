@@ -138,6 +138,8 @@
 常规 PR 评审使用 `dev-review-change` 的建议审查分支；只有正式准入才要求审批记录。
 浏览器专项可使用 Microsoft `playwright-cli`，入口见 `verify-browser-qa`；内网登录态仍由 `get-browser-session` 管理。
 
+共享浏览器状态与技能源码分开存放：`~/.local/state/agent-tools/browser-profiles/{main,healthy,webshell}` 保存隔离的登录态，`~/.local/state/agent-tools/session-snapshots/` 保存本机凭据快照，均不入 Git。主 profile 的参数/环境变量优先级见 `get-browser-session`；移动已有 profile 前必须停止浏览器和续期任务，整套备份迁移，不能把两个 Cookie 数据库合并。升级前已启动的 MCP 可能仍持有旧默认路径：迁移时可暂留旧 `.cache` 路径的软链接，重启所有客户端并确认没有旧引用后再移除链接。
+
 ```bash
 git clone git@github.com:whooshao-design/agent-tools.git ~/projects/ai/agent-tools
 cd ~/projects/ai/agent-tools

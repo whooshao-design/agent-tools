@@ -19,7 +19,7 @@ const {
   chromiumArgsFor,
 } = require('../../get-browser-session/scripts/browser_network');
 
-const DEFAULT_PROFILE = '/home/joney/.cache/healthy-dashboard-profile';
+const DEFAULT_PROFILE = '/home/joney/.local/state/agent-tools/browser-profiles/healthy';
 const DEFAULT_TOOL_DIR = path.join(os.homedir(), 'tools/lexiao-browser');
 const DEFAULT_ENV = 'prod';
 const DEFAULT_CLUSTER = 'default';

@@ -12,7 +12,12 @@ from pathlib import Path
 SKILL_DIR = Path(__file__).resolve().parents[1]
 SKILLS_DIR = SKILL_DIR.parent
 SKILLS_ROOT = SKILL_DIR.parents[1]
-DEFAULT_PROFILE = os.environ.get("JAVA_BACKEND_BROWSER_PROFILE", str(Path.home() / ".codex" / "lexiao-browser-profile"))
+DEFAULT_PROFILE = (
+    os.environ.get("BROWSER_SESSION_PROFILE")
+    or os.environ.get("DEVTOOLS_BROWSER_PROFILE")
+    or os.environ.get("JAVA_BACKEND_BROWSER_PROFILE")
+    or str(Path.home() / ".local" / "state" / "agent-tools" / "browser-profiles" / "main")
+)
 DEFAULT_TARGETS_FILE = os.environ.get("DUBBO_TARGETS_FILE", str(SKILL_DIR / "targets.json"))
 DEFAULT_NO_PROXY = ".fenqile.com,.lexinfintech.com,.lexincloud.com,10.0.0.0/8,localhost,127.0.0.1"
 BROWSER_SESSION_SCRIPT = os.environ.get(

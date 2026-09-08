@@ -37,7 +37,7 @@ function resolvePaths(args) {
       args.profile
       || process.env.BROWSER_SESSION_PROFILE
       || process.env.DEVTOOLS_BROWSER_PROFILE
-      || '~/.cache/lexiao-browser-profile'
+      || '~/.local/state/agent-tools/browser-profiles/main'
     ),
     chromePath: expandHome(args.chrome || path.join(toolDir, 'browsers/chrome-linux64/chrome')),
     runtimeLibDir: expandHome(args['runtime-lib-dir'] || path.join(toolDir, 'runtime-libs/usr/lib/x86_64-linux-gnu')),

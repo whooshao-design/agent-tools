@@ -7,7 +7,7 @@ const { createRequire } = require('module');
 const TOOL_DIR = path.join(os.homedir(), 'tools/lexiao-browser');
 const DEFAULT_PROFILE = process.env.BROWSER_SESSION_PROFILE
   || process.env.DEVTOOLS_BROWSER_PROFILE
-  || path.join(os.homedir(), '.cache/lexiao-browser-profile');
+  || path.join(os.homedir(), '.local/state/agent-tools/browser-profiles/main');
 
 /** 统一展开 ~ 并转绝对路径：曾因未展开而落到字面量 "~" 目录，被误报为登录态失效。 */
 function resolveProfilePath(value) {
@@ -23,9 +23,9 @@ function profileDir(value) {
   const dir = resolveProfilePath(value);
   if (fs.existsSync(dir)) return dir;
   const candidates = [
-    path.join(os.homedir(), '.cache/lexiao-browser-profile'),
-    path.join(os.homedir(), '.codex/webshell-direct-profile'),
-    '/home/joney/.cache/healthy-dashboard-profile',
+    path.join(os.homedir(), '.local/state/agent-tools/browser-profiles/main'),
+    path.join(os.homedir(), '.local/state/agent-tools/browser-profiles/webshell'),
+    '/home/joney/.local/state/agent-tools/browser-profiles/healthy',
   ].filter((p) => fs.existsSync(p));
   throw new Error(`PROFILE_NOT_FOUND: ${dir} 不存在（这不是登录态失效）。`
     + `可用 profile: ${candidates.length ? candidates.join(', ') : '无'}`);

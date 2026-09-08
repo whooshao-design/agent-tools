@@ -8,9 +8,10 @@ import sys
 import time
 from pathlib import Path
 
+from dubbo_request import DEFAULT_PROFILE
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 DUBBO_REQUEST = os.environ.get("DUBBO_REQUEST_SCRIPT", str(SCRIPT_DIR / "dubbo_request.py"))
-DEFAULT_PROFILE = os.environ.get("JAVA_BACKEND_BROWSER_PROFILE", str(Path.home() / ".codex" / "lexiao-browser-profile"))
 
 FULL_TEMPLATE = re.compile(r"^\{\{\s*([A-Za-z0-9_.-]+)\s*\}\}$")
 PART_TEMPLATE = re.compile(r"\{\{\s*([A-Za-z0-9_.-]+)\s*\}\}")

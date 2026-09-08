@@ -63,14 +63,14 @@ metadata:
 
 ### 自动获取（推荐）
 
-固定脚本默认通过 `get-browser-session` 从共享 profile 获取 bianque Cookie，优先读取 `BROWSER_SESSION_PROFILE` / `DEVTOOLS_BROWSER_PROFILE`，否则使用 `/home/joney/.cache/lexiao-browser-profile`。需要单独检查登录态时使用：
+固定脚本默认通过 `get-browser-session` 从共享 profile 获取 bianque Cookie，优先读取 `BROWSER_SESSION_PROFILE` / `DEVTOOLS_BROWSER_PROFILE`，否则使用 `/home/joney/.local/state/agent-tools/browser-profiles/main`。Python 入口还兼容较低优先级的旧变量 `JAVA_BACKEND_BROWSER_PROFILE`；显式 `--profile` 优先于这些变量。需要单独检查登录态时使用：
 
 ```bash
 node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js \
   --url=https://stable-bianque.lexinfintech.com \
   --cookies \
   --domain=stable-bianque.lexinfintech.com \
-  --profile=/home/joney/.cache/lexiao-browser-profile
+  --profile=/home/joney/.local/state/agent-tools/browser-profiles/main
 ```
 
 如果默认 profile 登录态不可用，打开 headed 浏览器让用户完成 SSO/MOA 登录；不要在聊天中索要密码、OTP 或 Cookie。
@@ -108,7 +108,7 @@ python3 /home/joney/projects/ai/agent-tools/skills/lexin/test-dubbo-api/scripts/
   --params '<JSON_ARRAY>'
 ```
 
-目标地址可以用 `--app` 从 `targets.json` 读取，也可以直接传 `--ip '<IP>' --port '<PORT>'`。默认 profile 使用 `/home/joney/.cache/lexiao-browser-profile`，并接受 `BROWSER_SESSION_PROFILE` / `DEVTOOLS_BROWSER_PROFILE` 覆盖。如果需要换浏览器登录态，传 `--profile=<profile-dir>`；如果已经有 Cookie，传 `--cookie='<COOKIE>'`。
+目标地址可以用 `--app` 从 `targets.json` 读取，也可以直接传 `--ip '<IP>' --port '<PORT>'`。默认 profile 使用 `/home/joney/.local/state/agent-tools/browser-profiles/main`，并接受 `BROWSER_SESSION_PROFILE` / `DEVTOOLS_BROWSER_PROFILE` 覆盖。如果需要换浏览器登录态，传 `--profile=<profile-dir>`；如果已经有 Cookie，传 `--cookie='<COOKIE>'`。
 
 手工 curl 仅作为脚本不可用时的备用：
 

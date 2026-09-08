@@ -59,7 +59,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/lexiao-hippo-publish-autho
 
 参数：`--demand-id`（正整数，必填）、`--apps`（add 必填，逗号分隔）、`--namespace`（add 必须显式指定，不使用默认值）、
 `--instance-type`（仅支持 `1`）、`--resource-type`（仅支持 `hippo`）、`--profile`（默认
-`/home/joney/.cache/lexiao-browser-profile`）、`--page-url`（默认乐效首页）。
+`/home/joney/.local/state/agent-tools/browser-profiles/main`）、`--page-url`（默认乐效首页）。
 
 ## 强制约束
 
