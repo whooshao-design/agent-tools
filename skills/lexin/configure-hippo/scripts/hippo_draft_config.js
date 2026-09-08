@@ -28,6 +28,7 @@ const COMMANDS = new Set([
   'plan',
   'upsert',
   'verify',
+  'delete-plan',
   'delete-item',
   'namespace-status',
   'namespace-plan',
@@ -51,8 +52,10 @@ const NAMESPACE_ROLE_TYPES = { modify: 'ModifyNamespace', release: 'ReleaseNames
 // Hippo 通常已经把创建者自动加上，这里做兜底，也覆盖“换人创建”的情况。
 const DEFAULT_NAMESPACE_GRANT_USERS = ['joneyshao'];
 const PUBLISH_AUTHORIZATION_VALUE = 'explicit';
-// 删除配置项同样要用户在当前对话明确授权；删除只动草稿，发布删除才影响运行期。
-const DELETE_AUTHORIZATION_VALUE = 'explicit';
+// 删除是不可逆的高危动作：授权值不是常量，而是目标全路径 <app>/<env>/<namespace>/<key>，
+// 写错任一字段即拒绝；另外要求 --confirm-env、delete-plan 的 token 与实例数，公共 namespace 还要单独放行。
+const DELETE_AUDIT_LOG = path.join(os.homedir(), '.local/state/agent-tools/hippo-delete-audit.log');
+const DELETE_INSTANCE_PAGE_SIZE = 500;
 const CREATE_AUTHORIZATION_VALUE = 'explicit';
 const GRANT_AUTHORIZATION_VALUE = 'explicit';
 // 与 Hippo 页面 valdr 约束保持一致：名称只能是字母数字下划线且不超过 64 字符
@@ -530,16 +533,46 @@ function diffKeysAfterDelete(beforeDiffKeys, target, activeConfig) {
   return [...result].sort();
 }
 
-function deleteOptions(args, summarized) {
-  assert(String(args['delete-authorization'] || '') === DELETE_AUTHORIZATION_VALUE,
+function deleteAuthorizationValue(target) {
+  return `${target.appId}/${target.env}/${target.namespaceName}/${target.key}`;
+}
+
+function isPublicNamespaceName(namespaceName) {
+  // Apollo 公共 namespace 形如 <orgId>.<name>；私有 namespace 不含点。
+  return String(namespaceName || '').includes('.');
+}
+
+function deleteOptions(args, summarized, target, impact) {
+  const expectedAuthorization = deleteAuthorizationValue(target);
+  assert(String(args['delete-authorization'] || '') === expectedAuthorization,
     'DELETE_AUTHORIZATION_REQUIRED',
-    '删除必须由用户在当前对话中明确授权，并传 --delete-authorization=explicit');
+    '删除必须由用户在当前对话中对该 key 明确授权，并把目标全路径原样传给 --delete-authorization', {
+      expectedDeleteAuthorization: expectedAuthorization,
+    });
+  assert(String(args['confirm-env'] || '') === target.env, 'DELETE_ENV_CONFIRMATION_REQUIRED',
+    '删除必须用 --confirm-env 重复目标环境，且与解析出的 env 完全一致', {
+      resolvedEnv: target.env,
+      confirmEnv: args['confirm-env'] ?? null,
+    });
+  assert(!isPublicNamespaceName(target.namespaceName) || flagEnabled(args['allow-public-namespace']),
+    'PUBLIC_NAMESPACE_DELETE_REJECTED',
+    '目标是公共 namespace，删除会影响所有关联应用；确需删除请传 --allow-public-namespace');
   assert(args['expected-current-token'], 'EXPECTED_TOKEN_REQUIRED_FOR_DELETE',
-    '删除必须携带本次 status 返回的 currentStateToken', {
+    '删除必须携带本次 delete-plan 返回的 currentStateToken', {
       currentStateToken: summarized.currentStateToken,
     });
   assert(String(args['expected-current-token']) === summarized.currentStateToken,
-    'CONCURRENT_DRAFT_CHANGED', '目标配置状态已变化，请重新运行 status 取 token');
+    'CONCURRENT_DRAFT_CHANGED', '目标配置状态已变化，请重新运行 delete-plan 取 token');
+  assert(args['expected-instances'] !== undefined && String(args['expected-instances']).trim() !== '',
+    'EXPECTED_INSTANCES_REQUIRED',
+    '删除必须携带 delete-plan 给出的 instancesOnActiveRelease（--expected-instances），以确认已评估影响面', {
+      instancesOnActiveRelease: impact.instancesOnActiveRelease,
+    });
+  assert(Number(args['expected-instances']) === impact.instancesOnActiveRelease,
+    'INSTANCE_COUNT_CHANGED', '当前读取该 namespace active release 的实例数与 delete-plan 不一致，请重新运行 delete-plan', {
+      expected: Number(args['expected-instances']),
+      actual: impact.instancesOnActiveRelease,
+    });
   const publish = flagEnabled(args.publish);
   if (publish) {
     assert(String(args['publish-authorization'] || '') === PUBLISH_AUTHORIZATION_VALUE,
@@ -551,6 +584,58 @@ function deleteOptions(args, summarized) {
     releaseComment: String(args['release-comment'] || `codex delete ${summarized.summary.target}`),
     isEmergencyPublish: flagEnabled(args['emergency-publish']),
   };
+}
+
+// 影响面：当前 namespace active release 有多少实例在读（Hippo instances/by-release）。
+// 公共 namespace 的实例属于各关联应用，这里不按 appId 过滤。
+async function readDeleteImpact(page, target, active) {
+  const releaseId = active.release?.id;
+  if (releaseId === undefined || releaseId === null) {
+    return { activeReleaseId: null, instancesOnActiveRelease: 0, instanceSample: [], instancesTruncated: false };
+  }
+  const payload = await fetchJson(page,
+    `/envs/${encodeSegment(target.env)}/instances/by-release?releaseId=${encodeSegment(String(releaseId))}&page=0&size=${DELETE_INSTANCE_PAGE_SIZE}`);
+  const content = Array.isArray(payload?.content) ? payload.content : [];
+  const total = Number.isInteger(payload?.total) ? payload.total : content.length;
+  return {
+    activeReleaseId: releaseId,
+    instancesOnActiveRelease: total,
+    instanceSample: content.slice(0, 20).map((row) => ({
+      appId: row.appId,
+      ip: row.ip,
+      lastFetch: ((row.configs || [])[0] || {}).dataChangeLastModifiedTime || null,
+    })),
+    instancesTruncated: total > content.length,
+  };
+}
+
+function deletePlanSummary(target, summarized, impact) {
+  const remaining = Object.keys(summarized.active.configurations).filter((key) => key !== target.key).sort();
+  return {
+    deleteAuthorizationValue: deleteAuthorizationValue(target),
+    confirmEnvValue: target.env,
+    publicNamespace: isPublicNamespaceName(target.namespaceName),
+    draftExists: summarized.summary.draftExists,
+    activeExists: summarized.summary.activeExists,
+    releaseNeededToTakeEffect: summarized.summary.activeExists,
+    activeKeysRemainingAfterDelete: remaining,
+    activeReleaseId: impact.activeReleaseId,
+    instancesOnActiveRelease: impact.instancesOnActiveRelease,
+    instanceSample: impact.instanceSample,
+    instancesTruncated: impact.instancesTruncated,
+  };
+}
+
+function appendDeleteAudit(entry) {
+  try {
+    fs.mkdirSync(path.dirname(DELETE_AUDIT_LOG), { recursive: true });
+    fs.appendFileSync(DELETE_AUDIT_LOG, `${JSON.stringify({ at: new Date().toISOString(), user: os.userInfo().username, ...entry })}\n`,
+      { mode: 0o600 });
+  } catch (_) {
+    // 审计日志写失败不阻断，但要在结果里体现。
+    return false;
+  }
+  return true;
 }
 
 function formatReleaseTimestamp(date = new Date()) {
@@ -1698,9 +1783,11 @@ function helpText() {
   hippo_draft_config.js plan --app-id=<app> --namespace=<ns> --key=<key> --value-file=<file>
   hippo_draft_config.js upsert --app-id=<app> --namespace=<ns> --key=<key> --value-file=<file>
   hippo_draft_config.js verify --app-id=<app> --namespace=<ns> --key=<key> --value-file=<file>
+  hippo_draft_config.js delete-plan --app-id=<app> --namespace=<ns> --key=<key>
   hippo_draft_config.js delete-item --app-id=<app> --namespace=<ns> --key=<key>
-      --delete-authorization=explicit --expected-current-token=<status token>
-      [--publish --publish-authorization=explicit] [--allow-non-pre]
+      --delete-authorization=<app>/<env>/<ns>/<key> --confirm-env=<env>
+      --expected-current-token=<delete-plan token> --expected-instances=<delete-plan instancesOnActiveRelease>
+      [--publish --publish-authorization=explicit] [--allow-non-pre] [--allow-public-namespace]
   hippo_draft_config.js namespace-status --app-id=<app> --namespace=<new ns>
   hippo_draft_config.js namespace-plan --app-id=<app> --namespace=<new ns> --comment=<10-64 字符备注>
   hippo_draft_config.js namespace-create --app-id=<app> --namespace=<new ns> --comment=<备注>
@@ -1720,11 +1807,16 @@ Overseas: env prefixes are per site, mx -> mxyw_pre/mxyw_prod, id -> ynyw_prod (
   so its default env is ynyw_prod and every id write needs --allow-non-pre).
   --env=prod --hippo-site=mx resolves to mxyw_prod; a full env such as mxyw_pre routes to its site by itself.
 Use --hippo-site=stable with explicit envs such as pdwl_pre when navtree shows a stable env prefix.
-Delete: delete-item removes one draft item (ConfigService.delete_item) after the user explicitly
-authorizes it; it needs the status token, refuses when the key is absent from the draft, and verifies
-that other items and the active release are untouched. With --publish it releases only that key as a
-type=delete entry (same key-granular payload the Hippo UI sends) and verifies the active release lost
-exactly that key. Without --publish the running config is unchanged.
+Delete: deletion is irreversible, so it is gated harder than upsert. delete-plan is read only and reports
+whether the key is in the active release, which keys remain, and how many instances currently read the
+namespace's active release (instancesOnActiveRelease). delete-item then requires, per invocation: the
+user's explicit authorization for that exact key, passed as the full target path
+--delete-authorization=<app>/<env>/<ns>/<key> (any mismatch is rejected); --confirm-env repeating the env;
+the delete-plan token; --expected-instances equal to the plan's instance count (so the impact was looked
+at); --allow-non-pre outside pre; and --allow-public-namespace for public (dotted) namespaces. It deletes
+one draft item, verifies other items and the active release are untouched, and with --publish releases
+only that key as a type=delete entry and verifies the active release lost exactly that key. Every
+delete-item run appends a JSON line to ~/.local/state/agent-tools/hippo-delete-audit.log.
 Safety: upsert saves a draft by default. Publishing requires --publish, --publish-authorization=explicit,
 and the current plan token via --expected-current-token. Publish selects only the target key.
 Stable is the exception: on the stable site upsert publishes the target key automatically after the
@@ -1784,6 +1876,31 @@ function runSelfTest() {
   let delFailed = null;
   try { releaseDeletedItem(delTarget, { id: 7 }, { configurations: { k2: 'v2' } }); } catch (error) { delFailed = error.code; }
   assert(delFailed === 'ACTIVE_KEY_MISSING', 'SELF_TEST_FAILED', 'active 不含 key 时应拒绝发布删除');
+  const delFull = { appId: 'demo', env: 'fql_pre', namespaceName: 'encryption', key: 'k1' };
+  assert(deleteAuthorizationValue(delFull) === 'demo/fql_pre/encryption/k1', 'SELF_TEST_FAILED', '删除授权值应为目标全路径');
+  assert(isPublicNamespaceName('hippo.encryption') && !isPublicNamespaceName('encryption'),
+    'SELF_TEST_FAILED', '公共 namespace 判定失败');
+  const delSummarized = { currentStateToken: 'tok', summary: { target: 'demo/fql_pre/default/encryption/k1' } };
+  const delImpact = { instancesOnActiveRelease: 3 };
+  const mustFail = (argv, code) => {
+    let got = null;
+    try { deleteOptions(parseArgs(argv), delSummarized, delFull, delImpact); } catch (error) { got = error.code; }
+    assert(got === code, 'SELF_TEST_FAILED', `删除守卫 ${code} 未生效（实际 ${got}）`);
+  };
+  mustFail(['delete-item', '--delete-authorization=explicit', '--confirm-env=fql_pre', '--expected-current-token=tok', '--expected-instances=3'], 'DELETE_AUTHORIZATION_REQUIRED');
+  mustFail(['delete-item', '--delete-authorization=demo/fql_pre/encryption/k1', '--confirm-env=fql_gray', '--expected-current-token=tok', '--expected-instances=3'], 'DELETE_ENV_CONFIRMATION_REQUIRED');
+  mustFail(['delete-item', '--delete-authorization=demo/fql_pre/encryption/k1', '--confirm-env=fql_pre', '--expected-current-token=old', '--expected-instances=3'], 'CONCURRENT_DRAFT_CHANGED');
+  mustFail(['delete-item', '--delete-authorization=demo/fql_pre/encryption/k1', '--confirm-env=fql_pre', '--expected-current-token=tok'], 'EXPECTED_INSTANCES_REQUIRED');
+  mustFail(['delete-item', '--delete-authorization=demo/fql_pre/encryption/k1', '--confirm-env=fql_pre', '--expected-current-token=tok', '--expected-instances=2'], 'INSTANCE_COUNT_CHANGED');
+  let pubGuard = null;
+  try {
+    deleteOptions(parseArgs(['delete-item', '--delete-authorization=demo/fql_pre/hippo.encryption/k1', '--confirm-env=fql_pre', '--expected-current-token=tok', '--expected-instances=3']),
+      delSummarized, { ...delFull, namespaceName: 'hippo.encryption' }, delImpact);
+  } catch (error) { pubGuard = error.code; }
+  assert(pubGuard === 'PUBLIC_NAMESPACE_DELETE_REJECTED', 'SELF_TEST_FAILED', '公共 namespace 删除守卫未生效');
+  const delOk = deleteOptions(parseArgs(['delete-item', '--delete-authorization=demo/fql_pre/encryption/k1', '--confirm-env=fql_pre', '--expected-current-token=tok', '--expected-instances=3']),
+    delSummarized, delFull, delImpact);
+  assert(delOk.publish === false, 'SELF_TEST_FAILED', '不带 --publish 的删除不应发布');
   assert(resolveSite('墨西哥') === 'mx' && resolveSite('kredito') === 'id',
     'SELF_TEST_FAILED', '海外站点别名解析失败');
   assert(resolveSite('mxyw_prod') === 'mx' && resolveSite('ynyw_prod') === 'id',
@@ -2285,7 +2402,7 @@ async function runBrowserCommand(command, args) {
     const state = await readState(browser.page, runtime.paths);
     const summarized = summarizeState(runtime.target, runtime.paths, state);
     assert(!flagEnabled(args.publish) || command === 'upsert' || command === 'delete-item',
-      'PUBLISH_COMMAND_INVALID', '只有 upsert/delete-item 支持 --publish；plan/verify/status 不会发布');
+      'PUBLISH_COMMAND_INVALID', '只有 upsert/delete-item 支持 --publish；plan/verify/status/delete-plan 不会发布');
     const access = await readNamespaceAccess(browser.page, runtime.target);
     const accessSummary = {
       roleNamespace: access.roleNamespace,
@@ -2294,8 +2411,28 @@ async function runBrowserCommand(command, args) {
     };
     if (command === 'status') return { command, ...summarized.summary, ...accessSummary };
 
+    if (command === 'delete-plan') {
+      const impact = await readDeleteImpact(browser.page, runtime.target, summarized.active);
+      return {
+        command,
+        ...summarized.summary,
+        ...accessSummary,
+        ...deletePlanSummary(runtime.target, summarized, impact),
+        publishAttempted: false,
+        deleted: false,
+      };
+    }
+
     if (command === 'delete-item') {
-      const options = deleteOptions(args, summarized);
+      const impact = await readDeleteImpact(browser.page, runtime.target, summarized.active);
+      const options = deleteOptions(args, summarized, runtime.target, impact);
+      const auditBase = {
+        command,
+        target: summarized.summary.target,
+        activeReleaseKeyBefore: summarized.active.release?.releaseKey || null,
+        instancesOnActiveRelease: impact.instancesOnActiveRelease,
+        publishRequested: options.publish,
+      };
       const pendingDeletion = !summarized.targetItem && hasOwn(summarized.active.configurations, runtime.target.key);
       if (pendingDeletion) {
         // 草稿行已经删掉、active 里还有：只剩"发布这次删除"这一步。
@@ -2313,6 +2450,12 @@ async function runBrowserCommand(command, args) {
           summarized.active,
           options,
         );
+        const audited = appendDeleteAudit({
+          ...auditBase,
+          draftAlreadyDeleted: true,
+          published: publishResult.published,
+          activeReleaseKeyAfter: publishResult.activeReleaseKeyAfter ?? null,
+        });
         return {
           command,
           ...summarized.summary,
@@ -2321,6 +2464,8 @@ async function runBrowserCommand(command, args) {
           draftItemDeleted: false,
           draftAlreadyDeleted: true,
           nonTargetActiveConfigurationsUnchanged: true,
+          instancesOnActiveRelease: impact.instancesOnActiveRelease,
+          auditLogged: audited,
           ...publishResult,
         };
       }
@@ -2356,6 +2501,7 @@ async function runBrowserCommand(command, args) {
         ...accessSummary,
         operation: mutation.operation,
         draftItemDeleted: true,
+        instancesOnActiveRelease: impact.instancesOnActiveRelease,
         deletedItemId: mutation.itemId,
         deletedValueSha256: sha256(String(summarized.targetItem.value ?? '')),
         otherItemsUnchanged: true,
@@ -2363,6 +2509,7 @@ async function runBrowserCommand(command, args) {
         remainingDraftKeys: afterState.items.map((item) => String(item.key)).sort(),
       };
       if (!options.publish) {
+        const audited = appendDeleteAudit({ ...auditBase, draftItemDeleted: true, deletedItemId: mutation.itemId, published: false });
         return {
           ...base,
           afterDraftDiffKeys: afterSummarized.summary.draftDiffKeys,
@@ -2370,6 +2517,7 @@ async function runBrowserCommand(command, args) {
           activeConfigurationsUnchanged: true,
           publishAttempted: false,
           published: false,
+          auditLogged: audited,
         };
       }
       const publishResult = await publishDeletionAndVerify(
@@ -2380,7 +2528,14 @@ async function runBrowserCommand(command, args) {
         afterSummarized.active,
         options,
       );
-      return { ...base, nonTargetActiveConfigurationsUnchanged: true, ...publishResult };
+      const audited = appendDeleteAudit({
+        ...auditBase,
+        draftItemDeleted: true,
+        deletedItemId: mutation.itemId,
+        published: publishResult.published,
+        activeReleaseKeyAfter: publishResult.activeReleaseKeyAfter ?? null,
+      });
+      return { ...base, nonTargetActiveConfigurationsUnchanged: true, auditLogged: audited, ...publishResult };
     }
 
     const desired = readDesired(args);
@@ -2560,8 +2715,11 @@ if (require.main === module) {
 
 module.exports = {
   activeConfigChangedKeys,
+  deleteAuthorizationValue,
   deleteOptions,
+  deletePlanSummary,
   diffKeysAfterDelete,
+  isPublicNamespaceName,
   releaseDeletedItem,
   appOwnersFrom,
   buildNamespacePaths,

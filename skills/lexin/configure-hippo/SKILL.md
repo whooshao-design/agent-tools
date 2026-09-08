@@ -46,7 +46,7 @@ namespace 归到分组时，角色接口里的 namespace 名要写成 `<groupPat
 报 `ASSIGN_ROLE_PERMISSION_DENIED`，说明当前账号根本没有这个应用的 Hippo 权限，脚本会把 `appOwners` 一起返回，
 此时必须停下来告知用户去向应用负责人申请权限，不要反复重试或换路径绕过。
 
-本 skill 不回滚配置。删除配置项只走 `delete-item`：用户在当前对话明确授权后，先 `status` 取 `currentStateToken`，再 `delete-item --delete-authorization=explicit --expected-current-token=<token>` 删除单个草稿项；加 `--publish --publish-authorization=explicit` 才按 key 粒度发布该删除（载荷 `type=delete`，与 Hippo 发布弹窗一致），发布后校验 active release 只少了目标 key。未授权时不发布；用户明确说“可以发布”“授权发布”“修改并发布”等同义表达后，可以在保存草稿并回读校验后自动发布目标 key。纯查询实际生效值使用 `query-hippo-config`；登录态失效使用 `get-browser-session`。
+本 skill 不回滚配置。**删除配置项是不可逆的高危动作，只走 `delete-item`，且每一个 key 都必须由用户在当前对话中点名授权**（应用、环境、namespace、key 四者齐全）；没有点名授权的 key 一律不删，也不能拿"清理冗余项"之类的概括性授权去删清单之外的 key。流程固定为：先 `delete-plan`（只读）看影响面，再把 plan 给出的 `deleteAuthorizationValue`（目标全路径）、`confirmEnvValue`、`currentStateToken`、`instancesOnActiveRelease` 原样传给 `delete-item`；加 `--publish --publish-authorization=explicit` 才按 key 粒度发布该删除（载荷 `type=delete`，与 Hippo 发布弹窗一致），发布后校验 active release 只少了目标 key。每次 `delete-item` 都写审计日志 `~/.local/state/agent-tools/hippo-delete-audit.log`。未授权时不发布；用户明确说“可以发布”“授权发布”“修改并发布”等同义表达后，可以在保存草稿并回读校验后自动发布目标 key。纯查询实际生效值使用 `query-hippo-config`；登录态失效使用 `get-browser-session`。
 
 `browser_session` MCP 优先用于登录态预检；由于该 MCP 只允许 GET，新增、修改和授权发布必须使用本 skill 的预置脚本。不要临时编写 Hippo PUT/POST 工具。
 
@@ -55,6 +55,7 @@ namespace 归到分组时，角色接口里的 namespace 名要写成 `<groupPat
 - 默认 env 是当前站点的 pre 环境：标准和 stable 站点是 `fql_pre`，墨西哥是 `mxyw_pre`；印尼没有 pre，缺省 env 是 `ynyw_prod`。只有用户明确指定其它环境时才传 `--env`，且写入时必须同时传 `--allow-non-pre`。
 - 印尼只有 `ynyw_prod`，任何印尼写入都等同于改线上：脚本不给印尼保留免二次确认的写入环境，必须由用户明确指定环境、传 `--allow-non-pre`，发布还要单独的明确授权。
 - 根据 `--env` 和 `--hippo-site` 自动选择 Hippo 站点：stable/测试/项目环境走 `http://stable-hippo.oa.fenqile.com`，墨西哥走 `https://hippo.oa.wowcredito.com`，印尼走 `https://hippo.oa.kredito.id`，其它环境走 `http://hippo.oa.fenqile.com`。不要把 stable 环境请求发到标准站点，不要把线上/预发请求发到 stable 站点，也不要把海外请求发到国内站点。
+- **删除规则（高于其它约束）**：① 只删用户在当前对话里逐 key 点名授权的项，授权必须能落成 `--delete-authorization=<app>/<env>/<namespace>/<key>`；② 先 `delete-plan`，向用户展示 `instancesOnActiveRelease` 与删除后剩余 key，再执行；③ 不要把多个 key 写进循环脚本一次跑完，除非用户已经逐条确认过完全相同的清单，且任一失败立即停止；④ 多环境按 pre → gray → oa → prod 逐环境做，每个环境删除后先验证（active 回读、实例仍在公共域/新代码、日志无 `未配置`）再进下一个；⑤ 绝不删除用户明确要求保留的 key，绝不删除公共 namespace 的项（除非用户专门授权并传 `--allow-public-namespace`）；⑥ 不删 namespace 本身；⑦ 结果里必须报告 `auditLogged`。
 - 默认动作仅是 upsert 草稿。没有用户明确授权时，不能传 `--publish`，也不能调用 release、publish、commitApprove 等发布动作。stable 站点例外：`upsert` 保存后自动发布目标 key，这是站点规则而不是授权动作，`--no-publish` 可关闭。
 - 非 stable 站点的授权发布只能通过 `upsert --publish --publish-authorization=explicit --expected-current-token=<plan token>` 执行；必须先运行 `plan`，并使用本次 `plan` 返回的 `currentStateToken`。stable 自动发布不要求 token，但目标 key 已有未发布草稿时仍要按草稿规则带 token。
 - stable 自动发布需要当前账号有该 namespace 的发布权；缺发布权时 `upsert` 报 `NAMESPACE_RELEASE_PERMISSION_DENIED`，按“已有 namespace 但没有权限”流程自助补权限，不要用 `--no-publish` 绕过后留下一个没人发布的草稿。
@@ -94,7 +95,8 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/configure-hippo/scripts/hi
 - `plan`：读取 `--value-file`，计算 `create/update/noop` 及并发保护 token，不写入。
 - `upsert`：新增或修改一个草稿项；相同内容自动 `noop`；默认不发布，只有显式授权参数齐全时才发布目标 key。
 - `verify`：只读确认草稿等于文件，并报告 active release 是否也等于文件。
-- `delete-item`：删除一个草稿项并可选发布该删除；需要 `--delete-authorization=explicit` 与本次 `status` 的 token；目标不在草稿中时报 `TARGET_ITEM_MISSING`；非 pre 环境同样要 `--allow-non-pre`；删除前后校验非目标项、active release 未被误动。
+- `delete-plan`：只读；报告目标 key 是否在草稿/active、删除后 active 剩余 key、当前读取该 namespace active release 的实例数与样本（`instancesOnActiveRelease`），并给出 `delete-item` 必须原样回填的 `deleteAuthorizationValue` / `confirmEnvValue` / `currentStateToken`。
+- `delete-item`：删除一个草稿项并可选发布该删除。必须同时满足：`--delete-authorization=<app>/<env>/<namespace>/<key>`（目标全路径，写错任一字段即拒绝，不接受常量）、`--confirm-env=<env>` 与解析环境一致、`--expected-current-token` 为本次 `delete-plan` 的 token、`--expected-instances` 等于 plan 的实例数（实例数变了必须重新 plan）；非 pre 环境还要 `--allow-non-pre`，公共 namespace（名称含 `.`）还要 `--allow-public-namespace`。目标不在草稿中时报 `TARGET_ITEM_MISSING`（草稿已删、active 仍有时可只补发布）；删除前后校验非目标项与 active release 未被误动。
 - `namespace-status`：只读查看应用类型、目标 namespace 在各 env 是否已存在、namespace 分组和新建权限。
 - `namespace-plan`：校验名称、备注、格式和加密组合，计算 `operation` 与并发保护 token，不写入。
 - `namespace-create`：用户明确授权后新建 namespace，并回读校验非目标 namespace、空配置项和无 release。
@@ -289,7 +291,9 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/script
 - `CONCURRENT_DRAFT_CHANGED`：重新运行 `plan`，不要复用旧 token。
 - `ACTIVE_RELEASE_CHANGED`：草稿可能已保存，但有人并发发布；立即停止，回读当前状态并向用户报告，不能自动回滚或再次写入。
 - `NON_TARGET_ITEM_CHANGED`：立即停止并报告并发修改；不要覆盖其它 key。
-- `DELETE_AUTHORIZATION_REQUIRED` / `EXPECTED_TOKEN_REQUIRED_FOR_DELETE`：删除缺少明确授权或本次 `status` 的 token；不要删除。
+- `DELETE_AUTHORIZATION_REQUIRED`：`--delete-authorization` 不是目标全路径（或用户根本没点名授权这个 key）；不要删除，回到用户处确认。
+- `DELETE_ENV_CONFIRMATION_REQUIRED` / `PUBLIC_NAMESPACE_DELETE_REJECTED`：环境没有重复确认，或目标是公共 namespace；核对目标后由用户决定。
+- `EXPECTED_TOKEN_REQUIRED_FOR_DELETE` / `EXPECTED_INSTANCES_REQUIRED` / `INSTANCE_COUNT_CHANGED`：缺少 `delete-plan` 的 token 或实例数，或实例数已变化；重新运行 `delete-plan`，把新结果给用户看过再删。
 - `TARGET_ITEM_MISSING` / `ACTIVE_KEY_MISSING`：草稿里没有该 key，或 active release 里没有该 key（无需发布删除）；先核对目标。
 - `DRAFT_DELETE_READBACK_TIMEOUT` / `PUBLISH_DELETE_READBACK_TIMEOUT`：删除或发布请求已发出但回读仍看到该 key；停止并人工核对，不要重复删除。
 - `PUBLISH_AUTHORIZATION_REQUIRED`：用户没有明确授权发布，或脚本缺少 `--publish-authorization=explicit`；不要发布。
