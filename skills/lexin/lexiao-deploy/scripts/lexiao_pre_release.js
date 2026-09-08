@@ -289,6 +289,12 @@ async function confirmIfNeeded(page, timeoutMs = 20000) {
   let last = [];
   while (Date.now() < deadline) {
     last = await visibleDialogs(page);
+    // 服务端拒绝（如「尚未完成生产部署前CR」）以 .el-message--error toast 呈现，约 5 秒即消失；
+    // 它没有 确定/确认 按钮，原逻辑只会等到超时并报 confirm timeout，把门禁问题误报成点击失败。
+    const errorToast = last.find((item) => /错误代码|错误信息|失败|不允许|尚未|无权限/.test(item.text) && !/确定|确认/.test((item.buttons || []).map((b) => b.text).join(' ')));
+    if (errorToast) {
+      return { confirmed: false, reason: 'server-rejected', errorToast: errorToast.text.slice(0, 300), dialogs: last.slice(0, 2) };
+    }
     const text = last.map((item) => item.text).join(' ');
     const running = text.match(/发布正在执行|部署正在执行|操作成功|发布成功|推送中|发布中/);
     if (running) {
