@@ -77,7 +77,11 @@ SSHManager = bastion_ssh.SSHManager
 APP_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 VERSION_RE = re.compile(r"^[A-Za-z0-9_.@:+-]+$")
 PID_RE = re.compile(r"^[1-9][0-9]{0,8}$")
-LOG_RE = re.compile(r"^(?:debug|error|info|stdout)\.log(?:[.\w-]+)?(?:\.gz)?$")
+# 兼容后缀轮转和时间戳位于扩展名前的轮转，仍只允许日志文件名。
+LOG_RE = re.compile(
+    r"^(?:debug|error|warn|info|stdout)"
+    r"(?:\.log(?:[.\w-]+)?|_\d{8}(?:\d{2}){0,3}(?:\.\d+)?\.log)(?:\.gz)?$"
+)
 HEALTH_PATH_RE = re.compile(r"^/[A-Za-z0-9_./?=&:%+-]*$")
 SENSITIVE_HEALTH_SEGMENTS = {
     "actuator/env",
@@ -272,7 +276,10 @@ def validate_keyword(keyword: str) -> str:
 def validate_log_file(file_name: str, default: str = "error.log") -> str:
     name = file_name or default
     if "/" in name or not LOG_RE.fullmatch(name):
-        raise ValueError("file_name must be debug.log/error.log/info.log/stdout.log or their rotated .gz files")
+        raise ValueError(
+            "file_name must be debug/error/warn/info/stdout logs or their rotations "
+            "(e.g. info.log.1, info_2026091010.0.log, optionally .gz); paths are not allowed"
+        )
     return name
 
 

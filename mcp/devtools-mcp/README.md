@@ -18,7 +18,7 @@
 - `java_app_diag`: 通过既有堡垒机配置做 Java 应用服务器只读诊断；默认用 `check_app_error_log` 只查 `error.log`，按日志线索再递进到基础状态、进程、端口、JVM、线程、GC/OOM、健康检查等诊断。
 - `k8s_readonly`: 通过 `kubectl` 执行 Kubernetes 只读查询和日志读取。
 - `observability`: Prometheus/Loki/Jaeger/SkyWalking 只读查询。
-- `healthy`: 复用 Healthy/Nightingale 脚本读取或应用固定大盘模板。
+- `healthy`: stable/线上大盘回读、通用配置写入与版本比对、页面验证、批量 PromQL；复用正式脚本和持久会话，不需要临时客户端。
 
 **数据与接口访问**
 

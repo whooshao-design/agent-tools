@@ -2,7 +2,7 @@
 name: inspect-healthy-metrics
 description: 只读查看 Healthy/雷神/Nightingale 指标上报状态。Use when 用户要求确认指标是否有数据、最近是否正常上报、批量检查 stable 或线上指标、按 metric 列表或 app+suffix 展开查询 Prometheus 样本、区分未注册/无数据/已过期/正常上报。
 metadata:
-  version: 1.0.0
+  version: 1.1.0
 ---
 
 # inspect-healthy-metrics
@@ -17,7 +17,8 @@ metadata:
 - `inspect-healthy-metrics`：用于 Prometheus 数据检查；只读，可选检查注册表辅助判断。
 - `healthy-dashboard-config`：用于大盘配置，不用于单指标上报排查。
 
-优先使用本 skill 的脚本，不要临时写 Node/Python/curl 拼接口。登录态失效时复用 `get-browser-session` 刷新同一个 profile，不要让用户在聊天里提供密码、验证码、Cookie 或 token。
+MCP 优先、脚本兜底：批量 PromQL 使用 `healthy_query_metrics`，指标注册状态和新鲜度分类用下文正式脚本。旧 MCP 进程需重启才能加载新增入口，期间直接调用正式脚本；不要复制临时 Node/Python/curl 客户端。
+登录态失效时复用 `get-browser-session` 刷新同一 profile；默认使用持久的 `/home/joney/.local/state/agent-tools/browser-profiles/healthy`，不要每次新建 profile。
 
 ## 环境
 
@@ -31,6 +32,7 @@ metadata:
 ```text
 POST /api/n9e/prometheus/api/v1/query
 POST /api/n9e/prometheus/api/v1/query_range
+POST /api/n9e/query-range-batch
 GET  /api/n9e/metric-manage?query=<metric>&exporter_type=&p=1&limit=15
 ```
 
@@ -41,6 +43,7 @@ GET  /api/n9e/metric-manage?query=<metric>&exporter_type=&p=1&limit=15
 3. `--profile` 指定的浏览器 profile 中 Healthy 页面 `localStorage.access_token`。
 
 请求头固定包含 `X-Cluster: Default`、`X-Language: zh`，必要时自动带 `Authorization: Bearer <token>` 和 `ticket`，但最终回复不输出这些敏感值。
+浏览器模式只读取精确键 `access_token`，不能按 `token` 模糊匹配，否则可能误用 `refresh_token` 导致 401。与大盘脚本共用会话锁、直连策略和页面 fetch；一批查询只启动一次浏览器，同一 profile 的任务串行。
 
 ## 推荐脚本
 
@@ -69,7 +72,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/inspect-healthy-metrics/sc
   --range 30m \
   --lookback 2h \
   --freshness 10m \
-  --profile /tmp/stable-healthy-metrics-profile \
+  --profile /home/joney/.local/state/agent-tools/browser-profiles/healthy \
   --check-registry
 ```
 
@@ -83,7 +86,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/inspect-healthy-metrics/sc
   --range 30m \
   --lookback 2h \
   --freshness 10m \
-  --profile /tmp/stable-healthy-metrics-profile \
+  --profile /home/joney/.local/state/agent-tools/browser-profiles/healthy \
   --check-registry
 ```
 
@@ -96,6 +99,19 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/inspect-healthy-metrics/sc
   --promql 'count(up)'
 ```
 
+批量查询（`env` 是站点，预发布使用 prod；`expr` 内的标签筛选才是数据环境）：
+
+```bash
+node /home/joney/projects/ai/agent-tools/skills/lexin/inspect-healthy-metrics/scripts/inspect_metrics.js \
+  --env=prod --queries-json='[{"name":"预发布实例数","expr":"count(up{env=\"pre\"})"}]' \
+  --query-type=range --range=30m --step=60s --output=/tmp/healthy-query-results.json
+```
+
+查询数据多时传 `--queries-file=<JSON 文件>`，内容为 `[{"name":"说明","expr":"PromQL"}]`。
+range 整批调用一次 `query-range-batch`；instant 在同一会话内查询。`--start/--end` 支持 Unix 秒回查历史窗口。
+`--output` 保存完整 JSON，终端输出每条 series 的首末样本和点数；目标文件存在时拒绝覆盖。查询 JSON 和结果可以保留，不需要为每个场景编写脚本。
+响应错误或批次结果缺项按查询失败处理，不能解释成无数据。
+
 ## 参数口径
 
 - `--metrics`：逗号或换行分隔的指标名。
@@ -107,6 +123,8 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/inspect-healthy-metrics/sc
 - `--step`：range query 步长，默认 `60s`。
 - `--check-registry`：同时查询指标注册表，区分未注册和无数据。
 - `--format json`：输出完整 JSON；默认输出 TSV 表格。
+- `--queries-json/--queries-file`：批量任意 PromQL，`--query-type=instant|range`，默认 range。
+- `--output`：保存完整查询数据并返回文件位置；MCP 自动使用独立结果目录。
 
 ## 多 series 陷阱（查聚合值时必读）
 
@@ -123,6 +141,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/inspect-healthy-metrics/sc
   但 `sum(...)` 是 60，即每分钟一个点，上报完全正常。
 - 脚本的 `range_samples` 已经是 `sum(count_over_time(...))`，`range_series` 是 `count(...)`，
   两者含义不同：前者是样本总数，后者是 series 条数。
+- 样本数不等于独立业务请求数；指标名带 counter 也不保证是累计计数器。先确认埋点口径，再选择 `rate/increase` 或汇总方式。
 - `--promql` 自由查询时脚本会输出 `series_count`；返回多条时附带 `multi_series_warning`，
   里面列出发生分裂的 label 和聚合建议。看到这个警告就说明当前查询没有聚合，结论不可直接采信。
 - 直接用 curl 打 `healthy.lexincloud.com/api/n9e/prometheus/api/v1/query` 时，

@@ -114,7 +114,7 @@ python -m bastion_mcp.server --transport http --port 8000
 
 ### `connect_bastion`
 
-连接堡垒机并启动保活。
+连接堡垒机并启动保活。连接属于当前 MCP 进程，与 `java_app_diag`、其它 `bastion` 实例及 Xshell 不共享。切换工具后应在本 MCP 先连接，再执行命令；按环境显式指定 profile（项目/stable=`dev`，预发/灰度/线上=`online`，DBA=`dba`，以本地配置为准）。
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|

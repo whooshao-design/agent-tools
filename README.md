@@ -24,7 +24,7 @@
 | `dev-review-solution` | 技术方案评审 - 独立检查可行性、完整性与风险并给出评审结论 |
 | `dev-derive-test-cases` | 编写测试清单 - 列清改完后检查什么、怎样算通过、需要什么证据 |
 | `dev-review-test-cases` | 独立复核测试清单 - 由另一 agent 检查漏项、错项和可执行性，不执行测试 |
-| `dev-build-change` | 代码开发 - 基于现有模式实施最小必要改动 |
+| `dev-build-change` | 代码开发 - 基于现有模式实施最小必要改动，检查类职责、方法语义和关键逻辑注释 |
 | `dev-verify-change` | 验证 - 围绕变更做最小必要验证 |
 | `dev-review-change` | 代码评审 - 基于变更证据评审正确性/架构/安全 |
 | `dev-finish-branch` | 分支收尾 - 交付前核对变更、证据、评审与风险 |
@@ -107,9 +107,9 @@
 
 | Skill | 说明 | 配套 MCP |
 |---|---|---|
-| `java-server-diagnostics` | Java 应用服务器只读诊断：默认先查 `error.log`，再按线索递进排查 | `java_app_diag` |
-| `healthy-dashboard-config` | Healthy/Nightingale 大盘配置 | `healthy` |
-| `inspect-healthy-metrics` | 只读查看雷神指标上报状态、最后样本和注册辅助信息 | `browser_session` |
+| `java-server-diagnostics` | Java 应用服务器只读诊断：默认先查 `error.log`，支持 warn/轮转日志及独立堡垒机会话 | `java_app_diag` |
+| `healthy-dashboard-config` | stable/线上大盘读写、版本比对、动态筛选和页面查询验证 | `healthy` |
+| `inspect-healthy-metrics` | 批量 PromQL、指标上报状态、最后样本和注册辅助信息，共用持久会话 | `healthy`, `browser_session` |
 | `inspect-healthy-jvm-dashboard` | 只读查看雷神 JVM/G1 看板，整理变量、面板、PromQL 和页面快照 | `healthy`, `browser_session` |
 | `register-healthy-metrics` | 查询、注册和复查 Healthy/雷神指标 | `browser_session` |
 | `diagnose-healthy-alert` | 从雷神告警排查原因：事件、规则、指标回放、埋点代码到日志的证据链 | `browser_session` |

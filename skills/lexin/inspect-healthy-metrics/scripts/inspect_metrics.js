@@ -2,41 +2,12 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { createRequire } = require('module');
+const { parseArgs, resolveBaseUrl, withHealthyClient } = require('../../healthy-dashboard-config/scripts/healthy_client');
 
-const BASE_URLS = {
-  stable: 'https://stable-eye.oa.fenqile.com',
-  test: 'https://stable-eye.oa.fenqile.com',
-  prod: 'https://healthy.lexincloud.com',
-  online: 'https://healthy.lexincloud.com',
-};
-
-const DEFAULT_CLUSTER = 'Default';
-const DEFAULT_LANGUAGE = 'zh';
-const DEFAULT_PROFILE = '/tmp/healthy-metrics-profile';
-const DEFAULT_TOOL_DIR = '~/tools/lexiao-browser';
 const DEFAULT_RANGE = '30m';
 const DEFAULT_LOOKBACK = '2h';
 const DEFAULT_FRESHNESS = '10m';
 const DEFAULT_STEP = '60s';
-
-function parseArgs(argv) {
-  const args = {};
-  for (let index = 0; index < argv.length; index += 1) {
-    const item = argv[index];
-    if (!item.startsWith('--')) continue;
-    const eq = item.indexOf('=');
-    if (eq !== -1) {
-      args[item.slice(2, eq)] = item.slice(eq + 1);
-    } else if (argv[index + 1] && !argv[index + 1].startsWith('--')) {
-      args[item.slice(2)] = argv[index + 1];
-      index += 1;
-    } else {
-      args[item.slice(2)] = true;
-    }
-  }
-  return args;
-}
 
 function usage() {
   console.log(`Usage:
@@ -46,7 +17,7 @@ function usage() {
 
 Options:
   --env              stable|test|prod|online
-  --base-url         Override API base URL
+  --base-url         Known Healthy site override only
   --metrics          Comma or newline separated metric names
   --metrics-file     JSON array of metric strings/objects, or {"metrics":[...]}
   --apps             Comma separated app names, used with --suffixes
@@ -56,10 +27,15 @@ Options:
   --freshness        OK freshness threshold, default 10m
   --step             Range query step, default 60s
   --check-registry   Also query /api/n9e/metric-manage
-  --promql           Run a raw instant PromQL query instead of metric inspection
+  --promql           Run one raw instant PromQL query
+  --queries-file     JSON array of {name,expr}; one browser session for the whole batch
+  --queries-json     Inline JSON array, alternative to --queries-file
+  --query-type       instant|range, default range for batches
+  --start/--end       Optional epoch seconds for a historical range (default now minus --range)
+  --output           Save full JSON results; stdout includes a compact query summary
   --format           table|json, default table
   --token            Bearer token. Also supports env HEALTHY_METRIC_TOKEN
-  --profile          Browser profile with Healthy login state, default /tmp/healthy-metrics-profile
+  --profile          Browser profile with Healthy login state, default browser-profiles/healthy
   --tool-dir         Local Playwright tool dir, defaults to ~/tools/lexiao-browser
   --plan-only        Only expand metrics/promql, no network access
 `);
@@ -83,16 +59,6 @@ function splitList(value) {
 function readJsonFile(file) {
   if (!file) return null;
   return JSON.parse(fs.readFileSync(expandHome(file), 'utf8'));
-}
-
-function normalizeEnv(env) {
-  const key = String(env || 'stable').toLowerCase();
-  if (key === '测试') return 'stable';
-  if (key === '线上' || key === '生产') return 'prod';
-  if (!BASE_URLS[key]) {
-    throw new Error(`Unsupported env: ${env}`);
-  }
-  return key;
 }
 
 function normalizeMetricItem(item) {
@@ -159,7 +125,9 @@ function parseDuration(value) {
     h: 3600,
     d: 86400,
   };
-  return amount * multipliers[unit];
+  const seconds = amount * multipliers[unit];
+  if (seconds <= 0) throw new Error('Duration must be positive');
+  return seconds;
 }
 
 function prometheusDuration(value) {
@@ -168,111 +136,6 @@ function prometheusDuration(value) {
     throw new Error(`Invalid Prometheus duration: ${value}`);
   }
   return /^\d+$/.test(text) ? `${text}s` : text;
-}
-
-function resolvePaths(args) {
-  const toolDir = expandHome(args['tool-dir'] || DEFAULT_TOOL_DIR);
-  return {
-    toolDir,
-    profileDir: expandHome(args.profile || DEFAULT_PROFILE),
-    chromePath: expandHome(args.chrome || path.join(toolDir, 'browsers/chrome-linux64/chrome')),
-    runtimeLibDir: expandHome(args['runtime-lib-dir'] || path.join(toolDir, 'runtime-libs/usr/lib/x86_64-linux-gnu')),
-    playwrightPackage: path.join(toolDir, 'package.json'),
-  };
-}
-
-function loadPlaywright(paths) {
-  if (!fs.existsSync(paths.playwrightPackage)) {
-    throw new Error(`Playwright tool dir not found: ${paths.toolDir}`);
-  }
-  const requireFromTool = createRequire(paths.playwrightPackage);
-  return requireFromTool('playwright').chromium;
-}
-
-async function extractAuthFromProfile(args, baseUrl) {
-  const paths = resolvePaths(args);
-  const chromium = loadPlaywright(paths);
-  const ldLibraryPath = [paths.runtimeLibDir, process.env.LD_LIBRARY_PATH].filter(Boolean).join(':');
-  const context = await chromium.launchPersistentContext(paths.profileDir, {
-    executablePath: paths.chromePath,
-    headless: true,
-    env: { ...process.env, LD_LIBRARY_PATH: ldLibraryPath },
-    args: ['--no-sandbox', '--disable-dev-shm-usage'],
-  });
-  try {
-    const page = context.pages()[0] || await context.newPage();
-    const authUrl = args['auth-url'] || `${baseUrl}/sys-manage/metric-manage`;
-    await page.goto(authUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
-    const auth = await page.evaluate(() => {
-      const keys = Object.keys(localStorage);
-      const tokenKey = keys.find((key) => /access.?token|token/i.test(key) && localStorage.getItem(key));
-      const ticketKey = keys.find((key) => /ticket/i.test(key) && localStorage.getItem(key));
-      return {
-        token: tokenKey ? localStorage.getItem(tokenKey) : '',
-        ticket: ticketKey ? localStorage.getItem(ticketKey) : '',
-        tokenKey,
-        ticketKey,
-        title: document.title,
-        snippet: document.body.innerText.replace(/\s+/g, ' ').trim().slice(0, 200),
-      };
-    });
-    if (!auth.token) {
-      throw new Error(`No access token in profile. Page title=${auth.title}, snippet=${auth.snippet}`);
-    }
-    return { token: auth.token, ticket: auth.ticket || '' };
-  } finally {
-    await context.close().catch(() => {});
-  }
-}
-
-async function resolveAuth(args, baseUrl) {
-  const token = args.token || process.env.HEALTHY_METRIC_TOKEN;
-  if (token) return { token, ticket: args.ticket || '' };
-  return extractAuthFromProfile(args, baseUrl);
-}
-
-function authHeaders(auth, args, hasBody) {
-  const headers = {
-    accept: 'application/json',
-    'x-cluster': args.cluster || DEFAULT_CLUSTER,
-    'x-language': args.language || DEFAULT_LANGUAGE,
-  };
-  if (hasBody) headers['content-type'] = 'application/json;charset=UTF-8';
-  if (auth.token) headers.authorization = `Bearer ${auth.token}`;
-  if (auth.ticket) headers.ticket = auth.ticket;
-  return headers;
-}
-
-async function requestJson(method, url, auth, args, body, redirectsLeft = 3) {
-  const response = await fetch(url, {
-    method,
-    headers: authHeaders(auth, args, Boolean(body) || method === 'POST'),
-    body: body ? JSON.stringify(body) : undefined,
-    redirect: 'manual',
-  });
-
-  if ([301, 302, 307, 308].includes(response.status) && response.headers.get('location') && redirectsLeft > 0) {
-    const nextUrl = new URL(response.headers.get('location'), url).toString();
-    return requestJson(method, nextUrl, auth, args, body, redirectsLeft - 1);
-  }
-
-  const text = await response.text();
-  let json;
-  try {
-    json = text ? JSON.parse(text) : {};
-  } catch (error) {
-    throw new Error(`${method} ${redactUrl(url)} returned non-json status=${response.status}: ${text.slice(0, 300)}`);
-  }
-  if (!response.ok || json.err) {
-    throw new Error(`${method} ${redactUrl(url)} failed status=${response.status} err=${json.err || json.error || ''}`);
-  }
-  return json;
-}
-
-function redactUrl(url) {
-  const parsed = new URL(url);
-  return `${parsed.origin}${parsed.pathname}`;
 }
 
 function promQueryUrl(baseUrl, query) {
@@ -299,24 +162,24 @@ function metricManageUrl(baseUrl, metric) {
   return url.toString();
 }
 
-async function promQuery(baseUrl, auth, args, query) {
-  const json = await requestJson('POST', promQueryUrl(baseUrl, query), auth, args);
+async function promQuery(client, query) {
+  const json = (await client.request('POST', promQueryUrl(client.baseUrl, query))).json;
   if (json.status !== 'success') {
     throw new Error(`Prometheus query failed: ${query}; status=${json.status || ''} error=${json.error || ''}`);
   }
   return json.data?.result || [];
 }
 
-async function promRange(baseUrl, auth, args, query, start, end, step) {
-  const json = await requestJson('POST', promRangeUrl(baseUrl, query, start, end, step), auth, args);
+async function promRange(client, query, start, end, step) {
+  const json = (await client.request('POST', promRangeUrl(client.baseUrl, query, start, end, step))).json;
   if (json.status !== 'success') {
     throw new Error(`Prometheus range query failed: ${query}; status=${json.status || ''} error=${json.error || ''}`);
   }
   return json.data?.result || [];
 }
 
-async function queryRegistry(baseUrl, auth, args, metric) {
-  const json = await requestJson('GET', metricManageUrl(baseUrl, metric), auth, args);
+async function queryRegistry(client, metric) {
+  const json = (await client.request('GET', metricManageUrl(client.baseUrl, metric))).json;
   const list = json.dat?.list || [];
   return list.filter((item) => item.metric === metric || item.standard_metric === metric);
 }
@@ -420,7 +283,7 @@ function statusFor(row, freshnessSeconds) {
   return 'MISSING';
 }
 
-async function inspectMetric(baseUrl, auth, args, metric, options) {
+async function inspectMetric(client, args, metric, options) {
   const row = {
     metric,
     registered: args['check-registry'] ? false : 'unknown',
@@ -439,7 +302,7 @@ async function inspectMetric(baseUrl, auth, args, metric, options) {
 
   try {
     if (args['check-registry']) {
-      const hits = await queryRegistry(baseUrl, auth, args, metric);
+      const hits = await queryRegistry(client, metric);
       row.registered = hits.length > 0;
       row.registry_ids = hits.map((hit) => hit.id).filter(Boolean).join(',');
       if (!row.registered) {
@@ -450,13 +313,13 @@ async function inspectMetric(baseUrl, auth, args, metric, options) {
 
     const range = options.range;
     const lookback = options.lookback;
-    row.current_series = vectorNumber(await promQuery(baseUrl, auth, args, `count(${metric})`));
-    row.range_series = vectorNumber(await promQuery(baseUrl, auth, args, `count(count_over_time(${metric}[${range}]))`));
-    row.range_samples = vectorNumber(await promQuery(baseUrl, auth, args, `sum(count_over_time(${metric}[${range}]))`));
-    row.lookback_series = vectorNumber(await promQuery(baseUrl, auth, args, `count(count_over_time(${metric}[${lookback}]))`));
+    row.current_series = vectorNumber(await promQuery(client, `count(${metric})`));
+    row.range_series = vectorNumber(await promQuery(client, `count(count_over_time(${metric}[${range}]))`));
+    row.range_samples = vectorNumber(await promQuery(client, `sum(count_over_time(${metric}[${range}]))`));
+    row.lookback_series = vectorNumber(await promQuery(client, `count(count_over_time(${metric}[${lookback}]))`));
 
-    const timestampSeries = await promRange(baseUrl, auth, args, `timestamp(${metric})`, options.start, options.end, options.step);
-    const valueSeries = await promRange(baseUrl, auth, args, metric, options.start, options.end, options.step);
+    const timestampSeries = await promRange(client, `timestamp(${metric})`, options.start, options.end, options.step);
+    const valueSeries = await promRange(client, metric, options.start, options.end, options.step);
     const latestTimestamp = latestTimestampValue(timestampSeries);
     const latestMetricValue = latestValue(valueSeries);
 
@@ -532,83 +395,101 @@ function countByStatus(rows) {
   return result;
 }
 
-async function runRawPromql(baseUrl, auth, args) {
-  const result = await promQuery(baseUrl, auth, args, args.promql);
-  const output = {
-    checked_at: formatTime(Math.floor(Date.now() / 1000)),
-    env: args.env || 'stable',
-    base_url: baseUrl,
-    promql: args.promql,
-    series_count: Array.isArray(result) ? result.length : 0,
-    result,
-  };
-  const breakdown = seriesBreakdown(result);
-  if (breakdown) output.multi_series_warning = breakdown;
-  console.log(JSON.stringify(output, null, 2));
+function loadQueries(args) {
+  if (args['queries-file'] && args['queries-json']) throw new Error('queries-file 与 queries-json 只能选择一个');
+  if (!args['queries-file'] && !args['queries-json']) return null;
+  const queries = args['queries-json'] ? JSON.parse(args['queries-json']) : readJsonFile(args['queries-file']);
+  if (!Array.isArray(queries) || !queries.length || queries.some(item =>
+    !item || typeof item.name !== 'string' || !item.name.trim() || typeof item.expr !== 'string' || !item.expr.trim())) {
+    throw new Error('queries 必须是非空的 {name,expr} 数组');
+  }
+  return queries;
+}
+
+function parseBatchResults(queries, json) {
+  if (json.err || !Array.isArray(json.dat) || json.dat.length !== queries.length || json.dat.some(item => !Array.isArray(item))) {
+    throw new Error('query-range-batch 失败或响应数量不匹配，不能按无数据处理');
+  }
+  return queries.map((item, index) => ({ ...item, series_count: json.dat[index].length, result: json.dat[index] }));
+}
+
+async function runQueries(client, args, queries) {
+  const type = args['query-type'] || 'range';
+  if (!['instant', 'range'].includes(type)) throw new Error('query-type 必须是 instant 或 range');
+  if (type === 'instant') {
+    // 同一页面适度并行，避免为每个表达式重新拉起浏览器。
+    const results = [];
+    for (let index = 0; index < queries.length; index += 4) {
+      results.push(...await Promise.all(queries.slice(index, index + 4).map(async item => {
+        const result = await promQuery(client, item.expr);
+        return { ...item, series_count: result.length, result };
+      })));
+    }
+    return { query_type: type, results };
+  }
+  const end = args.end === undefined ? Math.floor(Date.now() / 1000) : Number(args.end);
+  const start = args.start === undefined ? end - parseDuration(args.range || DEFAULT_RANGE) : Number(args.start);
+  const step = parseDuration(args.step || DEFAULT_STEP);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start) throw new Error('start/end 必须是有效时间区间');
+  const response = await client.request('POST', '/api/n9e/query-range-batch', {
+    queries: queries.map(item => ({ query: item.expr, start, end, step })),
+  });
+  return { query_type: type, start, end, step, results: parseBatchResults(queries, response.json) };
+}
+
+function outputJson(output, args) {
+  if (!args.output) return console.log(JSON.stringify(output, null, 2));
+  fs.writeFileSync(expandHome(args.output), JSON.stringify(output, null, 2), { flag: 'wx' });
+  const summary = { ...output, output: expandHome(args.output) };
+  if (summary.results) summary.results = summary.results.map(({ result, ...item }) => ({
+    ...item, series: result.map(series => ({ metric: series.metric, first: series.values?.[0] || series.value,
+      last: series.values?.at(-1) || series.value, points: series.values?.length || 1 })),
+  }));
+  console.log(JSON.stringify(summary, null, 2));
 }
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help || args.h) {
-    usage();
-    return;
-  }
-
-  const env = normalizeEnv(args.env || 'stable');
-  args.env = env;
-  const baseUrl = args['base-url'] || BASE_URLS[env];
-  const metrics = args.promql ? [] : loadMetrics(args);
-  if (!args.promql && !metrics.length) {
-    throw new Error('No metrics provided. Use --metrics, --metrics-file, or --apps with --suffixes.');
-  }
-
+  if (args.help || args.h) return usage();
+  args.env = args.env || 'stable';
+  const baseUrl = resolveBaseUrl(args, 'stable');
+  const queries = loadQueries(args);
+  if (queries && args.promql) throw new Error('promql 与 queries 只能选择一个');
+  const metrics = args.promql || queries ? [] : loadMetrics(args);
+  if (!args.promql && !queries && !metrics.length) throw new Error('请提供 metrics、promql 或 queries');
   if (args['plan-only']) {
-    printPlan(baseUrl, args, metrics);
+    if (queries) console.log(JSON.stringify({ base_url: baseUrl, query_type: args['query-type'] || 'range', queries }, null, 2));
+    else printPlan(baseUrl, args, metrics);
     return;
   }
-
-  const auth = await resolveAuth(args, baseUrl);
-  if (args.promql) {
-    await runRawPromql(baseUrl, auth, args);
-    return;
-  }
-
-  const now = Math.floor(Date.now() / 1000);
-  const lookback = prometheusDuration(args.lookback || DEFAULT_LOOKBACK);
-  const lookbackSeconds = parseDuration(lookback);
-  const options = {
-    range: prometheusDuration(args.range || DEFAULT_RANGE),
-    lookback,
-    freshnessSeconds: parseDuration(args.freshness || DEFAULT_FRESHNESS),
-    step: prometheusDuration(args.step || DEFAULT_STEP),
-    end: now,
-    start: now - lookbackSeconds,
-  };
-
-  const rows = [];
-  for (const metric of metrics) {
-    rows.push(await inspectMetric(baseUrl, auth, args, metric, options));
-  }
-
-  const summary = {
-    checked_at: formatTime(now),
-    env,
-    base_url: baseUrl,
-    range: options.range,
-    lookback: options.lookback,
-    freshness: args.freshness || DEFAULT_FRESHNESS,
-    status_counts: countByStatus(rows),
-    rows,
-  };
-
-  if (String(args.format || 'table').toLowerCase() === 'json') {
-    console.log(JSON.stringify(summary, null, 2));
-  } else {
-    printTable(summary);
-  }
+  // 保留显式 token 的旧入口，但凭据只在当前已限定站点的浏览器会话中使用。
+  args.token = args.token || process.env.HEALTHY_METRIC_TOKEN;
+  await withHealthyClient(args, async client => {
+    const now = Math.floor(Date.now() / 1000);
+    const common = { checked_at: formatTime(now), env: args.env, base_url: baseUrl };
+    if (queries) return outputJson({ ...common, ...await runQueries(client, args, queries) }, args);
+    if (args.promql) {
+      const result = await promQuery(client, args.promql);
+      const output = { ...common, promql: args.promql, series_count: result.length, result };
+      const breakdown = seriesBreakdown(result);
+      if (breakdown) output.multi_series_warning = breakdown;
+      return outputJson(output, args);
+    }
+    const lookback = prometheusDuration(args.lookback || DEFAULT_LOOKBACK);
+    const options = {
+      range: prometheusDuration(args.range || DEFAULT_RANGE), lookback,
+      freshnessSeconds: parseDuration(args.freshness || DEFAULT_FRESHNESS),
+      step: prometheusDuration(args.step || DEFAULT_STEP), end: now, start: now - parseDuration(lookback),
+    };
+    const rows = [];
+    for (const metric of metrics) rows.push(await inspectMetric(client, args, metric, options));
+    const summary = { ...common, range: options.range, lookback: options.lookback,
+      freshness: args.freshness || DEFAULT_FRESHNESS, status_counts: countByStatus(rows), rows };
+    if (args.output || String(args.format || 'table').toLowerCase() === 'json') outputJson(summary, args);
+    else printTable(summary);
+    if (rows.some(row => row.status === 'QUERY_ERROR')) process.exitCode = 1;
+  });
 }
 
-main().catch((error) => {
-  console.error(error.stack || error.message);
-  process.exit(1);
-});
+module.exports = { inspectMetric, loadMetrics, loadQueries, parseBatchResults, parseDuration, runQueries, statusFor };
+if (require.main === module) main().catch(error => { console.error(error.message); process.exitCode = 1; });

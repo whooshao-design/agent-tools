@@ -162,12 +162,12 @@ def _truncate_output(text: str, max_chars: int) -> str:
 
 @mcp.tool()
 async def execute_command(ip: str, command: str, timeout: int = 30) -> str:
-    """在目标机器上执行只读命令。
+    """在目标机器上执行只读命令。必须先在本 MCP 调用 connect_bastion；不共享 java_app_diag 的连接。
     ip: 目标机器 IP（通过堡垒机 go 命令跳转）
     command: 要执行的命令（默认只读护栏：写/破坏类命令与重定向写入会被拒绝）
     timeout: 命令超时秒数"""
     if not ssh_mgr or not ssh_mgr.is_connected():
-        return "错误：未连接堡垒机，请先调用 connect_bastion"
+        return "错误：当前 bastion MCP 未连接；连接不与 java_app_diag 等 MCP 共享。请先在当前 MCP 调用 connect_bastion，并按环境显式指定 profile（项目/stable=dev，预发/灰度/线上=online，DBA=dba）。"
     if os.environ.get("BASTION_ALLOW_WRITE") != "1" and _is_write_command(command):
         return (
             "错误：命令被只读护栏拦截（包含写/破坏类命令或重定向写入）。"
@@ -192,7 +192,7 @@ async def clickhouse_query(
     output_format: 输出格式，默认 TabSeparatedWithNames。
     max_chars: 返回内容最大字符数，默认 20000。"""
     if not ssh_mgr or not ssh_mgr.is_connected():
-        return "错误：未连接堡垒机，请先调用 connect_bastion"
+        return "错误：当前 bastion MCP 未连接；连接不与 java_app_diag 等 MCP 共享。请先在当前 MCP 调用 connect_bastion，并按环境显式指定 profile（项目/stable=dev，预发/灰度/线上=online，DBA=dba）。"
 
     readonly_sql, error = _validate_clickhouse_sql(sql)
     if error:

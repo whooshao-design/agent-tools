@@ -1,134 +1,23 @@
 #!/usr/bin/env node
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
-const { createRequire } = require('module');
-
-const BASE_URL = 'https://healthy.lexincloud.com';
-const DEFAULT_PROFILE = '/home/joney/.local/state/agent-tools/browser-profiles/healthy';
-const DEFAULT_TOOL_DIR = '~/tools/lexiao-browser';
-
-function expandHome(value) {
-  if (!value) return value;
-  if (value === '~') return os.homedir();
-  if (value.startsWith('~/')) return path.join(os.homedir(), value.slice(2));
-  return value;
-}
-
-function parseArgs(argv) {
-  const args = {};
-  for (let index = 0; index < argv.length; index += 1) {
-    const item = argv[index];
-    if (!item.startsWith('--')) continue;
-    const eq = item.indexOf('=');
-    if (eq !== -1) {
-      args[item.slice(2, eq)] = item.slice(eq + 1);
-    } else if (argv[index + 1] && !argv[index + 1].startsWith('--')) {
-      args[item.slice(2)] = argv[index + 1];
-      index += 1;
-    } else {
-      args[item.slice(2)] = true;
-    }
-  }
-  return args;
-}
+const { createHash } = require('crypto');
+const { isDeepStrictEqual } = require('util');
+const { parseArgs, resolveBaseUrl, withHealthyClient } = require('./healthy_client');
 
 function usage() {
   console.log(`Usage:
-  healthy_dashboard_config.js --board=<id> --read [--profile=/home/joney/.local/state/agent-tools/browser-profiles/healthy]
-  healthy_dashboard_config.js --board=<id> --mode=hawk-read-through --apply [--profile=/home/joney/.local/state/agent-tools/browser-profiles/healthy]
-  healthy_dashboard_config.js --board=<id> --configs-file=<path> --apply [--profile=/home/joney/.local/state/agent-tools/browser-profiles/healthy]
-
+  healthy_dashboard_config.js --board=<id> --env=stable|prod --read
+  healthy_dashboard_config.js --board=<id> --configs-file=<path> --expected-sha256=<hash> --apply
+  healthy_dashboard_config.js --board=<id> --mode=hawk-read-through --apply
+  healthy_dashboard_config.js --board=<id> --verify-page --variables-json='{"env":["pre"],"ip":["all"]}'
 Options:
-  --board          Healthy board id, for example 16761
-  --read           Only read board configs and write /tmp backup
-  --apply          Write generated configs back to Healthy
-  --mode           Built-in mode. Currently supports: hawk-read-through
-  --configs-file   Full configs JSON file to PUT; takes precedence over --mode
-  --profile        Browser profile with Healthy login state
-  --tool-dir       Local Playwright tool dir, defaults to ~/tools/lexiao-browser
+  --configs-json       Full configs object, alternative to --configs-file
+  --profile            Persistent browser profile (default browser-profiles/healthy)
+  --output-dir         Evidence directory; defaults to a unique /tmp/healthy-dashboard-* directory
+  --expected-sha256    Config hash from --read; required for full configs updates
+  --verify-page        Capture actual panel queries, dropdown options and screenshot
 `);
-}
-
-function resolvePaths(args) {
-  const toolDir = expandHome(args['tool-dir'] || DEFAULT_TOOL_DIR);
-  return {
-    toolDir,
-    profileDir: expandHome(args.profile || DEFAULT_PROFILE),
-    chromePath: expandHome(args.chrome || path.join(toolDir, 'browsers/chrome-linux64/chrome')),
-    runtimeLibDir: expandHome(args['runtime-lib-dir'] || path.join(toolDir, 'runtime-libs/usr/lib/x86_64-linux-gnu')),
-    playwrightPackage: path.join(toolDir, 'package.json'),
-  };
-}
-
-function loadPlaywright(paths) {
-  if (!fs.existsSync(paths.playwrightPackage)) {
-    throw new Error(`Playwright 工具目录不存在：${paths.toolDir}`);
-  }
-  const requireFromTool = createRequire(paths.playwrightPackage);
-  return requireFromTool('playwright').chromium;
-}
-
-async function openContext(paths, chromium) {
-  const ldLibraryPath = [paths.runtimeLibDir, process.env.LD_LIBRARY_PATH].filter(Boolean).join(':');
-  return chromium.launchPersistentContext(paths.profileDir, {
-    executablePath: paths.chromePath,
-    headless: true,
-    env: {
-      ...process.env,
-      LD_LIBRARY_PATH: ldLibraryPath,
-    },
-    args: ['--no-sandbox', '--disable-dev-shm-usage'],
-  });
-}
-
-async function extractAuth(page) {
-  await page.goto(`${BASE_URL}/dashboards`, { waitUntil: 'domcontentloaded', timeout: 60000 });
-  await page.waitForTimeout(1000);
-  return page.evaluate(() => {
-    const keys = Object.keys(localStorage);
-    const tokenKey = keys.find((key) => /access.?token|token/i.test(key) && localStorage.getItem(key));
-    const ticketKey = keys.find((key) => /ticket/i.test(key) && localStorage.getItem(key));
-    return {
-      token: tokenKey ? localStorage.getItem(tokenKey) : '',
-      ticket: ticketKey ? localStorage.getItem(ticketKey) : '',
-      tokenKey,
-      ticketKey,
-      title: document.title,
-      snippet: document.body.innerText.replace(/\s+/g, ' ').trim().slice(0, 400),
-    };
-  });
-}
-
-function headers(auth) {
-  const result = {
-    accept: 'application/json',
-    'content-type': 'application/json;charset=UTF-8',
-    'x-cluster': 'Default',
-    'x-language': 'zh',
-  };
-  if (auth.token) result.authorization = `Bearer ${auth.token}`;
-  if (auth.ticket) result.ticket = auth.ticket;
-  return result;
-}
-
-async function requestJson(page, method, url, auth, body) {
-  return page.evaluate(async ({ method, url, headers, body }) => {
-    const resp = await fetch(url, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-      credentials: 'include',
-    });
-    const text = await resp.text();
-    let json = null;
-    try {
-      json = text ? JSON.parse(text) : null;
-    } catch (error) {
-      json = { parseError: error.message, text: text.slice(0, 1000) };
-    }
-    return { status: resp.status, ok: resp.ok, json };
-  }, { method, url, headers: headers(auth), body });
 }
 
 function parseBoardConfigs(boardResp) {
@@ -192,7 +81,6 @@ function hawkReadThroughPatch(configs) {
       definition: 'label_values(old_gen_mem_used{app="$app"},env)',
       effect: 'default',
       datasource: { cate: 'prometheus' },
-      defaultValue: 'prod',
     },
     {
       name: 'ip',
@@ -204,7 +92,6 @@ function hawkReadThroughPatch(configs) {
       multi: true,
       allOption: true,
       allValue: '.*',
-      defaultValue: ['all'],
     },
   ];
   const replacingVarNames = new Set(variables.map((item) => item.name));
@@ -241,82 +128,152 @@ function summarize(configs) {
   };
 }
 
-async function main() {
-  const args = parseArgs(process.argv.slice(2));
-  if (args.help || args.h) {
-    usage();
-    process.exit(0);
-  }
-  if (!args.board) {
-    usage();
-    process.exit(1);
-  }
-  if (!args.read && !args.apply) {
-    throw new Error('必须指定 --read 或 --apply');
-  }
+function configsHash(configs) {
+  return createHash('sha256').update(JSON.stringify(configs)).digest('hex');
+}
 
-  const paths = resolvePaths(args);
-  const chromium = loadPlaywright(paths);
-  const context = await openContext(paths, chromium);
-  const page = await context.newPage();
+function validateConfigs(configs) {
+  if (!configs || typeof configs !== 'object' || Array.isArray(configs)) {
+    throw new Error('configs 必须是完整 JSON 对象');
+  }
+  return configs;
+}
+
+// 外部生成的全量配置必须绑定回读版本，避免覆盖其他人的编辑。
+async function updateBoard(client, boardUrl, before, desired, expectedHash, saveAfter) {
+  validateConfigs(desired);
+  if (configsHash(before) !== expectedHash) throw new Error('大盘配置已变化，请重新回读并合并修改');
+  if (isDeepStrictEqual(before, desired)) return { changed: false, configs: before };
+  const current = parseBoardConfigs(await client.request('GET', boardUrl));
+  if (configsHash(current.configs) !== expectedHash) throw new Error('写入前大盘配置已变化，请重新合并');
+  await client.request('PUT', `${boardUrl}/configs`, { configs: JSON.stringify(desired) });
+  const after = parseBoardConfigs(await client.request('GET', boardUrl));
+  saveAfter(after.board);
+  if (!isDeepStrictEqual(after.configs, desired)) throw new Error('写入后 configs 回读与目标不一致，请检查备份');
+  return { changed: true, configs: after.configs };
+}
+
+function dashboardUrl(baseUrl, board, configs, variables) {
+  const url = new URL(`/dashboards/${board}`, baseUrl);
+  if (!variables || typeof variables !== 'object' || Array.isArray(variables)) throw new Error('variables 必须是对象');
+  for (const [name, value] of Object.entries(variables)) {
+    const definition = (configs.var || []).find(item => item.name === name);
+    if (!definition) throw new Error(`大盘不存在变量：${name}`);
+    // query 的 defaultValue 无效；URL 的 JSON 值优先于浏览器保存的选择。
+    const selected = definition.type === 'query' && !Array.isArray(value) ? [value] : value;
+    url.searchParams.set(name, JSON.stringify(selected));
+  }
+  return url.toString();
+}
+
+function queryResponseSummary(url, status, request, body) {
+  const queries = request?.queries?.map(item => item.query || item.expr || '') || [];
+  const parsed = new URL(url);
+  for (const key of ['query', 'match[]']) queries.push(...parsed.searchParams.getAll(key));
+  const unresolved = queries.filter(query => /\$(?:[a-zA-Z_]\w*|\{[^}]+\})/.test(query));
+  const failed = status < 200 || status >= 300 || !body || Boolean(body.err) || body.status === 'error';
+  return { path: parsed.pathname, status, queries, unresolved, failed, body };
+}
+
+async function verifyPage(page, baseUrl, board, configs, variables, outputDir) {
+  const url = dashboardUrl(baseUrl, board, configs, variables);
+  const pending = [];
+  const responses = [];
+  const failures = [];
+  const isQuery = value => {
+    const parsed = new URL(value);
+    return parsed.origin === baseUrl && parsed.pathname.startsWith('/api/n9e/') && /query|label|series/.test(parsed.pathname);
+  };
+  const onResponse = response => {
+    if (!isQuery(response.url())) return;
+    pending.push((async () => {
+      let request = null;
+      try { request = response.request().postDataJSON(); } catch (_) { /* GET 没有 JSON body。 */ }
+      responses.push(queryResponseSummary(response.url(), response.status(), request, await response.json().catch(() => null)));
+    })());
+  };
+  const onFailure = request => { if (isQuery(request.url())) failures.push(new URL(request.url()).pathname); };
+  page.on('response', onResponse);
+  page.on('requestfailed', onFailure);
   try {
-    const auth = await extractAuth(page);
-    if (!auth.token) {
-      throw new Error(`未从 Healthy localStorage 获取 access_token，可能是登录态失效。请使用 get-browser-session skill 刷新登录态，url=${BASE_URL}/dashboards/${args.board}, profile=${paths.profileDir}，完成登录后再重试。页面标题=${auth.title}，内容=${auth.snippet}`);
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+    const missingPanels = [];
+    for (const panel of configs.panels || []) {
+      if (!panel.name) continue;
+      const title = page.getByText(panel.name, { exact: true }).first();
+      if (!await title.count()) { missingPanels.push(panel.name); continue; }
+      await title.scrollIntoViewIfNeeded();
+      await page.waitForTimeout(300);
     }
-
-    const boardUrl = `${BASE_URL}/api/n9e/board/${args.board}`;
-    const boardResp = await requestJson(page, 'GET', boardUrl, auth);
-    if (!boardResp.ok) {
-      throw new Error(`GET board 失败：status=${boardResp.status}, body=${JSON.stringify(boardResp.json).slice(0, 500)}`);
+    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+    await page.screenshot({ path: path.join(outputDir, 'dashboard.png'), fullPage: true });
+    const options = [];
+    const combos = page.getByRole('combobox');
+    for (let index = 0; index < await combos.count(); index++) {
+      await combos.nth(index).click();
+      options.push({ index, options: await page.locator('.ant-select-dropdown:visible').allTextContents() });
+      await page.keyboard.press('Escape');
     }
-
-    const parsed = parseBoardConfigs(boardResp);
-    const beforePath = `/tmp/healthy-dashboard-${args.board}-before.json`;
-    fs.writeFileSync(beforePath, JSON.stringify(parsed.board, null, 2));
-
-    let finalConfigs = parsed.configs;
-    let putResp = null;
-    if (args.apply) {
-      if (args['configs-file']) {
-        const raw = fs.readFileSync(args['configs-file'], 'utf-8');
-        finalConfigs = JSON.parse(raw);
-        if (!finalConfigs || typeof finalConfigs !== 'object' || Array.isArray(finalConfigs)) {
-          throw new Error(`--configs-file 必须是完整 configs 对象：${args['configs-file']}`);
-        }
-      } else if (args.mode === 'hawk-read-through') {
-        finalConfigs = hawkReadThroughPatch(parsed.configs);
-      } else {
-        throw new Error(`未知 mode：${args.mode}，或改用 --configs-file=<path>`);
-      }
-      putResp = await requestJson(page, 'PUT', `${boardUrl}/configs`, auth, {
-        configs: JSON.stringify(finalConfigs),
-      });
-      if (!putResp.ok || putResp.json?.err) {
-        throw new Error(`PUT configs 失败：status=${putResp.status}, body=${JSON.stringify(putResp.json).slice(0, 800)}`);
-      }
-    }
-
-    const afterResp = await requestJson(page, 'GET', boardUrl, auth);
-    const after = parseBoardConfigs(afterResp);
-    const afterPath = `/tmp/healthy-dashboard-${args.board}-after.json`;
-    fs.writeFileSync(afterPath, JSON.stringify(after.board, null, 2));
-
-    console.log(JSON.stringify({
-      board: String(args.board),
-      readStatus: boardResp.status,
-      putStatus: putResp?.status || null,
-      putErr: putResp?.json?.err || '',
-      backup: { before: beforePath, after: afterPath },
-      before: summarize(parsed.configs),
-      after: summarize(after.configs),
-    }, null, 2));
+    await Promise.all(pending);
+    const selected = await page.evaluate(({ board, names }) => Object.fromEntries(names.map(name =>
+      [name, localStorage.getItem(`dashboard_${board}_${name}`)])), { board, names: (configs.var || []).map(item => item.name) });
+    const queryCount = responses.reduce((count, item) => count + item.queries.length, 0);
+    const result = {
+      url, variables, selected, options, missingPanels, failures, queryCount,
+      failedResponses: responses.filter(item => item.failed || item.unresolved.length),
+      verified: new URL(page.url()).origin === baseUrl && queryCount > 0 && !missingPanels.length && !failures.length
+        && responses.every(item => !item.failed && !item.unresolved.length),
+      evidence: outputDir,
+    };
+    fs.writeFileSync(path.join(outputDir, 'page-query-responses.json'), JSON.stringify(responses, null, 2), { flag: 'wx' });
+    fs.writeFileSync(path.join(outputDir, 'page-verification.json'), JSON.stringify(result, null, 2), { flag: 'wx' });
+    return result;
   } finally {
-    await context.close();
+    page.off('response', onResponse);
+    page.off('requestfailed', onFailure);
   }
 }
 
-main().catch((error) => {
-  console.error(error.stack || error.message);
-  process.exit(1);
-});
+async function main() {
+  const args = parseArgs(process.argv.slice(2));
+  if (args.help || args.h) return usage();
+  if (!/^\d+$/.test(args.board || '') || Number(args.board) <= 0) throw new Error('--board 必须是正整数');
+  if (!args.read && !args.apply && !args['verify-page']) throw new Error('必须指定 --read、--apply 或 --verify-page');
+  if (args.read && args.apply) throw new Error('--read 不能与 --apply 同时使用');
+  if (args['configs-file'] && args['configs-json']) throw new Error('configs-file 与 configs-json 只能选择一个');
+  let desired;
+  if (args.apply && (args['configs-file'] || args['configs-json'])) {
+    desired = validateConfigs(JSON.parse(args['configs-json'] || fs.readFileSync(args['configs-file'], 'utf8')));
+    if (!/^[a-f0-9]{64}$/.test(args['expected-sha256'] || '')) throw new Error('全量更新必须提供 --read 返回的 --expected-sha256');
+  } else if (args.apply && args.mode !== 'hawk-read-through') {
+    throw new Error('请指定 configs-file/configs-json 或 mode=hawk-read-through');
+  }
+  resolveBaseUrl(args);
+  const outputDir = args['output-dir'] || fs.mkdtempSync(`/tmp/healthy-dashboard-${args.board}-`);
+  fs.mkdirSync(outputDir, { recursive: true });
+  const save = (name, value) => fs.writeFileSync(path.join(outputDir, name), JSON.stringify(value, null, 2), { flag: 'wx' });
+  await withHealthyClient(args, async client => {
+    const boardUrl = `/api/n9e/board/${args.board}`;
+    const before = parseBoardConfigs(await client.request('GET', boardUrl));
+    save('before.json', before.board);
+    let configs = before.configs;
+    let changed = false;
+    if (args.apply) {
+      const update = await updateBoard(client, boardUrl, before.configs,
+        desired || hawkReadThroughPatch(before.configs),
+        args['expected-sha256'] || configsHash(before.configs), board => save('after.json', board));
+      ({ configs, changed } = update);
+    }
+    const verification = args['verify-page']
+      ? await verifyPage(client.page, client.baseUrl, args.board, configs, JSON.parse(args['variables-json'] || '{}'), outputDir)
+      : undefined;
+    console.log(JSON.stringify({ board: args.board, baseUrl: client.baseUrl, changed, configsSha256: configsHash(configs),
+      backupDir: outputDir, summary: summarize(configs), configs, verification }, null, 2));
+    if (verification && !verification.verified) process.exitCode = 1;
+  });
+}
+
+module.exports = { configsHash, dashboardUrl, hawkReadThroughPatch, queryResponseSummary, updateBoard };
+if (require.main === module) main().catch(error => { console.error(error.message); process.exitCode = 1; });

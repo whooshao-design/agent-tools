@@ -2,7 +2,7 @@
 name: java-server-diagnostics
 description: "通过 java_app_diag MCP 对 Java 应用所在服务器做只读排查。默认先只看 error.log 判断有没有问题；只有 error.log 暴露线索后，才递进排查 info/debug/启动日志、进程、端口、JVM、线程或 GC。"
 metadata:
-  version: 1.3.0
+  version: 1.3.1
 ---
 
 # java-server-diagnostics
@@ -42,7 +42,7 @@ metadata:
 
 常见日志文件：
 
-- 共享日志：`error.log`、`debug.log`、`info.log`、`stdout.log` 及其轮转文件
+- 共享日志：`error.log`、`warn.log`、`debug.log`、`info.log`、`stdout.log` 及其轮转文件（如 `info.log.1`、`info_2026091010.0.log`，均支持 `.gz`）
 - 版本日志：优先 `stdout.log`，再按需要查 `error.log`、`debug.log`、`info.log`
 
 ## 默认排查策略
@@ -189,6 +189,10 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/java-server-diagnostics/sc
 - 默认快检：`check_app_error_log(ip, app_name?, env?, profile?)`
 - 递进日志：`grep_app_log`、`tail_app_log`、`grep_version_log`、`tail_version_log`，需要跨环境时同样透传 `env` 或 `profile`
 - 底层通道 MCP：`bastion`，仅在缺少专用诊断工具且命令明确只读时才考虑使用。
+- `java_app_diag`、`bastion`、`bastion_dba` 各自维护进程内连接，不能共享连接状态。`java_app_diag` 查询成功不代表 `bastion` 已连接。
+- 确需切到 `bastion` 时，先在同一个 MCP 调用 `connect_bastion(profile="dev", keepalive_ip=<目标 IP>)`（项目/stable）；预发、灰度、线上使用 `online`，DBA 使用 `dba`。连接成功后再执行只读命令，不依赖默认 profile。
+- “未连接堡垒机，请先调用 connect_bastion”表示当前 MCP 尚未建立连接，不等于服务器故障或凭据失效。按上述环境连接一次；认证失败再处理认证，不跨环境重试。
+- 轮转日志先用 `list_log_files` 确认真实文件名，再交给 `grep_app_log` / `tail_app_log`；不要因为文件名校验失败就直接切任意 shell。更新 MCP 源码后需重启对应 MCP 进程才会加载新能力。
 
 ## 登录态排查顺序
 

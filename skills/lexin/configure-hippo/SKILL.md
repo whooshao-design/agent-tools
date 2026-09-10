@@ -2,7 +2,7 @@
 name: configure-hippo
 description: 安全新增、修改并在明确授权后发布 Hippo 配置，并支持在明确授权后为应用新建 namespace；支持标准 Hippo、stable/测试/项目环境以及墨西哥、印尼海外站点的独立域名；默认使用预发布 fql_pre 且只保存草稿、不发布；stable/测试环境保存后自动按 key 发布。Use when 用户要求在 Hippo 配置中心新增 key、修改配置值、更新预发布或 stable 配置、修改墨西哥或印尼海外配置、把本地文件写入 namespace、给某个 appId 新建 namespace、给 namespace 授修改权或发布权，或明确授权“修改并发布”；内置变更前检查、并发草稿保护、非目标项保护、key 粒度发布、新建 namespace 与授权的二次确认和 active release 校验。
 metadata:
-  version: 1.9.2
+  version: 1.9.3
 ---
 
 # configure-hippo
@@ -62,6 +62,7 @@ namespace 归到分组时，角色接口里的 namespace 名要写成 `<groupPat
 - 发布必须是 key 粒度：脚本只把目标 key 放入 `releaseSelectedItems`。不要发布整个 namespace，不要合并发布灰度分支，不要顺手发布其它草稿 key。stable 自动发布同样遵守这一条，`otherDraftKeysLeftUnpublished` 非空是正常现象，表示别人的草稿被原样保留，不要去“帮忙”发布或清理。
 - 授权发布不等于绕过平台审批。若 Hippo 判断该环境需要审批，脚本必须停止并报告 `PUBLISH_REQUIRES_APPROVAL`，不能直接调用发布接口绕过流程。
 - 配置值只从 UTF-8 文件读取；不要把长配置、token、密钥直接放进命令行或聊天内容。
+- 配置项备注（`--comment` / `--comment-file`）解释配置用途、合法取值及各值行为；有默认值、单位或非法值回退行为时一并说明，并以代码为准。不要写测试目的、临时验证过程、需求章节号或版本号；发布背景写入独立的 `--release-comment`。只修改备注时保留原值，并验证 active 值未变；脚本因值相同跳过发布是正常结果。
 - Hippo 页面正文可能包含“登录”说明，不能据此误判 session；以目标 host、Angular injector 和 `ConfigService` 就绪为准。
 - 脚本复用 `browser_network` 对 Hippo 内网域名直连，仅清理子进程代理环境，不修改用户全局 VPS/代理配置。
 - items 较大时由页面内原生 fetch 完整读取，避免 `fetch_with_session` 输出上限导致配置被截断。

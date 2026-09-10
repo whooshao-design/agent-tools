@@ -419,7 +419,7 @@ async def tail_app_log(
     env: str = "",
     profile: str = "",
 ) -> str:
-    """查看共享应用日志尾部内容。支持 debug/error/info/stdout 日志及其轮转文件。"""
+    """查看共享应用日志尾部。支持 debug/error/warn/info/stdout 及轮转文件（含 info_2026091010.0.log、.gz）。"""
     try:
         path = app_log_path(app_name, file_name)
         line_count = bounded_int(lines, 200, 1, 1000)
@@ -444,7 +444,7 @@ async def grep_app_log(
     env: str = "",
     profile: str = "",
 ) -> str:
-    """按关键字查询共享应用日志。仅执行只读 grep/zcat/tail。"""
+    """按关键字查询共享日志（含 warn.log、info_2026091010.0.log 及 .gz）。自动连接堡垒机，仅执行只读 grep/zcat/tail。"""
     try:
         path = app_log_path(app_name, file_name)
         safe_keyword = validate_keyword(keyword)
