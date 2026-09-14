@@ -2,7 +2,7 @@
 name: build-codeagent
 description: Use when `dev-build-change` 或 `dev-auto-loop` 已确认任务边界，需要派发多后端 producer 执行改动，或派发与产物生成者身份隔离的正式 reviewer。
 metadata:
-  version: 1.4.0
+  version: 1.5.0
 ---
 
 # build-codeagent
@@ -15,6 +15,8 @@ metadata:
 
 正式评审委派统一遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/delegation-contract.md`。
 作为 `dev-auto-loop` 后端时，producer 结果、预算预占和恢复统一遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/dev-auto-loop/references/run-state-and-resume.md`。
+
+后端选择与实测能力画像见本目录 `model-routing.json`，由 `scripts/pick_agent.py` 执行，见下方「选后端」。
 
 ## When to Use
 
@@ -76,6 +78,52 @@ reviewer 信封不得包含尚未产生的 `reviewer_agent_ref`。编排器在 s
 - 只有执行失败可在完全相同的冻结输入和 fingerprints 上换一个新的 reviewer 重试一次；编排器重新记录并校验其 runtime `agent_ref`
 - 第二次执行仍失败时停止并报告恢复条件；输入发生变化时是新评审任务，不算原任务重试
 - producer 的失败按调用方契约处理，不套用 reviewer 的一次重试规则；auto-loop 中仅允许“写动作尚未启动且工作区未变化”的同输入派发安全重试一次，动作已启动或有部分写入时保留现场并停止盲目重试
+
+## 选后端
+
+不要凭印象挑模型，用脚本：
+
+```bash
+python3 /home/joney/projects/ai/agent-tools/skills/common/build-codeagent/scripts/pick_agent.py \
+  <环节> --task <任务ID> [--material <材料目录>] [--exclude 后端1,后端2] [--json]
+python3 .../pick_agent.py --task <任务ID> --show-record    # 查看该任务已选过谁
+```
+
+它读 `model-routing.json`，输出选中的后端、解析后的模型名和可直接执行的调用命令，并把这次选择追加到
+`~/.local/state/agent-routing/<任务ID>.jsonl`（`AGENT_ROUTING_HOME` 可改）。
+
+`model-routing.json` 记录三块内容：
+
+- `backends`：6 个后端的通道、模型来源、两项实测能力分数、只读能力。`claude-vps` 和 `codex-vps`
+  的模型写成 `dynamic:<路径>#<键>`，跟随用户配置，不写死。
+- `stages`：11 个环节的候选集与 `artifact` 归属。`evidence` 标 `extrapolated` 或 `untested` 的
+  条目表示该环节的候选是外推而非实测，不要当作已验证。
+- `rules`：脚本自动执行的规则，不需要人记。
+
+规则要点（完整表述见 JSON）：
+
+- **生成者终身排除**：参与过该 artifact 任一版本生成的后端，后续所有轮次都不能评审它
+- **评审者每轮轮换**：优先选该 artifact 上没当过评审者的。实测各模型盲区稳定且互不相同，
+  固定评审者会把它的盲区固化成整个流程的盲区
+- **轮换必须带上轮 findings**：否则新评审者只会重新发现同样问题，无法核对闭环
+- **候选耗尽可复用最早轮次**，但记录中标明本轮为复用
+- **修订由原生成者执行**，不重新随机
+- **一律不传 `--model`**，用 profile 配置的模型。一个后端=一个模型，因此不存在同厂商跨版本的歧义
+
+## 跨进程派发的两条硬约束
+
+**一、provider 是进程级的，同进程换不到别家模型。** 一个 Claude Code 会话连哪个网关由启动时的
+`ANTHROPIC_BASE_URL` 决定；agent 定义只有 `model:` 字段，没有 provider 或 baseUrl。在官方通道里
+指定 `qwen3.8-max` 会直接报模型不存在。所以想要不同模型的视角，只能跨进程派发——
+进程内 subagent 只能给到上下文隔离，给不了视角多样性。
+
+**二、codex 做评审必须走 `/home/joney/bin/codex-reviewer`。** 裸 `codex exec -s read-only`
+不安全：沙箱确实拦住了第一次写入，但 `approval_policy="on-request"` 会自动批准提权并重试成功，
+实测能写任意路径。`codex-reviewer` 三层叠加——bwrap 只读牢笼、`approval_policy=never` 断掉提权、
+`--ignore-user-config` 不挂载那 21 个 MCP server（其中 bastion 能执行远程命令，且 MCP 子进程
+完全在 codex 沙箱之外）。
+
+Claude 系后端做评审必须加 `--strict-mcp-config`，不加会被用户级 MCP 污染工具面导致评审者拒评。
 
 ## 使用原则
 
