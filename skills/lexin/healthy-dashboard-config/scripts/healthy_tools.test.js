@@ -44,7 +44,48 @@ test('请求传递 JSON 和 access token，HTTP 401 不泄露凭据或响应正�
   } };
   await assert.rejects(requestJson(page, base, {}, 'POST', '/api/n9e/query-range-batch', { queries: [] }), error => {
     assert.match(error.message, /401/);
+    assert.equal(error.status, 401);
     assert.doesNotMatch(error.message, /test-access|test-ticket|test-secret/);
+    return true;
+  });
+});
+
+test('查询超时参数传到浏览器，网络错误类型保留且正文脱敏', async () => {
+  for (const stage of ['fetch', 'body']) {
+    const timeoutValues = [];
+    const failure = Object.assign(new Error('sensitive error body'), { name: 'TimeoutError' });
+    const page = { evaluate: async (fn, args) => {
+      if (!args) return { token: 'test-access', ticket: '' };
+      return vm.runInNewContext(`(${fn.toString()})(payload)`, {
+        payload: args,
+        AbortSignal: { timeout: ms => { timeoutValues.push(ms); return {}; } },
+        fetch: async () => {
+          if (stage === 'fetch') throw failure;
+          return { status: 200, ok: true, json: async () => { throw failure; } };
+        },
+      });
+    } };
+    await assert.rejects(requestJson(page, base, { 'http-timeout': 1234 }, 'POST', '/api/n9e/prometheus/api/v1/query'), error => {
+      assert.equal(error.name, 'TimeoutError');
+      assert.doesNotMatch(error.message, /sensitive|test-access/);
+      return true;
+    });
+    assert.deepEqual(timeoutValues, [1234]);
+  }
+});
+
+test('非 JSON 响应保留 HTTP 状态，未指定超时时维持原默认值', async () => {
+  const page = { evaluate: async (fn, args) => {
+    if (!args) return { token: 'test-access', ticket: '' };
+    assert.equal(args.timeoutMs, 60000);
+    return vm.runInNewContext(`(${fn.toString()})(payload)`, {
+      payload: args, AbortSignal: { timeout: () => ({}) },
+      fetch: async () => ({ status: 503, ok: false, json: async () => { throw new SyntaxError('sensitive response'); } }),
+    });
+  } };
+  await assert.rejects(requestJson(page, base, {}, 'POST', '/api/n9e/prometheus/api/v1/query'), error => {
+    assert.equal(error.status, 503);
+    assert.doesNotMatch(error.message, /sensitive/);
     return true;
   });
 });

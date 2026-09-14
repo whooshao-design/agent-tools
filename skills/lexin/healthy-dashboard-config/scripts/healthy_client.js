@@ -43,20 +43,37 @@ async function requestJson(page, baseUrl, args, method, route, body) {
     authorization: `Bearer ${auth.token}`,
   };
   if (auth.ticket) headers.ticket = auth.ticket;
-  const response = await page.evaluate(async ({ url, method, headers, body }) => {
-    const resp = await fetch(url, {
-      method, headers, credentials: 'include', redirect: 'error',
-      body: body === undefined ? undefined : JSON.stringify(body),
-      signal: AbortSignal.timeout(60000),
-    });
+  const timeoutMs = Number(args['http-timeout'] || 60000);
+  const response = await page.evaluate(async ({ url, method, headers, body, timeoutMs }) => {
+    let resp;
+    try {
+      resp = await fetch(url, {
+        method, headers, credentials: 'include', redirect: 'error',
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch (error) {
+      // 只传递错误类型，避免浏览器的错误正文泄露凭据，同时供只读调用方判定是否重试。
+      return { transportError: error.name };
+    }
     // 不把登录页正文或认证信息带入错误输出。
     let json = null;
-    try { json = await resp.json(); } catch (_) { /* 由调用端统一报告非 JSON 响应。 */ }
+    try { json = await resp.json(); } catch (error) {
+      if (error.name !== 'SyntaxError') return { transportError: error.name };
+      // 非 JSON 响应由调用端根据 HTTP 状态统一报告。
+    }
     return { status: resp.status, ok: resp.ok, json };
-  }, { url, method, headers, body });
+  }, { url, method, headers, body, timeoutMs });
+  if (response.transportError) {
+    const error = new Error(`${method} ${new URL(url).pathname} 请求失败：${response.transportError}`);
+    error.name = response.transportError;
+    throw error;
+  }
   if (!response.ok || !response.json || response.json.err || response.json.status === 'error') {
     const hint = [401, 403].includes(response.status) ? '；请刷新同一 profile 的登录态' : '';
-    throw new Error(`${method} ${new URL(url).pathname} 失败：HTTP ${response.status}${hint}`);
+    const error = new Error(`${method} ${new URL(url).pathname} 失败：HTTP ${response.status}${hint}`);
+    error.status = response.status;
+    throw error;
   }
   return response;
 }
