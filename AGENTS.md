@@ -23,7 +23,10 @@ agent-tools/
 ├── mcp/
 │   ├── devtools-mcp/    # 研发工具链 MCP（16 个 server；查询为主，部分工具可写）
 │   ├── bastion-mcp/     # 堡垒机 SSH 通道 MCP（config.json 本地化）
-│   └── third-party-mcp/ # 第三方通用 MCP wrapper/remote 配置（Context7、GitHub、MarkItDown、Sonatype）
+│   └── third-party-mcp/ # 第三方通用 MCP wrapper/remote 配置（Context7、GitHub、Lark、MarkItDown、Sonatype）
+├── bin/                 # with-env（加载 env/credentials.env 后执行命令）、toolchain_audit.py（双端只读盘点）
+├── env/                 # 公共凭证 credentials.env（gitignore）与模板 credentials.env.example
+├── tests/               # 仓库级测试：install.py、toolchain_audit、dev-workflow 契约一致性
 ├── install.py           # 符号链接安装脚本（claude + codex 双目标）
 ├── AGENTS.md            # 本文件（主文档）
 └── CLAUDE.md            # 薄指针，指向本文件
@@ -46,6 +49,31 @@ python3 install.py --with-subagents --uninstall
 - `--with-subagents` 只合并 owner 为 `agent-tools-subagent-result-v1` 的 `SubagentStop` handler，
   不覆盖其他 settings/hooks；Codex 的 hook 信任由用户在 `/hooks` 中审查，安装器不代替确认。
 - settings/hooks JSON 本身是符号链接时安装器会拒绝写入，避免破坏 dotfiles 管理关系。
+- 安装器把自己拥有的链接/副本记录在 `~/.claude/.agent-tools-install.json` 与 `~/.codex/.agent-tools-install.json`；
+  `--uninstall` 只删除清单内且未被修改的内容。hook 脚本按内容哈希安装到 `<client>/hooks/agent-tools/subagent_result_guard-<sha256>.py`。
+- 新增或改名 skill 后重新跑 `python3 install.py`（可先 `--dry-run`），确认双端均为 `linked`，并同步 `README.md` 对应分类表格。
+
+## 验证与测试
+
+测试只用标准库 `unittest` 和 Node 内置 `node:test`；不依赖 pytest（当前 Python 环境也未安装），仓库没有统一的 lint 配置。
+
+```bash
+python3 -m unittest discover -s tests                    # 仓库级：install.py、bin/toolchain_audit.py、dev-workflow 契约一致性
+python3 -m unittest discover -s hooks/tests              # SubagentStop 结果守卫
+python3 -m unittest discover -s mcp/devtools-mcp/tests   # devtools_mcp（测试自行把包目录加入 sys.path）
+(cd mcp/bastion-mcp && python3 -m unittest discover -s tests)   # 需已安装 mcp、paramiko
+node --test 'skills/**/*.test.js' 'skills/**/*.test.mjs' # skill 脚本的 JS 测试
+python3 -m unittest discover -s skills/lexin/get-browser-session/tests -p 'test_*.py'   # 需要 node
+```
+
+- 单个用例：`python3 -m unittest tests.test_install.InstallTest.test_default_still_installs_only_skills`，
+  或在 discover 命令后加 `-k <关键字>`；JS 直接指定文件，如 `node --test skills/lexin/configure-hippo/tests/delete_item.test.js`。
+- `node --test` 必须传文件路径或 glob；Node 24 会把目录参数当成单个测试文件而直接失败。
+- `skills/common/convert-epub-to-markdown/scripts/test_convert_epub.py` 依赖 `markdownify` 等第三方包，系统 Python 未安装；
+  按该 SKILL.md 建 venv 安装 `requirements.txt` 后，在 `scripts/` 目录内运行。
+- 新建或修改 skill 后用系统校验器检查 frontmatter：
+  `python3 /home/joney/.codex/skills/.system/skill-creator/scripts/quick_validate.py <skill-dir>`。
+- `python3 bin/toolchain_audit.py`（`--json` 输出脱敏明细）只读盘点双端 skill 链接、MCP 注册和缺失环境变量，不联网。
 
 ## 独立评审约定
 
@@ -61,6 +89,12 @@ python3 install.py --with-subagents --uninstall
   也不得把可变的 `review.md` 当作下游门禁事实源。
 - `--with-subagents` 遇到同名外部 reviewer 时必须在写入前整体失败；仅在用户显式 `--force` 后替换，
   避免安装本仓库 hook 却继续运行未受控 reviewer。
+- 角色名、结论枚举、只读工具面、`delegation-result-v1` 字段和"检查项"等用户口径同时分布在
+  `hooks/subagent_result_guard.py`、`agents/claude/*.md`、`agents/codex/*.toml`、`skills/dev-workflow/references/*.md`、
+  各 dev-workflow SKILL.md 及其 `references/` 模板、`skills/common/build-codeagent` 中；`tests/test_workflow_contract.py`
+  逐项比对这些文件，改动任一处必须同步其余并重跑仓库级测试。
+- hook 只解析 reviewer 最终消息末尾 16 KiB 内最后一个 json fenced block；契约不符仅在 `stop_hook_active=false` 时拦截一次，
+  再次仍不符则放行并附系统提示，输入异常一律放行。
 
 ## 研发流程模式
 
@@ -99,6 +133,22 @@ PYTHONPATH 都指向本仓库内对应 MCP 目录。新增 MCP 服务器后需�
 模块调用形式：`python3 -m devtools_mcp.<xxx>_server`、`python3 -m bastion_mcp.server`。
 第三方 MCP 通过 `mcp/third-party-mcp/<name>/bin/<name>` wrapper 或官方 remote 配置注册，不在仓库提交依赖缓存。
 
+## MCP 实现约定
+
+- `devtools_mcp` 每个 `<xxx>_server.py` 都是独立的 FastMCP stdio 进程（`mcp = FastMCP(...)`、`@mcp.tool()`、`main()` 里 `mcp.run(transport="stdio")`）。
+  多数工具不实现业务逻辑，而是用 `common.skill_path("<skill>", "scripts", "<file>")` 定位 skill 脚本，经 `run_command` 调用、
+  `command_result_text` 截断后返回；改 skill 脚本的命令行参数时必须同步对应 server 与 `mcp/devtools-mcp/tests`。
+- `skill_path()` 按 `skills/<分类>/<skill>` 搜索，`DEVTOOLS_SKILLS_DIR` 可覆盖为扁平目录，都找不到时回退 `~/.codex/skills/<skill>`。
+- 公共辅助集中在 `devtools_mcp/common.py`：`env_value()` 先读进程环境、再读 `mcp/devtools-mcp/.env`（`DEVTOOLS_MCP_ENV` 可改路径）；
+  `internal_http_request()` 只放行 `INTERNAL_HTTP_ALLOWED_HOSTS`（默认公司内网域名）且仅支持 GET/POST；
+  `use_browser_session=True` 时请求交给 `get-browser-session/scripts/browser_session.js` 在浏览器上下文内发出，Cookie 不经过 Python。
+- `java_app_diag` 复用 `bastion-mcp` 的 `SSHManager`：`java_app_diag_core.py` 找不到包时把 `BASTION_MCP_ROOT`（默认同级 `mcp/bastion-mcp`）
+  插入 `sys.path`，堡垒机配置默认 `mcp/bastion-mcp/config.json`。每个 MCP 进程各自持有 SSH 连接，互不共享。
+- 目前只有 lexiao、healthy、dubbo_test、browser_session 使用 `ToolAnnotations`：写入工具标
+  `readOnlyHint=False, destructiveHint=True, idempotentHint=False`，只读工具标 `readOnlyHint=True`；annotation 只是提示，参数校验仍由底层脚本承担。
+- `bastion-mcp` 自带 `pyproject.toml`（依赖 `mcp`、`paramiko`）；`--transport http --port <n>` 可起仅本机监听的 streamable-http 调试服务；
+  命令白名单 `ALLOWED_COMMANDS` 在 `ssh_manager.py`。
+
 ## 凭据与本地文件
 
 不入 git（gitignore 管理，留在本地工作区）：
@@ -106,6 +156,11 @@ PYTHONPATH 都指向本仓库内对应 MCP 目录。新增 MCP 服务器后需�
 - `mcp/bastion-mcp/config.json`（堡垒机机器配置，模板见 config.json.example）
 - `mcp/devtools-mcp/.env`（GITLAB_TOKEN / JENKINS_COOKIE / SONARQUBE_COOKIE 等）
 - `skills/lexin/test-dubbo-api/targets.json`（应用 IP:Port 实数据）
+- `env/credentials.env`（公共凭证，模板 `env/credentials.env.example`；整个 `env/` 目录只放行模板与 `.gitkeep`）
+
+`env/credentials.env` 由 `bin/with-env <命令>` 或 `source bin/_load_env.sh` 加载，只导出非空值，空占位不会覆盖脚本默认值，
+`AGENT_TOOLS_ENV_FILE` 可改路径。`devtools_mcp` 不会自动加载它，只看进程环境与 `mcp/devtools-mcp/.env`；`third-party-mcp/lark` wrapper
+则强制要求它存在。浏览器登录态与凭据快照在 `~/.local/state/agent-tools/`（`browser-profiles/{main,healthy,webshell}`、`session-snapshots/`），不在仓库内。
 
 ## 命名约定
 
