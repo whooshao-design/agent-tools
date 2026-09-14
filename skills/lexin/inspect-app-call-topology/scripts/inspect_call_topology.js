@@ -4,8 +4,8 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { createRequire } = require('module');
 const { execFile } = require('child_process');
+const { withHealthyClient } = require('../../healthy-dashboard-config/scripts/healthy_client');
 
 // 只验证过线上。stable/test 域名沿用 inspect-healthy-metrics 的映射，但未实跑，
 // 指定时会打印未验证提示。
@@ -22,15 +22,11 @@ const DEFAULT_SITE = 'prod';
 const DEFAULT_ENV = 'all';
 const DEFAULT_RANGE = '1d';
 const DEFAULT_OUT_DIR = '/home/joney/docs/service-relationships';
-const DEFAULT_PROFILE = '/tmp/healthy-metrics-profile';
-const DEFAULT_TOOL_DIR = '~/tools/lexiao-browser';
-const DEFAULT_CLUSTER = 'Default';
-const DEFAULT_LANGUAGE = 'zh';
 const DEFAULT_SLOW_MS = 500;
 const DEFAULT_CONCURRENCY = 6;
 const DEFAULT_HTTP_TIMEOUT_MS = 30000;
 const DEFAULT_RETRIES = 2;
-const DEFAULT_MAX_DRILLDOWN = 8;
+const DEFAULT_MAX_DRILLDOWN = 0;
 // 一批 service 正则的最大字符数，避免 URL 过长被网关截断。
 const MAX_REGEX_CHARS = 1500;
 
@@ -59,28 +55,30 @@ const CLIENT_GROUP = ['app', 'env', 'service', 'method', 'src_set', 'dst_set'];
 function usage() {
   console.log(`Usage:
   inspect_call_topology.js --app=server_strategy_decision_java [options]
+  inspect_call_topology.js --apps=app_a,app_b [options]
   inspect_call_topology.js --service=com.fenqile.xxx.FooService [options]
 
 Options:
   --app             目标应用名（app 标签值，可含连字符）
+  --apps            逗号分隔的多个应用，共用会话和查询结果；与 --app/--service 互斥
   --service         只看某个 service；不给 --app 时先反查它属于哪个应用
   --site            prod|online|stable|test，决定 Healthy 域名，默认 prod
   --env             限定 env 标签：prod|gray|pre|oa；默认 all，即四个环境全看
   --range           统计窗口，默认 1d，可传 1h / 3d / 7d 等
   --baseline        与多久之前的同长窗口对比，如 1d / 7d；不给则不做对比
   --slow-ms         平均耗时告警阈值（毫秒），默认 500，可传 0
-  --max-drilldown   异常下钻的链路数上限，默认 8，传 0 关闭下钻
+  --max-drilldown   异常下钻的链路数上限，默认 0 关闭；显式传正整数开启（如 8）
   --out-dir         HTML 输出目录，默认 /home/joney/docs/service-relationships
-  --out             直接指定 HTML 输出路径，覆盖 --out-dir
-  --json            额外把完整结果写到该 JSON 路径
+  --out             直接指定 HTML 输出路径，覆盖 --out-dir；多应用须含 {app}
+  --json            额外把完整结果写到该 JSON 路径；多应用须含 {app}
   --no-html         只打印终端摘要，不写 HTML
   --fail-on-anomaly 存在异常条目时以退出码 2 结束
   --concurrency     并发查询数，默认 6
   --http-timeout    单次请求超时毫秒，默认 30000
   --retries         可重试错误的重试次数，默认 2
   --token           Bearer token，也可用环境变量 HEALTHY_METRIC_TOKEN
-  --profile         浏览器 profile，默认 /tmp/healthy-metrics-profile
-  --base-url        覆盖域名
+  --profile         浏览器 profile，默认 ~/.local/state/agent-tools/browser-profiles/healthy
+  --base-url        覆盖为已知 Healthy 站点域名
 `);
 }
 
@@ -149,119 +147,26 @@ async function pMap(items, mapper, concurrency) {
   return out;
 }
 
-// ---------------------------------------------------------------- auth
-
-function resolvePaths(args) {
-  const toolDir = expandHome(args['tool-dir'] || DEFAULT_TOOL_DIR);
-  return {
-    toolDir,
-    profileDir: expandHome(args.profile || DEFAULT_PROFILE),
-    chromePath: expandHome(args.chrome || path.join(toolDir, 'browsers/chrome-linux64/chrome')),
-    runtimeLibDir: expandHome(args['runtime-lib-dir'] || path.join(toolDir, 'runtime-libs/usr/lib/x86_64-linux-gnu')),
-    playwrightPackage: path.join(toolDir, 'package.json'),
-  };
-}
-
-async function extractAuthFromProfile(args, baseUrl) {
-  const paths = resolvePaths(args);
-  if (!fs.existsSync(paths.playwrightPackage)) {
-    throw new Error(`Playwright tool dir not found: ${paths.toolDir}`);
-  }
-  const chromium = createRequire(paths.playwrightPackage)('playwright').chromium;
-  const ldLibraryPath = [paths.runtimeLibDir, process.env.LD_LIBRARY_PATH].filter(Boolean).join(':');
-  const context = await chromium.launchPersistentContext(paths.profileDir, {
-    executablePath: paths.chromePath,
-    headless: true,
-    env: { ...process.env, LD_LIBRARY_PATH: ldLibraryPath },
-    args: ['--no-sandbox', '--disable-dev-shm-usage'],
-  });
-  try {
-    const page = context.pages()[0] || await context.newPage();
-    await page.goto(args['auth-url'] || `${baseUrl}/sys-manage/metric-manage`, { waitUntil: 'domcontentloaded', timeout: 60000 });
-    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
-    const auth = await page.evaluate(() => {
-      const keys = Object.keys(localStorage);
-      const tokenKey = keys.find((k) => /access.?token|token/i.test(k) && localStorage.getItem(k));
-      const ticketKey = keys.find((k) => /ticket/i.test(k) && localStorage.getItem(k));
-      return {
-        token: tokenKey ? localStorage.getItem(tokenKey) : '',
-        ticket: ticketKey ? localStorage.getItem(ticketKey) : '',
-        title: document.title,
-      };
-    });
-    if (!auth.token) throw new Error(`profile 中没有 access token，请先用 get-browser-session 登录。page=${auth.title}`);
-    return { token: auth.token, ticket: auth.ticket || '' };
-  } finally {
-    await context.close().catch(() => {});
-  }
-}
-
-async function resolveAuth(args, baseUrl) {
-  const token = args.token || process.env.HEALTHY_METRIC_TOKEN;
-  if (token) return { token, ticket: args.ticket || '' };
-  return extractAuthFromProfile(args, baseUrl);
-}
-
 // ---------------------------------------------------------------- prometheus
 
-function redactUrl(url) {
-  const parsed = new URL(url);
-  return `${parsed.origin}${parsed.pathname}`;
-}
-
-class RetryableError extends Error {}
-
-// 超时 + 重试的公共外壳。Prometheus 与 bianque 是不同域名、不同认证，共用这一层。
-async function fetchWithRetry(ctx, url, options) {
-  for (let attempt = 0; ; attempt += 1) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), ctx.httpTimeout);
-    try {
-      const response = await fetch(url, { ...options, redirect: 'follow', signal: controller.signal });
-      const text = await response.text();
-      if (response.status === 429 || response.status >= 500) {
-        throw new RetryableError(`HTTP ${response.status}: ${text.slice(0, 160)}`);
-      }
-      return { status: response.status, text };
-    } catch (error) {
-      // 超时被 AbortController 转成 AbortError，和网络抖动一样值得重试。
-      const retryable = error instanceof RetryableError
-        || error.name === 'AbortError'
-        || error.name === 'TypeError';
-      if (!retryable || attempt >= ctx.retries) {
-        if (error.name === 'AbortError') {
-          throw new Error(`请求超时（${ctx.httpTimeout}ms，已重试 ${attempt} 次）: ${redactUrl(url)}`);
-        }
-        throw error;
-      }
-      await delay(300 * (attempt + 1));
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-}
-
+// 复用公共客户端的鉴权、直连和脱敏错误；仅对暂时性查询失败重试。
 async function requestJson(ctx, url) {
-  const { status, text } = await fetchWithRetry(ctx, url, {
-    method: 'POST',
-    headers: {
-      accept: 'application/json',
-      'x-cluster': ctx.cluster,
-      'x-language': ctx.language,
-      ...(ctx.auth.token ? { authorization: `Bearer ${ctx.auth.token}` } : {}),
-      ...(ctx.auth.ticket ? { ticket: ctx.auth.ticket } : {}),
-    },
-  });
-  try {
-    return text ? JSON.parse(text) : {};
-  } catch (error) {
-    throw new Error(`POST ${redactUrl(url)} 返回非 JSON status=${status}: ${text.slice(0, 200)}`);
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return (await ctx.client.request('POST', url)).json;
+    } catch (error) {
+      const retryable = error.status === 429 || error.status >= 500
+        || ['AbortError', 'TimeoutError', 'TypeError'].includes(error.name);
+      if (!retryable || attempt >= ctx.retries) throw error;
+      await delay(300 * (attempt + 1));
+    }
   }
 }
 
 async function promQuery(ctx, label, query) {
   const url = new URL('/api/n9e/prometheus/api/v1/query', ctx.baseUrl);
   url.searchParams.set('query', query);
+  url.searchParams.set('time', String(ctx.now));
   const json = await requestJson(ctx, url.toString());
   if (json.status !== 'success') {
     throw new Error(`PromQL 失败 [${label}] status=${json.status || ''} error=${json.error || ''}`);
@@ -375,13 +280,14 @@ async function collectMetrics(ctx, role, filters, groupKeys, labelPrefix, offset
   return normalizeRows(rows, groupKeys);
 }
 
-// service -> 提供它的应用。service 归属与 env 无关，这里刻意不加 env 过滤，
-// 避免漏掉只在部分环境上报 provider 指标的应用。
+// 归属与流量使用同一窗口和查询时间，避免漏掉当前已无样本的低频服务。
+// 不加 env 过滤，保留跨环境提供方及多应用候选。
 async function resolveServiceOwners(ctx, services) {
   const batches = batchServices(services);
   const results = await pMap(batches, (batch) => {
     const re = batch.map(escapeRe).join('|');
-    return promQuery(ctx, 'downstream.owner', `count(${selector('provider', SUFFIX.count, [`service=~"${re}"`])}) by (app,service)`);
+    const samples = window(selector('provider', SUFFIX.count, [`service=~"${re}"`]), ctx.range, '');
+    return promQuery(ctx, 'downstream.owner', `sum(sum_over_time(${samples})) by (app,service) > 0`);
   }, ctx.concurrency);
   const owners = new Map();
   for (const result of results) {
@@ -999,6 +905,8 @@ function buildJsonModel(model, downstreamRows) {
   return {
     meta: {
       app, site, baseUrl, env, range, slowMs, generatedAt,
+      window_start: model.windowEnd - durationSeconds(range),
+      window_end: model.windowEnd,
       envs_seen: model.envsSeen || [],
       baseline: baselineLabel || null,
       cost_unit: 'ms（源指标 avr_cost_time / slowest_cost_time 单位为微秒，已在 PromQL 中除以 1000）',
@@ -1107,9 +1015,26 @@ async function explainEmpty(ctx, app, env) {
     + `\n该应用有数据的 env: ${envs.join(', ')}。请改 --env（不传即四个环境全看），或用 --range 拉长窗口。`);
 }
 
-async function main() {
-  const args = parseArgs(process.argv.slice(2));
+async function main(argv = process.argv.slice(2)) {
+  const args = parseArgs(argv);
   if (args.help || args.h) { usage(); return 0; }
+
+  if (args.apps !== undefined && (args.app !== undefined || args.service !== undefined)) {
+    throw new Error('--apps 与 --app/--service 不能同时使用');
+  }
+  const apps = args.apps !== undefined
+    ? [...new Set(String(args.apps === true ? '' : args.apps).split(',').map(app => app.trim()).filter(Boolean))]
+    : args.app && args.app !== true ? [String(args.app)] : [];
+  if (!apps.length && !(args.service && args.service !== true)) {
+    throw new Error('必须提供 --app、非空 --apps 或 --service');
+  }
+  if (apps.length > 1) {
+    for (const option of ['out', 'json']) {
+      if (args[option] && !String(args[option]).includes('{app}')) {
+        throw new Error(`多应用 --${option} 路径必须包含 {app}，避免覆盖报告`);
+      }
+    }
+  }
 
   const site = String(args.site || DEFAULT_SITE).toLowerCase();
   const baseUrl = args['base-url'] || BASE_URLS[site];
@@ -1118,6 +1043,16 @@ async function main() {
     console.log(`提示: 站点 ${site} 未实跑验证过，仅线上 prod 已验证；如果报错请核对域名与登录态。`);
   }
 
+  args.site = site;
+  args.token = args.token || process.env.HEALTHY_METRIC_TOKEN;
+  args['http-timeout'] = Math.max(1000, optionalNumber(args['http-timeout'], DEFAULT_HTTP_TIMEOUT_MS));
+  // --site 选择 Healthy 站点，--env 只过滤业务指标，不能把二者混用。
+  return withHealthyClient({ ...args, env: site, 'base-url': baseUrl }, client => inspectTopology(args, client, apps));
+}
+
+async function inspectTopology(args, client, apps) {
+  const site = args.site;
+  const baseUrl = client.baseUrl;
   const env = String(args.env || DEFAULT_ENV);
   const envFilter = env === 'all' ? '' : labelEq('env', env);
   const range = prometheusDuration(args.range || DEFAULT_RANGE);
@@ -1126,26 +1061,26 @@ async function main() {
   const maxDrilldown = optionalNumber(args['max-drilldown'], DEFAULT_MAX_DRILLDOWN);
   const focusService = args.service && args.service !== true ? String(args.service) : '';
 
-  const auth = await resolveAuth(args, baseUrl);
   const ctx = {
     baseUrl,
-    auth,
+    client,
+    site,
+    env,
     range,
+    slowMs,
+    baselineOffset,
+    maxDrilldown,
     windowSec: durationSeconds(range),
     now: Math.floor(Date.now() / 1000),
-    cluster: args.cluster || DEFAULT_CLUSTER,
-    language: args.language || DEFAULT_LANGUAGE,
     concurrency: Math.max(1, optionalNumber(args.concurrency, DEFAULT_CONCURRENCY)),
-    httpTimeout: Math.max(1000, optionalNumber(args['http-timeout'], DEFAULT_HTTP_TIMEOUT_MS)),
+    httpTimeout: args['http-timeout'],
     retries: Math.max(0, optionalNumber(args.retries, DEFAULT_RETRIES)),
     // Healthy 的 prod/online 对应 bianque 的 pre（线上与预发共用同一套 bianque）。
     registrySite: args['registry-site'] || (VERIFIED_SITES.has(site) ? 'pre' : 'stable'),
     queryLog: [],
   };
 
-  let app = args.app && args.app !== true ? String(args.app) : '';
-  if (!app) {
-    if (!focusService) { usage(); throw new Error('必须提供 --app 或 --service'); }
+  if (!apps.length) {
     const owners = await resolveServiceOwners(ctx, [focusService]);
     if (!owners.has(focusService)) await fillOwnersFromRegistry(ctx, owners, [focusService]);
     const list = [...(owners.get(focusService) || [])];
@@ -1154,35 +1089,60 @@ async function main() {
         + '\n请核对服务名（支持短名），或确认该服务是否已下线。');
     }
     if (list.length > 1) console.log(`注意: ${focusService} 有多个提供方 ${list.join(', ')}，取第一个继续`);
-    app = list[0];
-    console.log(`--service 反查到应用: ${app}`);
+    apps.push(list[0]);
+    console.log(`--service 反查到应用: ${apps[0]}`);
   }
 
-  const appFilter = labelEq('app', app);
+  const appFilter = apps.length === 1 ? labelEq('app', apps[0]) : `app=~"${apps.map(escapeRe).join('|')}"`;
   const serviceFilter = focusService ? labelEq('service', focusService) : '';
   const providerFilters = [appFilter, envFilter, serviceFilter];
   const consumerFilters = [appFilter, envFilter];
 
   // 第一层：provider 与 consumer 互不依赖，并发。
-  const [provider, consumer] = await Promise.all([
-    collectMetrics(ctx, 'provider', providerFilters, PROVIDER_GROUP, 'provider', ''),
-    collectMetrics(ctx, 'consumer', consumerFilters, CONSUMER_GROUP, 'consumer', ''),
+  const [allProvider, allConsumer] = await Promise.all([
+    collectMetrics(ctx, 'provider', providerFilters, ['app', ...PROVIDER_GROUP], 'provider', ''),
+    collectMetrics(ctx, 'consumer', consumerFilters, ['app', ...CONSUMER_GROUP], 'consumer', ''),
   ]);
 
-  if (!provider.length && !consumer.length) await explainEmpty(ctx, app, env);
+  const rowsFor = (rows, app) => rows.filter(row => row.app === app).map(({ app: owner, ...row }) => row);
+  const targets = apps.map(app => ({ app, provider: rowsFor(allProvider, app), consumer: rowsFor(allConsumer, app) }));
+  for (const target of targets) {
+    if (!target.provider.length && !target.consumer.length) await explainEmpty(ctx, target.app, env);
+  }
 
-  const providerServices = [...new Set(provider.map((r) => r.service).filter(Boolean))];
-  const consumerServices = [...new Set(consumer.map((r) => r.service).filter(Boolean))];
+  const providerServices = [...new Set(allProvider.map((r) => r.service).filter(Boolean))].sort();
+  const consumerServices = [...new Set(allConsumer.map((r) => r.service).filter(Boolean))].sort();
 
-  // 第二层：上游客户端与下游归属互不依赖，并发。
+  // 所有目标共用服务并集查询；归属仍查全局，不能把目标中的提供方当成唯一提供方。
   const [clients, ownerOf] = await Promise.all([
     providerServices.length ? resolveClients(ctx, providerServices, envFilter, '') : Promise.resolve([]),
     consumerServices.length ? resolveServiceOwners(ctx, consumerServices) : Promise.resolve(new Map()),
   ]);
 
   const registryFill = await fillOwnersFromRegistry(ctx, ownerOf, consumerServices);
-  const registryFilled = new Set(registryFill.filled);
+  const queryLog = ctx.queryLog.slice();
+  let exitCode = 0;
+  for (const target of targets) {
+    const provided = new Set(target.provider.map(row => row.service));
+    const consumed = new Set(target.consumer.map(row => row.service));
+    const code = await writeAppReport(args, { ...ctx, queryLog: queryLog.slice() }, {
+      ...target,
+      clients: clients.filter(row => provided.has(row.service)),
+      ownerOf: new Map([...ownerOf].filter(([service]) => consumed.has(service))),
+      registryFilled: new Set(registryFill.filled.filter(service => consumed.has(service))),
+      providerFilters: [labelEq('app', target.app), envFilter, serviceFilter],
+      consumerFilters: [labelEq('app', target.app), envFilter],
+    });
+    exitCode = Math.max(exitCode, code);
+  }
+  return exitCode;
+}
 
+// 查询结果按 app 拆分后沿用单应用报告和下钻流程，不混合不同应用的统计或输出文件。
+async function writeAppReport(args, ctx, target) {
+  const { app, provider, consumer, clients, ownerOf, registryFilled, providerFilters, consumerFilters } = target;
+  const { site, baseUrl, env, range, slowMs, baselineOffset, maxDrilldown } = ctx;
+  const consumerServices = [...new Set(consumer.map(row => row.service).filter(Boolean))];
   const providerSum = summarize(provider);
   const consumerSum = summarize(consumer);
 
@@ -1243,6 +1203,7 @@ async function main() {
     baselineLabel: baselineOffset,
     slowMs,
     generatedAt: now.toLocaleString('zh-CN', { hour12: false }),
+    windowEnd: ctx.now,
     provider,
     consumer,
     clients,
@@ -1259,7 +1220,7 @@ async function main() {
   if (!args['no-html']) {
     const safeApp = app.replace(/[^A-Za-z0-9._-]/g, '_');
     const outFile = args.out && args.out !== true
-      ? expandHome(String(args.out))
+      ? expandHome(String(args.out).replace(/\{app\}/g, safeApp))
       : path.join(expandHome(args['out-dir'] || DEFAULT_OUT_DIR), `${safeApp}-${env}-${stamp}.html`);
     fs.mkdirSync(path.dirname(outFile), { recursive: true });
     fs.writeFileSync(outFile, buildHtml(model), 'utf8');
@@ -1267,7 +1228,7 @@ async function main() {
   }
 
   if (args.json && args.json !== true) {
-    const jsonFile = expandHome(String(args.json));
+    const jsonFile = expandHome(String(args.json).replace(/\{app\}/g, app.replace(/[^A-Za-z0-9._-]/g, '_')));
     fs.mkdirSync(path.dirname(jsonFile), { recursive: true });
     fs.writeFileSync(jsonFile, JSON.stringify(buildJsonModel(model, null), null, 2), 'utf8');
     model.jsonFile = jsonFile;
@@ -1325,9 +1286,13 @@ async function buildBaseline(ctx, opts) {
   };
 }
 
-main()
-  .then((code) => { process.exitCode = code || 0; })
-  .catch((error) => {
-    console.error(`\n[inspect-app-call-topology] ${error.message}\n`);
-    process.exit(1);
-  });
+if (require.main === module) {
+  main()
+    .then((code) => { process.exitCode = code || 0; })
+    .catch((error) => {
+      console.error(`\n[inspect-app-call-topology] ${error.message}\n`);
+      process.exitCode = 1;
+    });
+}
+
+module.exports = { main, requestJson };
