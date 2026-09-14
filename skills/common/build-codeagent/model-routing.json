@@ -1,0 +1,184 @@
+{
+  "$comment": "多 LLM 生成-评审协作的后端注册表与环节路由。能力分数来自 2026-09-14 实测，方法见 notes。",
+  "version": "1.0.0",
+  "updated": "2026-09-14",
+  "backends": {
+    "claude-vps": {
+      "model_source": "dynamic:~/.claude/settings.json#model",
+      "model_note": "不写死；跟随 Claude Code 默认模型，用 /model 切换即生效",
+      "channel": "anthropic-official-via-vps-proxy",
+      "review_score": "9/9",
+      "gen_tier": "top",
+      "readonly_capable": true
+    },
+    "claude-qwen": {
+      "model": "qwen3.8-max",
+      "channel": "lexin-gateway-direct",
+      "review_score": "9/9",
+      "gen_tier": "strong",
+      "readonly_capable": true
+    },
+    "claude-glm": {
+      "model": "glm-5.3",
+      "channel": "lexin-gateway-direct",
+      "review_score": "7/9",
+      "gen_tier": "strong",
+      "readonly_capable": true,
+      "warn": "两轮测试中最慢（纯生成 31s，评审任务 410s），输出最冗长"
+    },
+    "codex-vps": {
+      "model_source": "dynamic:~/.codex/config.toml#model",
+      "channel": "openai-via-vps-proxy",
+      "review_score": "7/9",
+      "gen_tier": "strong",
+      "readonly_capable": true,
+      "readonly_requires": "必须走 /home/joney/bin/codex-reviewer；裸 codex exec -s read-only 会被提权绕过"
+    },
+    "claude-deepseek": {
+      "model": "deepseek-v4-pro",
+      "channel": "lexin-gateway-direct",
+      "review_score": "6/9",
+      "gen_tier": "strong",
+      "readonly_capable": true,
+      "note": "生成信息密度最高（1794 字达到他人 4000 字的覆盖），纯生成最快 9.4s"
+    },
+    "claude-kimi": {
+      "model": "kimi-k2.7-code",
+      "channel": "lexin-gateway-direct",
+      "review_score": "5/9",
+      "gen_tier": "mid",
+      "readonly_capable": true,
+      "warn": "两轮测试均垫底；生成时出现过一次越界（替产品下了讨论中没有的结论）"
+    }
+  },
+  "stages": {
+    "requirement-clarify": {
+      "role": "generate",
+      "candidates": [
+        "claude-deepseek",
+        "claude-qwen",
+        "claude-glm"
+      ],
+      "artifact": "requirement"
+    },
+    "requirement-review": {
+      "role": "review",
+      "candidates": [
+        "claude-vps",
+        "codex-vps"
+      ],
+      "artifact": "requirement"
+    },
+    "content-organize": {
+      "role": "generate",
+      "candidates": [
+        "claude-deepseek",
+        "claude-qwen",
+        "claude-glm"
+      ],
+      "artifact": "content"
+    },
+    "solution-design": {
+      "role": "generate",
+      "candidates": [
+        "claude-vps",
+        "codex-vps"
+      ],
+      "artifact": "solution"
+    },
+    "solution-review": {
+      "role": "review",
+      "candidates": [
+        "claude-vps",
+        "claude-qwen",
+        "codex-vps"
+      ],
+      "artifact": "solution"
+    },
+    "testcase-generate": {
+      "role": "generate",
+      "candidates": [
+        "claude-deepseek",
+        "claude-qwen",
+        "claude-glm"
+      ],
+      "evidence": "extrapolated",
+      "artifact": "testcase"
+    },
+    "testcase-review": {
+      "role": "review",
+      "candidates": [
+        "claude-vps",
+        "claude-qwen",
+        "codex-vps"
+      ],
+      "evidence": "extrapolated",
+      "artifact": "testcase"
+    },
+    "code-build": {
+      "role": "generate",
+      "candidates": [
+        "claude-deepseek",
+        "claude-qwen",
+        "claude-glm"
+      ],
+      "evidence": "untested",
+      "artifact": "code"
+    },
+    "code-review": {
+      "role": "review",
+      "candidates": [
+        "claude-vps",
+        "codex-vps",
+        "claude-qwen"
+      ],
+      "evidence": "untested",
+      "artifact": "code"
+    },
+    "quick-check": {
+      "role": "review",
+      "candidates": [
+        "claude-kimi",
+        "claude-deepseek",
+        "claude-glm",
+        "claude-qwen"
+      ],
+      "artifact": "content"
+    },
+    "verify-execute": {
+      "role": "execute",
+      "candidates": [
+        "claude-deepseek",
+        "claude-qwen",
+        "claude-glm"
+      ],
+      "needs_write": true,
+      "note": "唯一需要写权限的检查类环节（编译产物、测试报告），不能用只读评审者",
+      "artifact": "code"
+    }
+  },
+  "rules": {
+    "no_model_flag": "一律不传 --model，用 profile 配置的模型。一个后端=一个模型，因此不存在同厂商跨版本的边界问题",
+    "producer_excluded_for_life": "参与过该产物任一版本生成的后端，在该产物所有后续轮次都不能评审",
+    "reviewer_rotates": "评审者每轮轮换，优先选上一轮未用过的。理由：实测各模型盲区稳定且互不相同，固定评审者会把其盲区固化成流程盲区",
+    "rotation_carries_findings": "轮换时必须把上一轮 findings 带进信封，否则新评审者只会重新发现同样问题，无法核对闭环",
+    "reuse_allowed_when_exhausted": "候选耗尽时允许复用最早轮次的评审者，但必须在记录中标明本轮为复用",
+    "revision_by_original_producer": "修订必须由原生成者执行。连续两轮改不动才允许换人，并接受评审候选收窄",
+    "record_actual_choice": "每次实际选了哪个后端必须记录。随机是为了轮换视角，不是为了不可追溯",
+    "artifact_scope": "排除范围按 artifact 计：同一产物的生成与评审环节共享 artifact 键，见 stages[*].artifact"
+  },
+  "invocation": {
+    "claude_generate": "claude-<profile> -p --strict-mcp-config \"<prompt>\"",
+    "claude_review": "claude-<profile> -p --strict-mcp-config --allowedTools \"Read Grep Glob\" --add-dir <材料根> \"<prompt>\"",
+    "codex_generate": "codex-vps exec --skip-git-repo-check \"<prompt>\" </dev/null",
+    "codex_review": "cd <材料目录> && codex-reviewer \"<prompt>\" </dev/null",
+    "verify_execute": "按普通生成方式调用，不加只读限制",
+    "warn_strict_mcp": "--strict-mcp-config 对 claude 系是必须的；不加会被用户级 MCP 污染工具面导致评审者拒评（实测）"
+  },
+  "notes": {
+    "review_test": "9 个植入缺陷的文档，测召回率。规律：矛盾类缺陷 100% 命中，缺失类仅 29%~71%，结构/可读性类 57%——模型擅长比对，不擅长想象『本该有什么』",
+    "gen_test": "含 8 要点/3 矛盾/3 缺口/1 幻觉陷阱的讨论记录整理。所有后端要点召回均 8/8，区分度在矛盾识别与幻觉",
+    "sample_size": "每项能力各一轮，样本小。code-build 与 code-review 完全未测，按用户决定先跑起来再调",
+    "unavailable": "claude-doubao 因网关 team 权限 401 不可用；minimax 与 grok 已按用户要求剔除"
+  }
+}
