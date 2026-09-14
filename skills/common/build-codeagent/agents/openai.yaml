@@ -1,6 +1,6 @@
 interface:
   display_name: "build-codeagent"
-  short_description: "统一派发 producer/reviewer 并校验身份、写入证据与结果契约"
-  default_prompt: "使用 $build-codeagent 为任务选择 producer 或 reviewer 模式；代码 producer 每次只消费一个已定义 DEV 项，核对依赖和写集，不自行拆分或扩展范围；同时校验 runtime 身份、工具面、写入证据、超时与结果 schema。"
+  short_description: "跨模型生成与轻量互审，并支持正式 producer/reviewer 委派"
+  default_prompt: "使用 $build-codeagent 协作：普通任务先按轻档清单交接和验收，选模默认预览，实际参与后登记。正式委派中，代码 producer 每次只消费一个已定义 DEV 项，核对依赖和写集，不自行拆分或扩展范围；校验 runtime 身份、工具面、写入证据、超时与结果 schema。"
 policy:
   allow_implicit_invocation: false

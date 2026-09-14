@@ -1,26 +1,27 @@
 ---
 name: build-codeagent
-description: Use when `dev-build-change` 或 `dev-auto-loop` 已确认任务边界，需要派发多后端 producer 执行改动，或派发与产物生成者身份隔离的正式 reviewer。
+description: Use when 需求梳理、内容整理、方案、测试或代码需要跨模型生成与轻量互审，或 dev-build-change/dev-auto-loop 需要派发 producer 与独立正式 reviewer。
 metadata:
-  version: 1.5.0
+  version: 1.7.0
 ---
 
 # build-codeagent
 
 ## 定位
 
-用于作为 `dev-build-change` 和 `dev-auto-loop` 的执行后端增强，统一派发 codeagent producer 和独立 reviewer。
+统一派发跨模型生成者和评审者。普通需求梳理、内容整理与互审使用轻档；`dev-build-change`、`dev-auto-loop` 或正式评审门禁委派使用正式路径。
 
-它负责约束任务信封、运行时身份、权限、超时、并行和失败处理，不替代开发主入口的业务判断或正式评审 skill 的专业判断。
+主会话负责交接、验收与停止判断；脚本只负责候选选择和参与记录，不自动审批内容。
 
 正式评审委派统一遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/delegation-contract.md`。
 作为 `dev-auto-loop` 后端时，producer 结果、预算预占和恢复统一遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/dev-auto-loop/references/run-state-and-resume.md`。
 
-后端选择与实测能力画像见本目录 `model-routing.json`，由 `scripts/pick_agent.py` 执行，见下方「选后端」。
+候选、分数和调用模板见 `model-routing.json`，由 `scripts/pick_agent.py` 执行，见下方「选后端」。
 
 ## When to Use
 
 适合以下场景：
+- 日常需求梳理、内容整理、方案、测试或代码需要生成者与另一模型交叉检查
 - 较大或长耗时改动需要交给 producer 执行
 - 需要并行处理写集不相交的实现任务
 - 需求、方案、测试清单或代码需要由独立 reviewer 正式评审
@@ -28,10 +29,19 @@ metadata:
 
 不适合以下场景：
 - 小改动可由当前主流程直接完成，且不涉及独立评审门禁
-- 需求或方案尚未稳定，不适合放大执行
-- 只是做一般搜索、问答或轻量修改，不需要 codeagent
+- 只是单次搜索或问答，没有跨模型协作需要
 
-## 两种模式
+## 轻档协作
+
+按 [轻档交接与验收](references/lightweight-collaboration.md) 执行：主会话组装交接材料（目标、事实、假设、未决项、检查项、旧 findings），用脚本预览选模后派发，实际参与后登记，再核对修订与停止条件。
+
+轻档不需要 DEV 清单、身份信封或审批记录；接入已有开发或正式评审流程时仍按那套流程的准入走，互审结果不当正式结论用。
+
+未解决的问题必须跟着材料传到下一轮。连续两轮没有实质改善时暂停，由主会话决定换生成者还是补材料，不能靠换评审者绕过。
+
+## 正式委派的两种模式
+
+本节及 Task envelope、失败重试、使用原则、输出要求、交接建议用于正式委派；选后端与调用边界适用于两条路径。
 
 ### producer
 
@@ -84,46 +94,49 @@ reviewer 信封不得包含尚未产生的 `reviewer_agent_ref`。编排器在 s
 不要凭印象挑模型，用脚本：
 
 ```bash
+# 预览：输出选中后端、模型和待填调用模板，不写记录
 python3 /home/joney/projects/ai/agent-tools/skills/common/build-codeagent/scripts/pick_agent.py \
   <环节> --task <任务ID> [--material <材料目录>] [--exclude 后端1,后端2] [--json]
-python3 .../pick_agent.py --task <任务ID> --show-record    # 查看该任务已选过谁
+# 登记：实际参与后追加一条记录
+python3 .../pick_agent.py <环节> --task <任务ID> --record <实际后端> [--actual-model <运行模型ID>]
+python3 .../pick_agent.py --task <任务ID> --show-record
 ```
 
-它读 `model-routing.json`，输出选中的后端、解析后的模型名和可直接执行的调用命令，并把这次选择追加到
-`~/.local/state/agent-routing/<任务ID>.jsonl`（`AGENT_ROUTING_HOME` 可改）。
+需要 Python 3.11+。记录追加到 `~/.local/state/agent-routing/<任务ID>.jsonl`（`AGENT_ROUTING_HOME` 可改）。排除集只看登记过的记录，所以：
 
-`model-routing.json` 记录三块内容：
+- 已有产物先按对应生成环节逐个 `--record` 补录生成者，否则它可能被选为评审者。评审预览时脚本会提示该产物尚无生成者记录。
+- 生成或修订留下实质产出就登记，失败但改了东西也登记；评审拿到有效结论（含「需修订」）就登记；只预览或启动前失败不登记。
+- 有运行返回的模型 ID 就用 `--actual-model` 一起登记，没有则记配置值。
+- `--exclude` 只对当次预览生效。登记不接受 `--exclude`；登记的评审者若是该产物的生成者会被拒绝。
 
-- `backends`：6 个后端的通道、模型来源、两项实测能力分数、只读能力。`claude-vps` 和 `codex-vps`
-  的模型写成 `dynamic:<路径>#<键>`，跟随用户配置，不写死。
-- `stages`：11 个环节的候选集与 `artifact` 归属。`evidence` 标 `extrapolated` 或 `untested` 的
-  条目表示该环节的候选是外推而非实测，不要当作已验证。
-- `rules`：脚本自动执行的规则，不需要人记。
+任务 ID 只能用 Unicode 字母数字和 `-_.`。每个 task 的每种 artifact 只对应一份产物：修订沿用 task，另一份同类产物另建 task；同 task 的选择、调用、登记串行。记录文件有损坏行时脚本停止并报行号，核实后再继续，不要清空历史。
+
+`model-routing.json` 三块内容：
+
+- `backends`：6 个后端的通道、模型来源、评审实测分数、生成能力分档和只读调用要求。`claude-vps` 和 `codex-vps`
+  的模型写成 `dynamic:<路径>#<键>`，跟随本机配置。
+- `stages`：11 个环节的候选集与 `artifact` 归属。`evidence` 标 `extrapolated` 或 `untested` 的环节，
+  候选是外推来的，试运行后再调。
+- `rules`：8 条规则。排除、轮换、修订归属由脚本执行；交接、验收、换人判断由主会话负责。
 
 规则要点（完整表述见 JSON）：
 
 - **生成者终身排除**：参与过该 artifact 任一版本生成的后端，后续所有轮次都不能评审它
-- **评审者每轮轮换**：优先选该 artifact 上没当过评审者的。实测各模型盲区稳定且互不相同，
-  固定评审者会把它的盲区固化成整个流程的盲区
+- **评审者每轮轮换**：优先选该 artifact 上没当过评审者的，同优先级随机
 - **轮换必须带上轮 findings**：否则新评审者只会重新发现同样问题，无法核对闭环
-- **候选耗尽可复用最早轮次**，但记录中标明本轮为复用
-- **修订由原生成者执行**，不重新随机
-- **一律不传 `--model`**，用 profile 配置的模型。一个后端=一个模型，因此不存在同厂商跨版本的歧义
+- **候选耗尽复用最久未使用者**，`reuse_of_round` 记它上次评审的轮次
+- **修订沿用最近的生成者**；它被排除、不可用或连续两轮无改善时用 `--replace-producer '原因'` 换人，旧生成者仍排除
+- **调用方不传后端 `--model`**，用各后端默认配置；`--actual-model` 只是登记元数据
 
-## 跨进程派发的两条硬约束
+## 调用与只读边界
 
-**一、provider 是进程级的，同进程换不到别家模型。** 一个 Claude Code 会话连哪个网关由启动时的
-`ANTHROPIC_BASE_URL` 决定；agent 定义只有 `model:` 字段，没有 provider 或 baseUrl。在官方通道里
-指定 `qwen3.8-max` 会直接报模型不存在。所以想要不同模型的视角，只能跨进程派发——
-进程内 subagent 只能给到上下文隔离，给不了视角多样性。
+**provider 是进程级的。** 一个 Claude Code 会话连哪个网关由启动时的 `ANTHROPIC_BASE_URL` 决定，进程内 subagent 换不到别家模型。要不同模型的视角只能跨进程派发：`claude-vps` 经 `ai-vps-exec` 启动 `claude`，其他 `claude-*` 经 `claude-profile` 按各自 env 启动。
 
-**二、codex 做评审必须走 `/home/joney/bin/codex-reviewer`。** 裸 `codex exec -s read-only`
-不安全：沙箱确实拦住了第一次写入，但 `approval_policy="on-request"` 会自动批准提权并重试成功，
-实测能写任意路径。`codex-reviewer` 三层叠加——bwrap 只读牢笼、`approval_policy=never` 断掉提权、
-`--ignore-user-config` 不挂载那 21 个 MCP server（其中 bastion 能执行远程命令，且 MCP 子进程
-完全在 codex 沙箱之外）。
+**Codex 评审必须走 `/home/joney/bin/codex-reviewer`。** 裸 `codex exec -s read-only` 不安全：沙箱拦住第一次写入后，本机配置 `approval_policy = "on-request"` 加 `approvals_reviewer = "auto_review"` 会自动批准提权，同一条命令重试即成功（2026-09-14 复现：第一次报 Read-only file system，第二次 exit 0）。`codex-reviewer` 叠加三层：bwrap 只读绑定 home（`~/.codex` 除外）和材料目录；`approval_policy=never` 断掉提权，home 外的写入由 codex 自身只读沙箱拦住；`--ignore-user-config` 不挂用户级 MCP。它内部从主配置取模型传 `-m`，是封装例外。
 
-Claude 系后端做评审必须加 `--strict-mcp-config`，不加会被用户级 MCP 污染工具面导致评审者拒评。
+**Claude 评审用 `--tools "Read,Grep,Glob"` 加 `--strict-mcp-config`。** 前者把工具集合限到三个只读工具，后者去掉用户级 MCP；实测 claude-qwen 在此配置下工具面只有这三个、MCP 为空、skill 仍可加载。`--allowedTools` 只控制免确认，不限制工具集合，不要拿它当隔离。
+
+派发后核对运行返回的工具面、MCP 列表和材料目录是否未变。正式 reviewer 另需满足上面的委派契约。模板要填入真实 prompt 再用，不要直接 `eval` 脚本输出。
 
 ## 使用原则
 

@@ -9,7 +9,7 @@
 
 | Skill | 说明 |
 |---|---|
-| `build-codeagent` | 执行后端 - 多后端 codeagent 处理大改动/并行子任务（被 dev-workflow 复用） |
+| `build-codeagent` | 跨模型生成与轻量互审；支持 dev-workflow 正式委派、候选轮换和实际参与登记 |
 | `debug-systematic` | 系统化调试方法论：复现→定位→根因→验证 |
 | `convert-epub-to-markdown` | EPUB 转 Markdown，保留原件与图片，自动选择全文或分卷并校验正文 |
 | `skill-authoring` | 按仓库约定创建/维护 skill 的元技能 |

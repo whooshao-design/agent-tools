@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""按 model-routing.json 的规则为某个环节选后端，并记录实际选择。
+"""预览环节选模；实际参与后用 --record BACKEND 登记，预览不写历史。
 
-规则由数据驱动，不在代码里硬编码候选集：
-  - 生成者终身排除：同一 artifact 上做过 generate 的后端，不能再评审该 artifact
-  - 评审者每轮轮换：优先选该 artifact 上还没当过评审者的
-  - 候选耗尽可复用：标记 reuse=true 并说明复用了哪一轮
-  - 修订由原生成者做：generate 角色若该 artifact 已有生成者，直接沿用
-
-用法：
-  pick_agent.py <stage> --task <task-id> [--material <dir>] [--exclude a,b] [--json]
-  pick_agent.py --show-record --task <task-id>
+同一 task 的每种 artifact 只对应一份产物，调用方串行完成选择、调用和登记。
+生成角色的登记也用于补录既有产物的生成者。
 """
 from __future__ import annotations
-import argparse, json, os, random, sys, datetime
+import argparse
+import datetime
+import json
+import os
+import random
+import shlex
+import sys
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -26,8 +26,11 @@ def load_routing() -> dict:
 
 
 def record_path(task: str) -> Path:
-    safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in task)
-    return STATE / f"{safe}.jsonl"
+    if not task or task in (".", "..") or any(
+        not (c.isalnum() or c in "-_.") for c in task
+    ):
+        raise ValueError("任务 ID 只能包含 Unicode 字母数字与 -_.，且不能为 . 或 ..")
+    return STATE / f"{task}.jsonl"
 
 
 def read_record(task: str) -> list[dict]:
@@ -35,23 +38,41 @@ def read_record(task: str) -> list[dict]:
     if not p.exists():
         return []
     out = []
-    for line in p.read_text(encoding="utf-8").splitlines():
+    for number, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
         line = line.strip()
         if line:
-            out.append(json.loads(line))
+            try:
+                entry = json.loads(line)
+                valid = (isinstance(entry, dict) and entry.get("task") == task
+                         and entry.get("role") in ("generate", "review", "execute")
+                         and isinstance(entry.get("backend"), str)
+                         and isinstance(entry.get("artifact"), str)
+                         and isinstance(entry.get("stage"), str)
+                         and isinstance(entry.get("ts"), str)
+                         and isinstance(entry.get("model", ""), str)
+                         and type(entry.get("round")) is int
+                         and entry["round"] > 0)
+            except json.JSONDecodeError:
+                valid = False
+            if not valid:
+                raise ValueError(f"记录 {p} 第 {number} 行损坏或任务不匹配；"
+                                 "请保留文件并核对来源，不能跳过或清空生成者历史")
+            out.append(entry)
     return out
 
 
 def append_record(task: str, entry: dict) -> Path:
     p = record_path(task)
     p.parent.mkdir(parents=True, exist_ok=True)
+    # 手工补录的最后一行可能没有换行符，不能把下一条 JSON 拼到同一行。
+    separator = "\n" if p.exists() and p.stat().st_size and not p.read_bytes().endswith(b"\n") else ""
     with p.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        f.write(separator + json.dumps(entry, ensure_ascii=False) + "\n")
     return p
 
 
 def resolve_model(backend: str, spec: dict) -> str:
-    """把 dynamic:<路径>#<键> 解析成实际模型名；固定模型直接返回。"""
+    """读取配置模型名；不把它当作本次运行时模型证明。"""
     if "model" in spec:
         return spec["model"]
     src = spec.get("model_source", "")
@@ -61,35 +82,58 @@ def resolve_model(backend: str, spec: dict) -> str:
     path = Path(os.path.expanduser(path_part))
     if not path.exists():
         return f"(读不到 {path})"
-    text = path.read_text(encoding="utf-8")
-    if path.suffix == ".json":
-        try:
-            return str(json.loads(text).get(key, "(缺 %s)" % key))
-        except Exception:
-            return "(JSON 解析失败)"
-    # TOML：只取第一个 section 之前的顶层键
-    for line in text.splitlines():
-        if line.lstrip().startswith("["):
-            break
-        s = line.strip()
-        if s.startswith(f"{key}") and "=" in s:
-            v = s.split("=", 1)[1].strip()
-            return v.strip('"').strip("'")
-    return f"(缺 {key})"
+    try:
+        text = path.read_text(encoding="utf-8")
+        config = json.loads(text) if path.suffix == ".json" else tomllib.loads(text)
+        value = config.get(key) if isinstance(config, dict) else None
+        return value if isinstance(value, str) and value.strip() else f"(缺 {key})"
+    except (OSError, ValueError):
+        return "(模型配置读取或解析失败)"
 
 
-def build_command(backend: str, spec: dict, role: str, material: str | None) -> str:
-    needs_ro = role == "review"
-    if backend == "codex-vps":
-        if needs_ro:
-            d = material or "<材料目录>"
-            return f'cd {d} && codex-reviewer "<prompt>" </dev/null'
-        return 'codex-vps exec --skip-git-repo-check "<prompt>" </dev/null'
-    base = f'{backend} -p --strict-mcp-config'
-    if needs_ro:
-        d = material or "<材料根>"
-        base += f' --allowedTools "Read Grep Glob" --add-dir {d}'
-    return base + ' "<prompt>"'
+def build_command(backend: str, invocation: dict, role: str, material: str | None) -> str:
+    """仅生成模板；所有调用参数保持为字面值，不在本脚本执行 shell。"""
+    family = "codex" if backend == "codex-vps" else "claude"
+    action = "review" if role == "review" else "generate"
+    return invocation[f"{family}_{action}"].format(
+        backend=shlex.quote(backend), material=shlex.quote(material or "<材料目录>"))
+
+
+def select_backend(stage, history, backends, manual, replacement):
+    producers = [h for h in history if h["role"] == "generate"]
+    reviews = [h for h in history if h["role"] == "review"]
+    excluded = set(manual)
+    if stage["role"] == "review":
+        excluded.update(h["backend"] for h in producers)
+        models = {h["model"] for h in producers
+                  if isinstance(h.get("model"), str) and not h["model"].startswith("(")}
+        excluded.update(b for b in stage["candidates"]
+                        if resolve_model(b, backends[b]) in models)
+    pool = [b for b in stage["candidates"] if b not in excluded]
+    if not pool:
+        raise ValueError(f"无可用后端：候选 {stage['candidates']}，已排除 {sorted(excluded)}")
+    notes = []
+    if stage["role"] == "generate" and producers:
+        # 换人后以最近的生成者为修订责任人；全部历史生成者仍不可参与评审。
+        current = producers[-1]["backend"]
+        if not replacement:
+            if current not in pool:
+                raise ValueError("原生成者已被排除或移出候选；确认换人条件后提供 "
+                                 "--replace-producer 原因")
+            return current, None, excluded, ["沿用当前生成者修订同一产物"]
+        notes.append(f"已声明换人原因：{replacement}")
+        pool = [b for b in pool if b != current]
+        if not pool:
+            raise ValueError("无可接替当前生成者的后端")
+    if stage["role"] == "review":
+        last_used = {h["backend"]: h["round"] for h in reviews}
+        unused = [b for b in pool if b not in last_used]
+        if not unused:
+            chosen = min(pool, key=lambda b: last_used[b])
+            return chosen, last_used[chosen], excluded, ["候选已用完，复用最久未使用的评审者"]
+        pool = unused
+        excluded.update(last_used)
+    return random.choice(pool), None, excluded, notes
 
 
 def pick(args) -> int:
@@ -105,69 +149,55 @@ def pick(args) -> int:
     candidates = list(stage["candidates"])
     history = [h for h in read_record(args.task) if h.get("artifact") == artifact]
 
-    producers = [h["backend"] for h in history if h["role"] == "generate"]
-    reviewers = [h["backend"] for h in history if h["role"] == "review"]
-    manual = [x for x in (args.exclude or "").split(",") if x]
-
-    reuse_of = None
-    notes = []
-
-    if role == "generate" and producers:
-        # 修订由原生成者做
-        chosen = producers[0]
-        notes.append(f"沿用原生成者（修订规则）；该产物已有 {len(producers)} 次生成")
+    manual = [x.strip() for x in (args.exclude or "").split(",") if x.strip()]
+    if set(manual) - backends.keys():
+        raise ValueError(f"未知排除后端：{sorted(set(manual) - backends.keys())}")
+    if args.replace_producer is not None and (role != "generate" or not args.replace_producer.strip()):
+        raise ValueError("--replace-producer 仅用于生成角色，且必须提供换人原因")
+    if args.record:
+        # 登记是调用方提供的参与事实：不重新随机，也接受候选表外的既有生成者补录。
+        chosen = args.record
+        if chosen not in backends:
+            raise ValueError(f"未知登记后端：{chosen}")
+        if role == "review" and any(h["backend"] == chosen for h in history if h["role"] == "generate"):
+            raise ValueError(f"{chosen} 是该产物的生成者，不能登记为评审者")
+        reused = [h["round"] for h in history if h["role"] == "review" and h["backend"] == chosen]
+        reuse_of = reused[-1] if role == "review" and reused else None
+        excluded, notes = set(), []
     else:
-        excluded = set(manual)
-        if role in ("review", "execute"):
-            excluded |= set(producers)          # 生成者终身排除
-        if role == "review":
-            excluded |= set(reviewers)          # 每轮轮换
-        pool = [c for c in candidates if c not in excluded]
-
-        if not pool and role == "review":
-            # 候选耗尽：放宽轮换，仅保留生成者排除
-            relaxed = [c for c in candidates if c not in set(manual) | set(producers)]
-            if relaxed:
-                # 规则：复用最早那一轮的评审者，而不是再随机一次
-                review_hist = [h for h in history if h["role"] == "review"]
-                order = {h["backend"]: i + 1 for i, h in reversed(list(enumerate(review_hist)))}
-                chosen = min(relaxed, key=lambda c: order.get(c, len(order) + 1))
-                reuse_of = order.get(chosen)
-                notes.append(f"候选耗尽，复用第 {reuse_of} 轮评审者" if reuse_of
-                             else "候选耗尽，放宽轮换后仍有未用过的后端")
-            else:
-                print(f"无可用后端：{args.stage} 候选 {candidates}，"
-                      f"已排除生成者 {producers} 与手动排除 {manual}", file=sys.stderr)
-                return 1
-        elif not pool:
-            print(f"无可用后端：{args.stage} 候选 {candidates}，已排除 {sorted(excluded)}",
-                  file=sys.stderr)
-            return 1
-        else:
-            chosen = random.choice(pool)
+        chosen, reuse_of, excluded, notes = select_backend(
+            stage, history, backends, manual, args.replace_producer)
+        if role == "review" and not any(h["role"] == "generate" for h in history):
+            notes.append("该产物还没有生成者记录；若由模型生成，先按生成环节 --record 补录")
 
     spec = backends[chosen]
     entry = {
         "ts": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
         "task": args.task, "artifact": artifact, "stage": args.stage,
         "role": role, "backend": chosen,
-        "model": resolve_model(chosen, spec),
-        "round": len([h for h in history if h["role"] == role]) + 1,
+        "model": args.actual_model or resolve_model(chosen, spec),
+        "model_basis": "runtime" if args.actual_model else "configured",
+        "round": max((h["round"] for h in history if h["role"] == role), default=0) + 1,
         "candidates": candidates,
-        "excluded": sorted(set(manual) | (set(producers) if role != "generate" else set())
-                           | (set(reviewers) if role == "review" and reuse_of is None else set())),
+        "excluded": sorted(excluded),
         "reuse_of_round": reuse_of,
+        "replacement_reason": args.replace_producer,
+        "event": "participation" if args.record else "preview",
     }
-    rec = append_record(args.task, entry)
-    cmd = build_command(chosen, spec, role, args.material)
+    rec = append_record(args.task, entry) if args.record else record_path(args.task)
+    cmd = None if args.record else build_command(chosen, routing["invocation"], role, args.material)
+    tested_model = spec.get("review_test_model")
+    if tested_model and entry["model"] != tested_model:
+        notes.append(f"评审分数是在 {tested_model} 上测的，当前模型不同")
 
     if args.json:
         print(json.dumps({**entry, "command": cmd, "record": str(rec),
                           "notes": notes}, ensure_ascii=False, indent=2))
         return 0
 
-    print(f"环节   {args.stage}  ({role}, artifact={artifact}, 第 {entry['round']} 轮)")
-    print(f"选中   {chosen}   模型 {entry['model']}")
+    print(f"{'登记' if args.record else '预览'}   {args.stage}  ({role}, artifact={artifact}, 第 {entry['round']} 轮)")
+    basis = "运行值" if entry["model_basis"] == "runtime" else "配置值"
+    print(f"选中   {chosen}   模型 {entry['model']}（{basis}）")
     if entry["excluded"]:
         print(f"已排除 {', '.join(entry['excluded'])}")
     for n in notes:
@@ -176,8 +206,9 @@ def pick(args) -> int:
         print(f"提醒   {spec['warn']}")
     if role == "review" and spec.get("readonly_requires"):
         print(f"只读   {spec['readonly_requires']}")
-    print(f"记录   {rec}")
-    print(f"\n{cmd}")
+    print(f"记录   {rec}{'' if args.record else '（未写入）'}")
+    if cmd:
+        print(f"\n调用模板（填入 prompt 和材料目录后使用；不要直接 eval 输出）：\n{cmd}")
     return 0
 
 
@@ -185,24 +216,34 @@ def show(args) -> int:
     for h in read_record(args.task):
         ru = f"  (复用第 {h['reuse_of_round']} 轮)" if h.get("reuse_of_round") else ""
         print(f"{h['ts']}  {h['stage']:<20} {h['role']:<9} {h['backend']:<17} "
-              f"{h['model']:<18} 第{h['round']}轮{ru}")
+              f"{h.get('model', '(未知)'):<18} 第{h['round']}轮{ru}")
     return 0
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="按 model-routing.json 选后端并记录")
+    ap = argparse.ArgumentParser(description="预览选模；实际参与后用 --record BACKEND 登记")
     ap.add_argument("stage", nargs="?", help="环节名，省略时配合 --show-record")
     ap.add_argument("--task", required=True, help="任务 ID，用于隔离记录")
-    ap.add_argument("--material", help="评审材料目录（评审角色用于拼 --add-dir / cd）")
+    ap.add_argument("--material", help="评审材料目录（用于调用模板中的 cd）")
     ap.add_argument("--exclude", help="额外排除的后端，逗号分隔")
+    ap.add_argument("--replace-producer", metavar="原因", help="确认无法继续修订后，显式选择接替者")
+    ap.add_argument("--actual-model", help="登记时填本次运行返回的模型 ID")
     ap.add_argument("--json", action="store_true", help="输出 JSON")
-    ap.add_argument("--show-record", action="store_true", help="查看该任务的选择历史")
+    action = ap.add_mutually_exclusive_group()
+    action.add_argument("--record", metavar="BACKEND", help="登记实际生成/修订、完成的评审或验证；也可补录既有生成者")
+    action.add_argument("--show-record", action="store_true", help="查看该任务的参与历史")
     args = ap.parse_args()
-    if args.show_record:
-        return show(args)
-    if not args.stage:
+    if args.actual_model is not None and (not args.record or not args.actual_model.strip()):
+        ap.error("--actual-model 仅用于 --record，且不能为空")
+    if args.record and args.exclude:
+        ap.error("--record 登记实际事实，不接受 --exclude；排除用于预览")
+    if not args.stage and not args.show_record:
         ap.error("需要指定环节名，或使用 --show-record")
-    return pick(args)
+    try:
+        return show(args) if args.show_record else pick(args)
+    except (ValueError, OSError) as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
