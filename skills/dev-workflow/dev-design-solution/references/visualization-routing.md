@@ -46,8 +46,8 @@
 
 ## 4. 格式
 
-- mermaid 只用稳定子集：`flowchart` / `graph`、`sequenceDiagram`、`stateDiagram`、`erDiagram`、`classDiagram`。不用 beta 图型、`%%{init}%%` 指令和主题配置。`stateDiagram-v2` 在飞书渲染确认前不用。
-- 节点文本避免全角冒号和箭头符号，旧版引擎会报词法错误；用逗号或空格分隔。
+- mermaid 只用稳定子集：`flowchart` / `graph`、`sequenceDiagram`（含 `autonumber`、`Note`、`alt`/`loop`、激活）、`stateDiagram` / `stateDiagram-v2`、`erDiagram`、`classDiagram`。不用 beta 图型、`%%{init}%%` 指令和主题配置。2026-09-18 在飞书文本绘图小组件实测：flowchart、带 autonumber/alt/loop 的 sequenceDiagram、stateDiagram-v2 都能出图；erDiagram、classDiagram 只在本地 mermaid 8.13 与 11 下校验通过，未在飞书实测。
+- 节点文本避免全角冒号和箭头符号，mermaid 8.13 会报词法错误；用逗号或空格分隔。
 - 一张图节点不超过 15 个、消息不超过 12 条；超过就拆图或提升抽象层级。
 - 等宽文本块画的时序、调用树、时间线与 mermaid 同为正式形式，设计方可以直接选用；它在本地、GitLab 和飞书三端表现一致，飞书导入时保留为代码块。
 - 非文本图（draw.io、图片）只在 mermaid 明显失真时使用，且必须提交可编辑源；不因此引入新的渲染依赖。
@@ -72,7 +72,7 @@ node /home/joney/projects/ai/agent-tools/skills/dev-workflow/dev-design-solution
 
 脚本抽取全部 mermaid 块，默认用 mermaid 8.13.0 和 11 两个版本做 `parse`，再渲染 SVG 和 PNG 到 `diagrams/`，并写 `diagrams/results.md`。它复用 `get-browser-session` 已装好的 Chrome 与 Playwright，不需要新装软件，需要联网加载 mermaid。有图未通过就改到通过，改不好就换等宽文本块；结果表随方案一起提交。
 
-上传飞书时：飞书导入 `.md` 不渲染 mermaid 代码块，只有"文本绘图小组件"渲染。把 `diagrams/D<n>.mmd` 的内容粘进小组件，或直接插入同名 PNG；等宽文本块不需要处理。
+上传飞书时：直接导入 `.md`。实测（2026-09-18，探针文档 249 块逐块核对）标题、列表、引用、行内样式、6 列以内表格和 `<br>` 换行都保留且不需要横向滚动，等宽文本块逐字节保留且中文对齐；mermaid 代码块只显示为代码，不渲染。每张 mermaid 图在文档里插入一个"文本绘图"小组件（`/` 菜单），把 `diagrams/D<n>.mmd` 的内容粘进去即可出图；或直接插入同名 PNG。图的数量直接决定上传的手工步骤数，这也是默认只有一张主图的原因之一。
 
 ## 7. reviewer 检查
 
