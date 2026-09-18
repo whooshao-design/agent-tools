@@ -1,0 +1,6 @@
+interface:
+  display_name: "Query App Logs"
+  short_description: "统一查询 Java 应用日志：服务器、容器与日志平台"
+  default_prompt: "使用 $query-app-logs 按路由规则查询应用日志：服务器/容器日志优先，超出保存期或跨机器按 traceId 汇总时走日志平台，输出查询范围、结论与证据。"
+policy:
+  allow_implicit_invocation: true

@@ -2,7 +2,7 @@
 name: java-server-diagnostics
 description: "通过 java_app_diag MCP 对 Java 应用所在服务器做只读排查。默认先只看 error.log 判断有没有问题；只有 error.log 暴露线索后，才递进排查 info/debug/启动日志、进程、端口、JVM、线程或 GC。"
 metadata:
-  version: 1.3.1
+  version: 1.4.0
 ---
 
 # java-server-diagnostics
@@ -91,54 +91,11 @@ metadata:
 
 `java_app_diag` 已支持 `env` 和 `profile` 参数，调用时优先传 `env`，只有需要强制路径时才传 `profile`。如果无法从用户请求或发布上下文明确判断环境，默认按线上/生产机器处理，走线上堡垒机路径 `ssh.jumpserver.fenqile.cn`。`pre`、预发布、灰度、`prod`、线上、生产都映射到 `profile=online`；项目环境、`stable`、`test`、`prj` 映射到 `profile=dev`；DBA 类场景才使用 `profile=dba`。若工具返回自动连接失败且提示密码/OTP，要说明当前 `profile/host`，不要反复重试同一失败连接。
 
-### 2. 容器日志快检
+### 2. 容器日志与历史日志
 
-当目标是容器 Pod，而不是 VM/KVM 时：
-
-1. 先用 `query-app-instances` 获取 `namespace`、`pod_name`、`container`、`cluster_id/context`、`login_pod_addr`、`login_url_source` 和校验结果。WebShell URL 必须使用乐效原值，不重新生成。
-2. 优先检查并实际使用匹配的只读 kubectl context。只有 context/kubeconfig/连接不可用等已知基础设施错误才回退 WebShell；权限拒绝、Pod 不存在等业务性错误不要静默回退。
-3. WebShell Chromium 使用隔离 profile 和进程级内网直连，不修改全局 VPS 代理；ATrust/乐空间、登录页和 403 不得判为 READY。
-4. `app + env` 返回多个 Running Pod 时不随机选择，必须补精确 `--pod` 或告警中的 `--ip`：
-
-```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/java-server-diagnostics/scripts/container_log_check.js \
-  --app=<app_name> \
-  --env=pre \
-  --ip=<pod_ip> \
-  --lines=120
-```
-
-5. 快检默认 `--log-mode=quick`，只把 `error.log` 作为主要错误来源。只有启动问题或用户明确要求时才加 `--include-startup` 查询 stdout/info 启动标记。已有 `login_pod_addr` 时可直接使用 WebShell helper；`--mode=auto` 先走 Gotty WebSocket，终端 DOM 确认可用时才允许回退 DOM：
-
-```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/java-server-diagnostics/scripts/webshell_log_check.js \
-  --url=<login_pod_addr> \
-  --app=<app_name> \
-  --lines=120 \
-  --since-minutes=60 \
-  --version=<version_tag>
-```
-
-6. 已有 error/trace 线索后使用取证模式，支持当前日志、未压缩轮转和 `.gz` 轮转，并按时间戳聚合完整多行事件：
-
-```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/java-server-diagnostics/scripts/container_log_check.js \
-  --app=<app_name> \
-  --env=prod \
-  --ip=<pod_ip> \
-  --log-mode=forensics \
-  --trace-id=<trace_id> \
-  --from="2026-07-13 11:39:00" \
-  --to="2026-07-13 11:42:00" \
-  --files=error.log,info.log \
-  --context=2 \
-  --include-rotated \
-  --max-lines=500 \
-  --max-bytes=1048576
-```
-
-7. `trace-id/rule-id/keyword` 同时提供时按 AND 匹配同一日志事件；`context` 表示前后事件数，范围 0～20。日志文件只允许 `error.log/info.log/warn.log/debug.log/stdout.log`。
-8. 优先读取输出中的 `targetSource/loginUrlSource/access/accessAttempts/errorCode/warningCode`，再看 `summary` 或 `forensics`。`warningCode=RESULT_TRUNCATED` 时缩小时间窗或提高受控上限后重查。自动登录失败时使用返回的乐效 `manualUrl` 让用户在浏览器打开；不要贴完整日志，不要执行修改、重启、删除或写文件命令。
+容器 Pod 日志的快检/取证（`container_log_check.js`、`webshell_log_check.js`）和日志平台 `log.oa.fenqile.com` 的检索统一由 `query-app-logs` 承接：
+目标是容器、日志已轮转或超出服务器保存期、需要跨机器按 traceId 汇总时，按该 skill 的路由规则执行，本 skill 不再重复其步骤。
+两个容器脚本仍位于 `/home/joney/projects/ai/agent-tools/skills/lexin/java-server-diagnostics/scripts/`，路径不变。
 
 ### 3. 基于 error.log 递进定位
 
@@ -148,6 +105,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/java-server-diagnostics/sc
 - 需要还原异常前后上下文：再查 `info.log` 或 `debug.log` 的同一 traceId、请求 ID、用户 ID、任务 ID。
 - `error.log` 指向启动失败、配置加载、Dubbo 注册或 Spring 初始化：再查版本本地 `stdout.log` 或共享 `stdout.log`。
 - `error.log` 指向 MQ、Redis、DB、RPC 等依赖异常：优先用日志关键字定位具体依赖、消费组、topic、接口或数据源，再决定是否调用对应 MCP。
+- 服务器上文件已轮转、`.gz` 也不在，或需要更早的历史/跨机器按 traceId 汇总：改用 `query-app-logs` 的日志平台路径，不要在服务器上继续翻找。
 
 不要因为有一两条历史 `ERROR` 就直接做 JVM、线程、GC 或服务器资源排查；先判断错误时间、频率和是否仍在持续。
 
