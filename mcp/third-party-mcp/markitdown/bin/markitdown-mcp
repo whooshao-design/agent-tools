@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PACKAGE="${MARKITDOWN_MCP_PACKAGE:-markitdown-mcp==0.0.1a4}"
+# 0.0.1a4 的 --http 不可用：它构造了 StreamableHTTPSessionManager 却没进入
+# run() 生命周期，每个请求都以 "Task group is not initialized" 500 失败。
+PACKAGE="${MARKITDOWN_MCP_PACKAGE:-markitdown-mcp==0.0.1a7}"
 CACHE_ROOT="${AGENT_TOOLS_MCP_CACHE:-/tmp/agent-tools-mcp-cache}"
 VENV="${MARKITDOWN_MCP_VENV:-$CACHE_ROOT/markitdown-mcp-venv}"
 PYTHON_BIN="${PYTHON:-python3}"
