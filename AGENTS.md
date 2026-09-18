@@ -130,12 +130,20 @@ metadata:
 两端注册分别在 `~/.claude.json`（`claude mcp add --scope user`）和 `~/.codex/config.toml`，
 PYTHONPATH 都指向本仓库内对应 MCP 目录。新增 MCP 服务器后需要在两处各加一条注册。
 
-模块调用形式：`python3 -m devtools_mcp.<xxx>_server`、`python3 -m bastion_mcp.server`。
+模块调用形式：`python3 -m devtools_mcp.aggregate_server`、`python3 -m bastion_mcp.server`。
+`devtools_mcp` 的 16 个 server 合并注册为一个 `devtools` MCP：每个 CLI 会话原本要起 16 个 Python 进程，
+而 MCP SDK 每个解释器就占约 45MB（裸解释器约 9MB），合并后单进程约 74MB。工具名不变，只是前缀变成
+`mcp__devtools__<tool>`。新增 `<xxx>_server.py` 后要把模块名加进 `aggregate_server.SERVER_MODULES`，
+注册条目不用动；`env` 取各 server 所需变量的并集。单独调试某个 server 仍可直接 `python3 -m devtools_mcp.<xxx>_server`。
 第三方 MCP 通过 `mcp/third-party-mcp/<name>/bin/<name>` wrapper 或官方 remote 配置注册，不在仓库提交依赖缓存。
 
 ## MCP 实现约定
 
-- `devtools_mcp` 每个 `<xxx>_server.py` 都是独立的 FastMCP stdio 进程（`mcp = FastMCP(...)`、`@mcp.tool()`、`main()` 里 `mcp.run(transport="stdio")`）。
+- `devtools_mcp` 每个 `<xxx>_server.py` 都自带 FastMCP 实例（`mcp = FastMCP(...)`、`@mcp.tool()`、`main()` 里 `mcp.run(transport="stdio")`），
+  运行时由 `aggregate_server.py` 导入并把各自的工具合并进一个 FastMCP 实例，同名工具会直接报错。
+  FastMCP 会在事件循环里直接调用同步工具，合并后这会让同一会话的工具调用互相阻塞，所以 `aggregate_server` 把同步工具
+  包进 `anyio.to_thread.run_sync`；工具实现因此要能在 worker 线程里并发执行，共享连接等状态自己加锁
+  （`java_app_diag` 的 `BastionDiagSession` 用 `asyncio.Lock` 串行化那条 SSH 连接）。
   多数工具不实现业务逻辑，而是用 `common.skill_path("<skill>", "scripts", "<file>")` 定位 skill 脚本，经 `run_command` 调用、
   `command_result_text` 截断后返回；改 skill 脚本的命令行参数时必须同步对应 server 与 `mcp/devtools-mcp/tests`。
 - `skill_path()` 按 `skills/<分类>/<skill>` 搜索，`DEVTOOLS_SKILLS_DIR` 可覆盖为扁平目录，都找不到时回退 `~/.codex/skills/<skill>`。
@@ -143,7 +151,8 @@ PYTHONPATH 都指向本仓库内对应 MCP 目录。新增 MCP 服务器后需�
   `internal_http_request()` 只放行 `INTERNAL_HTTP_ALLOWED_HOSTS`（默认公司内网域名）且仅支持 GET/POST；
   `use_browser_session=True` 时请求交给 `get-browser-session/scripts/browser_session.js` 在浏览器上下文内发出，Cookie 不经过 Python。
 - `java_app_diag` 复用 `bastion-mcp` 的 `SSHManager`：`java_app_diag_core.py` 找不到包时把 `BASTION_MCP_ROOT`（默认同级 `mcp/bastion-mcp`）
-  插入 `sys.path`，堡垒机配置默认 `mcp/bastion-mcp/config.json`。每个 MCP 进程各自持有 SSH 连接，互不共享。
+  插入 `sys.path`，堡垒机配置默认 `mcp/bastion-mcp/config.json`。`bastion`、`bastion_dba`、`devtools`（`java_app_diag` 在其中）
+  仍是各自独立的进程，SSH 连接互不共享；同一进程内的 CLI 会话之间也不共享，因为每个会话各起一套 MCP 进程。
 - 目前只有 lexiao、healthy、dubbo_test、browser_session 使用 `ToolAnnotations`：写入工具标
   `readOnlyHint=False, destructiveHint=True, idempotentHint=False`，只读工具标 `readOnlyHint=True`；annotation 只是提示，参数校验仍由底层脚本承担。
 - `bastion-mcp` 自带 `pyproject.toml`（依赖 `mcp`、`paramiko`）；`--transport http --port <n>` 可起仅本机监听的 streamable-http 调试服务；

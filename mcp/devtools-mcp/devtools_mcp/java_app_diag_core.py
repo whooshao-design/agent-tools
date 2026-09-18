@@ -106,6 +106,7 @@ class BastionDiagSession:
         self.ssh_mgr: SSHManager | None = None
         self.active_profile = ""
         self.active_bastion_host = ""
+        self._lock = asyncio.Lock()
 
     def _read_config(self) -> dict:
         config_path = os.environ.get("BASTION_CONFIG", str(DEFAULT_BASTION_CONFIG))
@@ -173,6 +174,19 @@ class BastionDiagSession:
         env: str = "",
         profile: str = "",
     ) -> str:
+        async with self._lock:
+            return await self._connect(
+                password=password, otp=otp, keepalive_ip=keepalive_ip, env=env, profile=profile
+            )
+
+    async def _connect(
+        self,
+        password: str = "",
+        otp: str = "",
+        keepalive_ip: str = "",
+        env: str = "",
+        profile: str = "",
+    ) -> str:
         requested_profile = resolve_bastion_profile(env=env, profile=profile)
         try:
             config, loaded_profile = self._load_config(requested_profile)
@@ -208,11 +222,17 @@ class BastionDiagSession:
         return f"{state}（profile={profile}）"
 
     async def execute(self, ip: str, command: str, timeout: int, env: str = "", profile: str = "") -> str:
+        # One SSH connection per process, so concurrent tool calls must not
+        # interleave on it -- their output would be read back by each other.
+        async with self._lock:
+            return await self._execute(ip, command, timeout, env=env, profile=profile)
+
+    async def _execute(self, ip: str, command: str, timeout: int, env: str = "", profile: str = "") -> str:
         desired_profile = self._desired_profile(env=env, profile=profile)
         profile_changed = desired_profile and desired_profile != self.active_profile
         if not self.ssh_mgr or not self.ssh_mgr.is_connected() or profile_changed:
             try:
-                connect_result = await self.connect(env=env, profile=profile)
+                connect_result = await self._connect(env=env, profile=profile)
             except Exception as exc:
                 return f"错误：未连接堡垒机，自动连接失败：{exc}"
             if connect_result.startswith("错误") or not self.ssh_mgr or not self.ssh_mgr.is_connected():
