@@ -3,6 +3,14 @@ import test from "node:test";
 
 import {
   assessAuthorization,
+  assessKeyring,
+  buildHeadingLinkPlan,
+  elementsSignature,
+  encodeLinkUrl,
+  parseGdbusBoolean,
+  parseGdbusObjectPath,
+  prepareTextPlan,
+  updateTextElements,
   buildManagedBlocks,
   cellBlockTarget,
   classifyFailure,
@@ -364,4 +372,165 @@ test("upsert verifies new content before deleting old managed section", async ()
   const retry = await writeJson(mcp, "doc-token", { content, section, heading: "PackageAllInfo", mode: "upsert" });
   assert.equal(retry.status, "unchanged");
   assert.deepEqual(calls, []);
+});
+
+test("keyring preflight blocks only on a confirmed Locked collection", () => {
+  const path = parseGdbusObjectPath("(objectpath '/org/freedesktop/secrets/collection/login',)\n");
+  assert.equal(path, "/org/freedesktop/secrets/collection/login");
+  assert.equal(parseGdbusObjectPath("Error: timeout"), null);
+  assert.equal(parseGdbusBoolean("(<true>,)\n"), true);
+  assert.equal(parseGdbusBoolean("(<false>,)\n"), false);
+  assert.equal(parseGdbusBoolean(null), null);
+
+  const locked = assessKeyring({ collection: path, locked: true });
+  assert.equal(locked.failureClass, "KEYRING_LOCKED");
+  assert.match(locked.nextAction, /unlock_keyring\.py/);
+  assert.match(locked.nextAction, /不要在聊天中提供密码/);
+  assert.equal(assessKeyring({ collection: path, locked: false }).state, "unlocked");
+  assert.equal(assessKeyring({ collection: null, locked: null }).state, "unknown");
+  assert.equal(assessKeyring({ collection: "/", locked: null }).state, "unknown");
+});
+
+const DOC = "DocToken123";
+function textBlock(id, type, runs) {
+  const key = { 2: "text", 4: "heading2", 6: "heading4", 12: "bullet", 14: "code" }[type];
+  return {
+    block_id: id,
+    block_type: type,
+    [key]: {
+      elements: runs.map(([content, style = {}]) => ({
+        text_run: { content, text_element_style: { bold: false, inline_code: false, italic: false, strikethrough: false, underline: false, ...style } },
+      })),
+    },
+  };
+}
+
+test("encodeLinkUrl encodes raw URLs once and keeps encoded ones", () => {
+  const raw = `https://lexin.feishu.cn/docx/${DOC}#doxcnA`;
+  const encoded = encodeLinkUrl(raw);
+  assert.equal(encoded, encodeURIComponent(raw));
+  assert.equal(encodeLinkUrl(encoded), encoded);
+});
+
+test("prepareTextPlan validates items and encodes link urls", () => {
+  const plan = prepareTextPlan({
+    updates: [
+      { block_id: "b1", elements: [{ text_run: { content: "x", text_element_style: { link: { url: "https://a.b/c#d" } } } }], text: "extra" },
+    ],
+  });
+  assert.deepEqual(Object.keys(plan[0]), ["block_id", "elements"]);
+  assert.equal(plan[0].elements[0].text_run.text_element_style.link.url, encodeURIComponent("https://a.b/c#d"));
+  assert.throws(() => prepareTextPlan([]), (error) => error.code === "INVALID_PLAN");
+  assert.throws(
+    () => prepareTextPlan([{ block_id: "b", elements: [{}] }, { block_id: "b", elements: [{}] }]),
+    (error) => error.code === "INVALID_PLAN",
+  );
+  assert.throws(() => prepareTextPlan([{ block_id: "b", elements: [] }]), (error) => error.code === "INVALID_PLAN");
+});
+
+test("elementsSignature merges same-style runs and compares decoded links", () => {
+  const url = "https://lexin.feishu.cn/docx/x#y";
+  const a = [
+    { text_run: { content: "见", text_element_style: {} } },
+    { text_run: { content: "下文", text_element_style: { bold: false } } },
+    { text_run: { content: "第 3 章", text_element_style: { link: { url: encodeURIComponent(url) } } } },
+  ];
+  const b = [
+    { text_run: { content: "见下文" } },
+    { text_run: { content: "第 3 章", text_element_style: { link: { url } } } },
+  ];
+  assert.deepEqual(elementsSignature(a), elementsSignature(b));
+  assert.equal(elementsSignature(a)[1].style.link, url);
+  const c = [{ text_run: { content: "见下文第 3 章", text_element_style: {} } }];
+  assert.notDeepEqual(elementsSignature(a), elementsSignature(c));
+});
+
+test("buildHeadingLinkPlan splits runs, keeps style, and skips headings, code, links and inline code", () => {
+  const blocks = [
+    textBlock("h3", 4, [["3. 查询方法"]]),
+    textBlock("h4", 6, [["3.1 实例"]]),
+    textBlock("p1", 2, [["详见第 3 章和 3.1 实例。", { bold: true }]]),
+    textBlock("p2", 2, [["第 3 章", { inline_code: true }], ["已链接", { link: { url: "x" } }]]),
+    textBlock("p3", 12, [["无关文本"]]),
+    textBlock("c1", 14, [["第 3 章"]]),
+  ];
+  const { plan, linkCount, targets } = buildHeadingLinkPlan(blocks, DOC, { "第 3 章": "3. 查询方法", "3.1 实例": "h4" });
+  assert.deepEqual(targets, { "第 3 章": "h3", "3.1 实例": "h4" });
+  assert.equal(linkCount, 2);
+  assert.deepEqual(plan.map((item) => item.block_id), ["p1"]);
+  const runs = plan[0].elements.map((element) => element.text_run);
+  assert.deepEqual(runs.map((run) => run.content), ["详见", "第 3 章", "和 ", "3.1 实例", "。"]);
+  assert.ok(runs.every((run) => run.text_element_style.bold === true), "原 run 的加粗要沿用");
+  assert.equal(runs[1].text_element_style.link.url, encodeURIComponent(`https://lexin.feishu.cn/docx/${DOC}#h3`));
+  assert.equal(runs[0].text_element_style.link, undefined);
+
+  // Rerunning on the linked output is a no-op.
+  const after = blocks.map((block) => (block.block_id === "p1" ? { ...block, text: { elements: plan[0].elements } } : block));
+  assert.equal(buildHeadingLinkPlan(after, DOC, { "第 3 章": "3. 查询方法" }).plan.length, 0);
+
+  assert.throws(() => buildHeadingLinkPlan(blocks, DOC, { x: "不存在" }), (error) => error.code === "HEADING_NOT_FOUND");
+  const dup = [...blocks, textBlock("h3b", 4, [["3. 查询方法"]])];
+  assert.throws(() => buildHeadingLinkPlan(dup, DOC, { x: "3. 查询方法" }), (error) => error.code === "AMBIGUOUS_HEADING");
+});
+
+test("updateTextElements batches, skips unchanged blocks, and verifies readback", async () => {
+  const blocks = Array.from({ length: 45 }, (_, index) => textBlock(`b${index}`, 2, [[`old ${index}`]]));
+  blocks.push(textBlock("same", 2, [["keep"]]));
+  const calls = [];
+  const mcp = {
+    async call(name, args) {
+      if (name === "docx.v1.documentBlock.list") return { items: structuredClone(blocks) };
+      if (name === "docx.v1.documentBlock.batchUpdate") {
+        calls.push({ size: args.data.requests.length, token: args.params.client_token });
+        for (const request of args.data.requests) {
+          blocks.find((block) => block.block_id === request.block_id).text.elements = request.update_text_elements.elements;
+        }
+        return { document_revision_id: 7 };
+      }
+      throw new Error(`unexpected tool: ${name}`);
+    },
+  };
+  const plan = prepareTextPlan([
+    ...Array.from({ length: 45 }, (_, index) => ({
+      block_id: `b${index}`,
+      elements: [{ text_run: { content: `new ${index}`, text_element_style: { link: { url: "https://x.y/z" } } } }],
+    })),
+    { block_id: "same", elements: [{ text_run: { content: "keep" } }] },
+  ]);
+
+  const dry = await updateTextElements(mcp, DOC, plan, { dryRun: true });
+  assert.equal(dry.status, "dry_run");
+  assert.equal(dry.toWrite, 45);
+  assert.equal(dry.preview[0].before, "old 0");
+  assert.deepEqual(dry.preview[0].links, ["https://x.y/z"]);
+  assert.equal(calls.length, 0);
+
+  const result = await updateTextElements(mcp, DOC, plan);
+  assert.equal(result.status, "updated");
+  assert.equal(result.blocksWritten, 45);
+  assert.deepEqual(calls.map((call) => call.size), [40, 5]);
+  assert.notEqual(calls[0].token, calls[1].token);
+
+  calls.length = 0;
+  assert.equal((await updateTextElements(mcp, DOC, plan)).status, "unchanged");
+  assert.equal(calls.length, 0);
+
+  await assert.rejects(
+    () => updateTextElements(mcp, DOC, prepareTextPlan([{ block_id: "missing", elements: [{ text_run: { content: "x" } }] }])),
+    (error) => error.code === "BLOCK_NOT_FOUND",
+  );
+});
+
+test("updateTextElements reports VERIFY_FAILED when readback differs", async () => {
+  const blocks = [textBlock("b1", 2, [["old"]])];
+  const mcp = {
+    async call(name) {
+      if (name === "docx.v1.documentBlock.list") return { items: structuredClone(blocks) };
+      return { document_revision_id: 1 }; // write silently ignored
+    },
+  };
+  await assert.rejects(
+    () => updateTextElements(mcp, DOC, prepareTextPlan([{ block_id: "b1", elements: [{ text_run: { content: "new" } }] }])),
+    (error) => error.code === "VERIFY_FAILED" && error.details.mismatches[0].block_id === "b1",
+  );
 });

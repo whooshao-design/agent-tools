@@ -2,7 +2,7 @@
 
 import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -29,6 +29,7 @@ const MAX_BATCH_UPDATES = 40;
 const BLOCK_TYPE_TEXT = 2;
 const BLOCK_TYPE_TABLE = 31;
 const BLOCK_TYPE_TABLE_CELL = 32;
+const WHOAMI_TIMEOUT_MS = 60_000;
 
 export const OPERATION_SCOPES = Object.freeze({
   read: ["docx:document:readonly", "offline_access"],
@@ -480,9 +481,103 @@ export function cellBlockTarget(cellBlockCounts, existingRowSize) {
   return [...tally.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0][0];
 }
 
+// gdbus prints `(objectpath '/org/.../collection/login',)` for ReadAlias and
+// `(<true>,)` for Properties.Get; anything else means "could not tell".
+export function parseGdbusObjectPath(output) {
+  const match = String(output ?? "").match(/objectpath\s+'([^']*)'/);
+  return match ? match[1] : null;
+}
+
+export function parseGdbusBoolean(output) {
+  const match = String(output ?? "").match(/<(true|false)>/);
+  return match ? match[1] === "true" : null;
+}
+
+// lark-mcp reads its AES key through keytar -> gnome-keyring. A Locked default
+// collection makes that call hang for minutes with no output, so only a
+// confirmed Locked=true blocks; an unreachable Secret Service stays "unknown"
+// and lets lark-mcp report its own error.
+export function assessKeyring({ collection, locked }) {
+  if (!collection || collection === "/" || locked === null || locked === undefined) {
+    return { state: "unknown", collection: collection ?? null };
+  }
+  if (!locked) return { state: "unlocked", collection };
+  return {
+    state: "locked",
+    collection,
+    failureClass: "KEYRING_LOCKED",
+    missingScopes: [],
+    nextAction:
+      "gnome-keyring 默认钥匙串处于 Locked 状态，lark-mcp 读取密钥会卡住。请用户在自己的终端运行 " +
+      `/usr/bin/python3 ${join(SCRIPT_DIR, "unlock_keyring.py")} 输入密码解锁（不要在聊天中提供密码），` +
+      "解锁后重新运行本命令；详见 references/permission-matrix.md 的钥匙串排障",
+  };
+}
+
+function gdbusCall(args) {
+  const result = spawnSync("gdbus", ["call", "--session", "--dest", "org.freedesktop.secrets", ...args], {
+    encoding: "utf8",
+    env: process.env,
+    timeout: 5_000,
+  });
+  return result.status === 0 ? result.stdout : null;
+}
+
+export function checkKeyring() {
+  if (process.env.FEISHU_DOC_SKIP_KEYRING_CHECK === "1") return { state: "skipped", collection: null };
+  const collection = parseGdbusObjectPath(
+    gdbusCall([
+      "--object-path",
+      "/org/freedesktop/secrets",
+      "--method",
+      "org.freedesktop.Secret.Service.ReadAlias",
+      "default",
+    ]),
+  );
+  if (!collection || collection === "/") return assessKeyring({ collection, locked: null });
+  const locked = parseGdbusBoolean(
+    gdbusCall([
+      "--object-path",
+      collection,
+      "--method",
+      "org.freedesktop.DBus.Properties.Get",
+      "org.freedesktop.Secret.Collection",
+      "Locked",
+    ]),
+  );
+  return assessKeyring({ collection, locked });
+}
+
 function runWhoami() {
-  const result = spawnSync(LARK_WRAPPER, ["whoami"], { encoding: "utf8", env: process.env });
+  const keyring = checkKeyring();
+  if (keyring.state === "locked") {
+    const error = new Error(`钥匙串 ${keyring.collection} 已锁定，未启动 lark-mcp`);
+    error.code = "KEYRING_LOCKED";
+    const { failureClass, missingScopes, nextAction } = keyring;
+    error.details = { failureClass, missingScopes, nextAction };
+    throw error;
+  }
+  const result = spawnSync(LARK_WRAPPER, ["whoami"], { encoding: "utf8", env: process.env, timeout: WHOAMI_TIMEOUT_MS });
   const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+  if (result.error?.code === "ETIMEDOUT") {
+    const error = new Error(`lark-mcp whoami ${WHOAMI_TIMEOUT_MS / 1000}s 内无响应`);
+    error.code = "WHOAMI_TIMEOUT";
+    error.details = {
+      failureClass: "WHOAMI_TIMEOUT",
+      missingScopes: [],
+      nextAction:
+        "多为 OS 钥匙串无响应：检查 gnome-keyring 是否锁定、是否有陈旧的 gcr-prompter 进程；" +
+        "详见 references/permission-matrix.md 的钥匙串排障",
+    };
+    throw error;
+  }
+  if (/keytar timeout/i.test(output)) {
+    const error = new Error("lark-mcp 读取 OS 钥匙串超时");
+    error.code = "KEYRING_LOCKED";
+    const { failureClass, missingScopes, nextAction } = assessKeyring({ collection: "default", locked: true });
+    error.details = { failureClass, missingScopes, nextAction };
+    throw error;
+  }
   if (result.error) throw result.error;
   if (result.status !== 0) fail(output.trim() || "lark-mcp whoami 失败", "WHOAMI_FAILED");
   return parseWhoamiOutput(output);
@@ -888,6 +983,230 @@ export async function syncTable(mcp, documentToken, { tableId, rows, padCells = 
   };
 }
 
+// ---- 元素级文本编辑：update-text / link-plan ----
+
+const HEADING_TYPES = new Set([3, 4, 5, 6, 7, 8, 9, 10, 11]);
+// Body blocks that link-plan rewrites: text, bullet and ordered list items.
+// Headings and code blocks are never touched.
+const LINKABLE_TYPES = new Set([BLOCK_TYPE_TEXT, 12, 13]);
+const STYLE_FLAGS = ["bold", "italic", "strikethrough", "underline", "inline_code"];
+
+function textContainerKey(block) {
+  return TEXT_CONTAINER_KEYS.find((key) => Array.isArray(block?.[key]?.elements)) ?? null;
+}
+
+export function blockElements(block) {
+  const key = textContainerKey(block);
+  return key ? block[key].elements : null;
+}
+
+function decodeUrl(url) {
+  try {
+    return decodeURIComponent(url);
+  } catch {
+    return url;
+  }
+}
+
+// text_element_style.link.url must be percent-encoded as a whole; an encoded
+// value never contains ":" or "/", so a raw URL is detected and encoded once.
+export function encodeLinkUrl(url) {
+  return /[:/?#]/.test(url) ? encodeURIComponent(url) : url;
+}
+
+export function prepareTextPlan(input) {
+  const items = Array.isArray(input) ? input : input?.updates;
+  if (!Array.isArray(items) || items.length === 0) {
+    fail('计划必须是非空数组 [{block_id, elements}] 或 {"updates": [...]}', "INVALID_PLAN");
+  }
+  const seen = new Set();
+  return items.map((item, index) => {
+    if (typeof item?.block_id !== "string" || item.block_id === "") fail(`第 ${index} 项缺少 block_id`, "INVALID_PLAN");
+    if (seen.has(item.block_id)) fail(`block_id 重复: ${item.block_id}`, "INVALID_PLAN");
+    seen.add(item.block_id);
+    if (!Array.isArray(item.elements) || item.elements.length === 0) {
+      fail(`${item.block_id} 的 elements 必须是非空数组`, "INVALID_PLAN");
+    }
+    const elements = item.elements.map((element) => {
+      const url = element?.text_run?.text_element_style?.link?.url;
+      if (typeof url !== "string") return element;
+      const style = { ...element.text_run.text_element_style, link: { ...element.text_run.text_element_style.link, url: encodeLinkUrl(url) } };
+      return { ...element, text_run: { ...element.text_run, text_element_style: style } };
+    });
+    return { block_id: item.block_id, elements };
+  });
+}
+
+// Comparable projection of elements: adjacent runs with the same style are
+// merged (Feishu may merge them on write), missing flags count as false and
+// link URLs are compared decoded.
+export function elementsSignature(elements = []) {
+  const runs = [];
+  for (const element of elements) {
+    const run = element?.text_run;
+    const entry = run
+      ? {
+          content: run.content ?? "",
+          ...Object.fromEntries(STYLE_FLAGS.map((flag) => [flag, Boolean(run.text_element_style?.[flag])])),
+          link: run.text_element_style?.link?.url ? decodeUrl(run.text_element_style.link.url) : null,
+        }
+      : { content: "", other: Object.keys(element ?? {}).sort().join(",") };
+    const last = runs[runs.length - 1];
+    const { content, ...style } = entry;
+    if (last && JSON.stringify(last.style) === JSON.stringify(style) && !style.other) last.content += content;
+    else runs.push({ content, style });
+  }
+  return runs.filter((run) => run.content !== "" || run.style.other);
+}
+
+export function diffTextPlan(blocks, plan) {
+  const blockMap = indexBlocks(blocks);
+  const mismatches = [];
+  for (const item of plan) {
+    const block = blockMap.get(item.block_id);
+    const actual = block ? elementsSignature(blockElements(block) ?? []) : null;
+    const expected = elementsSignature(item.elements);
+    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+      mismatches.push({ block_id: item.block_id, found: Boolean(block), expected, actual });
+    }
+  }
+  return mismatches;
+}
+
+export async function updateTextElements(mcp, documentToken, plan, { dryRun = false } = {}) {
+  const blocks = await listAllBlocks(mcp, documentToken);
+  const blockMap = indexBlocks(blocks);
+  for (const item of plan) {
+    const block = blockMap.get(item.block_id);
+    if (!block) fail(`找不到块 ${item.block_id}`, "BLOCK_NOT_FOUND");
+    if (!textContainerKey(block)) fail(`块 ${item.block_id}（block_type=${block.block_type}）没有文本元素`, "BLOCK_NOT_TEXT");
+  }
+  const pendingIds = new Set(diffTextPlan(blocks, plan).map((item) => item.block_id));
+  const pending = plan.filter((item) => pendingIds.has(item.block_id));
+  const preview = pending.map((item) => ({
+    block_id: item.block_id,
+    block_type: blockMap.get(item.block_id).block_type,
+    before: blockText(blockMap.get(item.block_id)).slice(0, 120),
+    after: elementsText(item.elements).slice(0, 120),
+    links: item.elements
+      .map((element) => element?.text_run?.text_element_style?.link?.url)
+      .filter(Boolean)
+      .map(decodeUrl),
+  }));
+  if (dryRun) {
+    return { status: "dry_run", verified: false, planned: plan.length, toWrite: pending.length, preview };
+  }
+
+  let revision = null;
+  for (let start = 0; start < pending.length; start += MAX_BATCH_UPDATES) {
+    const chunk = pending
+      .slice(start, start + MAX_BATCH_UPDATES)
+      .map((item) => ({ block_id: item.block_id, update_text_elements: { elements: item.elements } }));
+    const result = await mcp.call("docx.v1.documentBlock.batchUpdate", {
+      path: { document_id: documentToken },
+      params: {
+        document_revision_id: -1,
+        client_token: deterministicClientToken(documentToken, "update-text", sha256(JSON.stringify(chunk))),
+      },
+      data: { requests: chunk },
+      useUAT: true,
+    });
+    revision = revisionOf(result) ?? revision;
+  }
+
+  const mismatches = diffTextPlan(await listAllBlocks(mcp, documentToken), plan);
+  if (mismatches.length > 0) {
+    const error = new Error(`回读校验失败：${mismatches.length} 个块与计划不一致`);
+    error.code = "VERIFY_FAILED";
+    error.details = {
+      failureClass: "VERIFY_FAILED",
+      missingScopes: [],
+      nextAction: "检查 mismatches 后修正计划重试",
+      mismatches: mismatches.slice(0, 10),
+    };
+    throw error;
+  }
+  return {
+    status: pending.length === 0 ? "unchanged" : "updated",
+    verified: true,
+    planned: plan.length,
+    blocksWritten: pending.length,
+    revision,
+  };
+}
+
+// Splits every plain run on label matches and links the matched substring,
+// keeping the run's original style. Runs that already carry a link or are
+// inline code are left alone, which also makes reruns idempotent.
+export function linkRuns(elements, pattern, urlFor) {
+  const out = [];
+  let count = 0;
+  for (const element of elements) {
+    const run = element?.text_run;
+    const style = run?.text_element_style ?? {};
+    if (!run || style.link || style.inline_code) {
+      out.push(element);
+      continue;
+    }
+    const content = run.content ?? "";
+    let position = 0;
+    const piece = (text, extra = {}) => ({
+      ...element,
+      text_run: { ...run, content: text, text_element_style: { ...style, ...extra } },
+    });
+    for (const match of content.matchAll(pattern)) {
+      if (match.index > position) out.push(piece(content.slice(position, match.index)));
+      out.push(piece(match[0], { link: { url: encodeLinkUrl(urlFor(match[0])) } }));
+      position = match.index + match[0].length;
+      count += 1;
+    }
+    if (position === 0) out.push(element);
+    else if (position < content.length) out.push(piece(content.slice(position)));
+  }
+  return { elements: out, count };
+}
+
+export function headingLinkUrl(documentToken, blockId) {
+  return `https://lexin.feishu.cn/docx/${documentToken}#${blockId}`;
+}
+
+// labels: {"正文里出现的文字": "标题文本或标题 block_id"}
+export function buildHeadingLinkPlan(blocks, documentToken, labels) {
+  const entries = Object.entries(labels ?? {});
+  if (entries.length === 0) fail("labels 必须是非空对象 {标签: 标题文本或 block_id}", "INVALID_PLAN");
+  const blockMap = indexBlocks(blocks);
+  const headings = blocks.filter((block) => HEADING_TYPES.has(block.block_type));
+  const targets = new Map();
+  for (const [label, target] of entries) {
+    if (typeof label !== "string" || label === "" || typeof target !== "string" || target === "") {
+      fail(`labels 的键和值都必须是非空字符串: ${label}`, "INVALID_PLAN");
+    }
+    const direct = blockMap.get(target);
+    let matched = direct && HEADING_TYPES.has(direct.block_type) ? [direct] : [];
+    if (matched.length === 0) matched = headings.filter((block) => blockText(block).trim() === target.trim());
+    if (matched.length === 0) fail(`找不到标题: ${target}`, "HEADING_NOT_FOUND");
+    if (matched.length > 1) fail(`标题文本不唯一: ${target}，请改用 block_id`, "AMBIGUOUS_HEADING");
+    targets.set(label, matched[0].block_id);
+  }
+  const escaped = [...targets.keys()]
+    .sort((a, b) => b.length - a.length)
+    .map((label) => label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const pattern = new RegExp(escaped.join("|"), "g");
+  const urlFor = (label) => headingLinkUrl(documentToken, targets.get(label));
+  const plan = [];
+  let linkCount = 0;
+  for (const block of blocks) {
+    if (!LINKABLE_TYPES.has(block.block_type)) continue;
+    const elements = blockElements(block);
+    if (!elements) continue;
+    const linked = linkRuns(elements, pattern, urlFor);
+    if (linked.count === 0) continue;
+    linkCount += linked.count;
+    plan.push({ block_id: block.block_id, elements: linked.elements, text: blockText(block).slice(0, 80) });
+  }
+  return { plan, linkCount, targets: Object.fromEntries(targets) };
+}
+
 function parseArgs(argv) {
   const [command, ...rest] = argv;
   const options = {};
@@ -937,7 +1256,9 @@ function usage() {
       "auth-check --operation=read|write-json|write-blocks|convert|write-markdown [--target=<url-or-token>]",
       "authorize --operation=<operation> [--target=<url-or-token>]",
       "read --target=<url-or-token> [--summary]",
-      "list-blocks --target=<url-or-token> [--type=<block_type>] [--full]",
+      "list-blocks --target=<url-or-token> [--type=<block_type>] [--full] [--out=<path>]",
+      "update-text --target=<url-or-token> --file=<plan.json>|--stdin [--dry-run]",
+      "link-plan --target=<url-or-token> --labels=<labels.json> --out=<plan.json>",
       "table-read --target=<url-or-token> [--table=<block_id>|--table-index=<n>]",
       "table-sync --target=<url-or-token> --table=<block_id>|--table-index=<n> --file=<path>|--stdin [--pad-cells=auto|off] [--dry-run]",
       "inspect-sections --target=<url-or-token> [--section=<id>]",
@@ -946,6 +1267,9 @@ function usage() {
     ],
     notes: [
       "table-sync 的输入是 {\"rows\": [[...]]} 或裸二维数组，含表头行；行数只增不减。",
+      "list-blocks --full 返回原始块（含 text_element_style）；--out 把原始块写入文件，只在 stdout 打印摘要。",
+      "update-text 的计划是 [{block_id, elements}]，整块替换 elements；未变化的块跳过，每批 40 条，写后逐块回读校验。",
+      "link-plan 的 labels 是 {正文文字: 标题文本或 block_id}，只生成计划，写入仍走 update-text。",
       "call 是逃生口，直接透传参数给已加载的 lark MCP 工具；参数 JSON 需自带 path/params/data。",
     ],
   };
@@ -1042,12 +1366,12 @@ async function main() {
 
   if (!target) fail(`${command} 必须指定 --target`);
   requireDocumentTarget(target, command);
-  const READ_COMMANDS = new Set(["read", "inspect-sections", "list-blocks", "table-read", "outline"]);
+  const READ_COMMANDS = new Set(["read", "inspect-sections", "list-blocks", "table-read", "outline", "link-plan"]);
   const operation = READ_COMMANDS.has(command)
     ? "read"
     : command === "write-json"
       ? "write-json"
-      : command === "table-sync"
+      : command === "table-sync" || command === "update-text"
         ? "write-blocks"
         : command === "call"
           ? options.operation === "read"
@@ -1120,6 +1444,17 @@ async function main() {
         : blocks;
       const tally = {};
       for (const block of blocks) tally[block.block_type] = (tally[block.block_type] ?? 0) + 1;
+      if (options.out) {
+        writeFileSync(options.out, `${JSON.stringify(filtered, null, 2)}\n`);
+        return printJson({
+          status: "ok",
+          ...resolved,
+          blockCount: blocks.length,
+          blockTypeCounts: tally,
+          out: options.out,
+          written: filtered.length,
+        });
+      }
       return printJson({
         status: "ok",
         ...resolved,
@@ -1160,6 +1495,29 @@ async function main() {
         dryRun: Boolean(options["dry-run"]),
       });
       return printJson({ status: result.status, ...resolved, blockId: tableId, ...result });
+    }
+    if (command === "update-text") {
+      const plan = prepareTextPlan(JSON.parse(await inputJson(options)));
+      const result = await updateTextElements(mcp, resolved.documentToken, plan, {
+        dryRun: Boolean(options["dry-run"]),
+      });
+      return printJson({ ...resolved, ...result });
+    }
+    if (command === "link-plan") {
+      if (!options.labels || !options.out) fail("link-plan 必须指定 --labels=<labels.json> 和 --out=<plan.json>");
+      const labels = JSON.parse(readFileSync(options.labels, "utf8"));
+      const blocks = await listAllBlocks(mcp, resolved.documentToken);
+      const result = buildHeadingLinkPlan(blocks, resolved.documentToken, labels);
+      writeFileSync(options.out, `${JSON.stringify(result.plan, null, 2)}\n`);
+      return printJson({
+        status: "ok",
+        ...resolved,
+        out: options.out,
+        blocks: result.plan.length,
+        linkCount: result.linkCount,
+        targets: result.targets,
+        preview: result.plan.slice(0, 10).map((item) => item.text),
+      });
     }
     if (command === "call") {
       if (!options.api) fail("call 必须指定 --api=<lark.api.name>");

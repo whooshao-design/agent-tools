@@ -2,7 +2,7 @@
 name: manage-feishu-doc
 description: 通过飞书官方 Lark MCP 读取、追加、替换并校验飞书云文档内容。Use when 用户提供 lexin.feishu.cn/docx 或 lexin.feishu.cn/wiki 链接，要求读取飞书文档、把 JSON/文本写入已有文档、更新已有表格或段落、按数据源同步表格数据、更新托管章节、检查文档或 OAuth 权限，或在缺权限时快速申请准确 scope。
 metadata:
-  version: 1.1.0
+  version: 1.2.0
 ---
 
 # Manage Feishu Doc
@@ -30,6 +30,8 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/manage-feishu-doc/scripts/
 node /home/joney/projects/ai/agent-tools/skills/lexin/manage-feishu-doc/scripts/feishu_doc_mcp.mjs \
   auth-check --operation=write-json --target='<飞书链接>'
 ```
+
+`auth-check` 及所有会启动 lark-mcp 的命令会先经 D-Bus 预检 gnome-keyring：默认钥匙串 Locked 时几秒内返回 `KEYRING_LOCKED`，不再无输出挂住。此时让用户**在自己的终端**运行 `nextAction` 里的 `unlock_keyring.py`，绝不在聊天中索要密码；解锁后先 `authorize` 再复检。排障步骤见 `references/permission-matrix.md`。
 
 权限齐全时直接继续。缺权限时一次性向用户说明 `missingScopes`、`failureClass` 和 `nextAction`，不要先用多个 API 试错。完整映射见 `references/permission-matrix.md`。
 
@@ -79,6 +81,18 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/manage-feishu-doc/scripts/
   --file=/absolute/path/args.json
 ```
 
+元素级编辑（加链接、改行内样式、重写单元格）走「导出原始块 → 生成计划 → dry-run → 写入」：
+
+```bash
+S=/home/joney/projects/ai/agent-tools/skills/lexin/manage-feishu-doc/scripts/feishu_doc_mcp.mjs
+node $S list-blocks --target='<飞书链接>' --full --out=/abs/raw.json      # 原始块，含 text_element_style
+node $S link-plan --target='<飞书链接>' --labels=/abs/labels.json --out=/abs/plan.json   # 可选：正文文字→标题跳转链接
+node $S update-text --target='<飞书链接>' --file=/abs/plan.json --dry-run
+node $S update-text --target='<飞书链接>' --file=/abs/plan.json
+```
+
+`update-text` 的计划是 `[{block_id, elements}]`，整块替换 elements：自行拼 elements 时必须沿用原 run 的 `text_element_style`。它跳过已一致的块，每批 40 条、确定性 client_token，写后逐块回读比对（内容、样式标志、解码后的链接），不一致报 `VERIFY_FAILED`。`labels.json` 形如 `{"第 3 章": "3. 国内流水查询"}`（值为标题文本或标题 block_id）。页内链接格式、样式保留规则与导入注意事项见 `references/docx-block-operations.md`。源文件更新后优先用 API 增量修改，重新导入 Markdown 会丢失在飞书上做的所有增量编辑。
+
 块级操作细节（表格行插入语义、单元格块结构、批量写入上限）见 `references/docx-block-operations.md`。
 
 把 JSON 写入已有文档的托管章节：
@@ -95,6 +109,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/manage-feishu-doc/scripts/
 
 ## 权限和错误处理
 
+- `KEYRING_LOCKED` / `WHOAMI_TIMEOUT`：OS 钥匙串锁定或无响应，与 OAuth 无关；按 `permission-matrix.md` 的钥匙串排障处理，不要反复重试 `auth-check`。
 - `AUTH_REQUIRED` / `TOKEN_EXPIRED`：运行 `authorize`，授权后复检一次。
 - `OAUTH_SCOPE_MISSING`：从 `permission_violations[].subject` 提取准确 scope，只申请缺失项。
 - `APP_PERMISSION_NOT_PUBLISHED`：先在应用后台添加并发布权限；不要反复 OAuth。
@@ -109,5 +124,6 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/manage-feishu-doc/scripts/
 - 写操作前权限已预检，缺失权限有准确分类和一步到位的后续动作。
 - Wiki token 已解析为 `obj_type=docx` 的真实文档 token。
 - 写入具备确定性幂等标识；托管章节回读 SHA-256 与输入一致，表格写入逐格回读与输入一致。
+- 元素级改动用 `update-text` 写入并通过逐块回读校验。
 - 表格类结果用 `table-read` 结构化比对确认，没有把 rawContent 的换行切分当作校验依据。
 - 没有泄漏凭据；失败时没有把 OAuth、应用发布、文档 ACL 和工具加载问题混为一类。

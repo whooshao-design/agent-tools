@@ -122,3 +122,31 @@ params: { document_revision_id: -1, client_token, index: 0 }
 ## 样式保持
 
 `update_text_elements` 会整体替换 elements，`text_element_style` 不传就会丢失加粗、行内代码等样式。`table-sync` 只重写内容有差异的格，并沿用该块原有的 `text_element_style`。
+
+## 元素级编辑
+
+`list-blocks` 默认只返回扁平文本摘要；做元素级修改要用 `list-blocks --full --out=<file>` 导出原始块，里面才有 `text.elements[].text_run.text_element_style`。
+
+常用块类型：1 页面根、2 文本、3–11 为 H1–H9（4/5/6/7 即 H2/H3/H4/H5）、12 无序列表、13 有序列表、14 代码、31 表格、32 单元格。root 块（`block_type=1`）的 `children` 顺序就是文档顺序，可据此追踪「当前 H4」，给 H5 生成带上级编号的引用标签（如 `3.2 某小节`）。
+
+改写规则（`link-plan` 已按此实现）：
+
+- 按 text_run 拆分：保留原 run 的 `text_element_style`，只把匹配的子串拆成新 run 并加 `link`。
+- 跳过已有 `link` 或 `inline_code` 的 run，跳过标题块和代码块（14），只处理 2/12/13。这样重跑是幂等的。
+- 导入的表格每个单元格通常只有 1 个文本子块，可直接对该子块 `update_text_elements` 重写整格；表头原有的 `bold` 要沿用。
+- 手写 Markdown 行内语法转 elements 时：`` `x` `` → `inline_code: true`，`**x**` → `bold: true`，`[t](url)` → `link.url`。
+
+写入统一走 `update-text --file=<plan.json>`：先 `--dry-run` 看 `toWrite` 和 `preview`（before/after/解码后的链接），再正式写。它每批最多 40 条 `update_text_elements`、用确定性 client_token，写后回读逐块比对内容、样式标志和解码后的链接 URL。比对前会合并相邻同样式 run，因为飞书写入后可能合并它们。2026-09 实测一次 51 处改动全部回读一致，对同一计划再次 dry-run 得到 `toWrite: 0`。
+
+## 页内跳转链接
+
+- Markdown 导入飞书会丢掉 `<a id>` 锚点和 `](#...)` 页内链接。
+- 可用格式是 `https://lexin.feishu.cn/docx/<document_token>#<heading_block_id>`，block_id 形如 `doxcn...`，从 API 获取；已由用户在飞书中点击验证可跳转。
+- 飞书界面「复制链接」生成的是 `#share-<id>`，这种 id 不是 API 的 block_id，API 拿不到，不要拿它拼链接。
+- 写入时 `text_element_style.link.url` 必须整体 URL 编码（`encodeURIComponent`）。`update-text` 和 `link-plan` 会把未编码的 URL 自动编码一次，已编码的保持不变。
+
+## Markdown 导入注意事项
+
+- 重新导入 Markdown 会丢失所有在飞书上做的增量编辑（如链接）。源文件更新后优先用 API 增量修改。
+- mermaid 在飞书中只显示为代码块。
+- 路径含 `%20` 的本地图片导入后打不开；改为文字/表格，或按上文「插图」链路上传。

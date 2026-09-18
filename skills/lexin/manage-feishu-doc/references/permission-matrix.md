@@ -21,6 +21,7 @@
 
 ## 快速判定顺序
 
+0. D-Bus 预检到默认钥匙串 Locked，或 `whoami` 输出 `keytar timeout`：`KEYRING_LOCKED`；`whoami` 60 秒无响应：`WHOAMI_TIMEOUT`。两者都与 OAuth 无关，先按下文「钥匙串锁定」处理。
 1. `whoami` 没有会话：`AUTH_REQUIRED`。
 2. access token 已过期且没有 refresh token：`TOKEN_EXPIRED`。
 3. 当前 token scope 缺少矩阵中的权限：`OAUTH_SCOPE_MISSING`，一次性列出全部缺失项。
@@ -49,3 +50,24 @@
 ### MCP 工具未加载
 
 直接使用 `scripts/feishu_doc_mcp.mjs` 兜底。若需要在会话内直接调用，调整 `LARK_TOOLS` 后重启客户端；OAuth 不会让缺失工具出现。
+
+### 钥匙串锁定（KEYRING_LOCKED / WHOAMI_TIMEOUT）
+
+lark-mcp 用 keytar 从 gnome-keyring 读取本地 token 的加密密钥。默认钥匙串处于 Locked 时，`auth-check` 等命令曾在 120s、300s 内都没有任何输出。脚本现在会在启动 lark-mcp 前预检，锁定时几秒内返回 `KEYRING_LOCKED`；设 `FEISHU_DOC_SKIP_KEYRING_CHECK=1` 可跳过预检。
+
+手工判定（`Locked` 为 `<true>` 即锁定）：
+
+```bash
+gdbus call --session --dest org.freedesktop.secrets --object-path /org/freedesktop/secrets \
+  --method org.freedesktop.Secret.Service.ReadAlias default
+gdbus call --session --dest org.freedesktop.secrets --object-path '<上一步返回的 collection>' \
+  --method org.freedesktop.DBus.Properties.Get org.freedesktop.Secret.Collection Locked
+```
+
+处理步骤：
+
+1. 让用户在**自己的终端**运行 `/usr/bin/python3 /home/joney/projects/ai/agent-tools/skills/lexin/manage-feishu-doc/scripts/unlock_keyring.py`，由 getpass 读取密码（通常是 WSL 登录密码）。绝不让用户在聊天中提供密码，也不要代为输入。必须用系统 `/usr/bin/python3`，pyenv 的 python3 没有 `dbus` 模块。
+2. 解锁后本地会话往往失效：运行 `authorize`（公司 SSO 下可能自动完成并输出 `Successfully logged in`），再 `auth-check` 复检到 `ready`。
+3. 用户明确同意后，可让其运行同一脚本加 `--empty-password`，把钥匙串密码改为空，以后开机不再锁定。代价是钥匙串文件不再加密，必须先说明再执行。
+
+WSL 下的图形解锁弹窗通常不可用：systemd 用户环境没有 `DISPLAY` 时 gcr-prompter 起不来（可用 `systemctl --user import-environment DISPLAY WAYLAND_DISPLAY` 和 `dbus-update-activation-environment --systemd DISPLAY WAYLAND_DISPLAY` 补环境），即使弹出也可能无法操作；陈旧的 gcr-prompter 进程可能挂住多日，可用 `pgrep -a gcr-prompter` 检查。优先用上面的终端脚本，不要等弹窗。
