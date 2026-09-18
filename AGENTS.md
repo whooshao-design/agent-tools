@@ -152,7 +152,7 @@ PYTHONPATH 都指向本仓库内对应 MCP 目录。新增 MCP 服务器后需�
   `use_browser_session=True` 时请求交给 `get-browser-session/scripts/browser_session.js` 在浏览器上下文内发出，Cookie 不经过 Python。
 - `java_app_diag` 复用 `bastion-mcp` 的 `SSHManager`：`java_app_diag_core.py` 找不到包时把 `BASTION_MCP_ROOT`（默认同级 `mcp/bastion-mcp`）
   插入 `sys.path`，堡垒机配置默认 `mcp/bastion-mcp/config.json`。`bastion`、`bastion_dba`、`devtools`（`java_app_diag` 在其中）
-  仍是各自独立的进程，SSH 连接互不共享；同一进程内的 CLI 会话之间也不共享，因为每个会话各起一套 MCP 进程。
+  仍是各自独立的进程，SSH 连接互不共享；不同 CLI 会话之间也不共享，因为每个会话各起一套 MCP 进程。
 - 目前只有 lexiao、healthy、dubbo_test、browser_session 使用 `ToolAnnotations`：写入工具标
   `readOnlyHint=False, destructiveHint=True, idempotentHint=False`，只读工具标 `readOnlyHint=True`；annotation 只是提示，参数校验仍由底层脚本承担。
 - `bastion-mcp` 自带 `pyproject.toml`（依赖 `mcp`、`paramiko`）；`--transport http --port <n>` 可起仅本机监听的 streamable-http 调试服务；

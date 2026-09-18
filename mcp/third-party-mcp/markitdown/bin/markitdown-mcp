@@ -4,7 +4,9 @@ set -euo pipefail
 # 0.0.1a4 的 --http 不可用：它构造了 StreamableHTTPSessionManager 却没进入
 # run() 生命周期，每个请求都以 "Task group is not initialized" 500 失败。
 PACKAGE="${MARKITDOWN_MCP_PACKAGE:-markitdown-mcp==0.0.1a7}"
-CACHE_ROOT="${AGENT_TOOLS_MCP_CACHE:-/tmp/agent-tools-mcp-cache}"
+# 不放 /tmp：Ubuntu 开机会清空 /tmp（tmpfiles "D /tmp"），而共享实例由 systemd
+# 用户服务拉起、不带代理，开机后重新 pip install 会失败并反复重启。
+CACHE_ROOT="${AGENT_TOOLS_MCP_CACHE:-$HOME/.local/share/agent-tools/mcp-cache}"
 VENV="${MARKITDOWN_MCP_VENV:-$CACHE_ROOT/markitdown-mcp-venv}"
 PYTHON_BIN="${PYTHON:-python3}"
 export PIP_DISABLE_PIP_VERSION_CHECK="${PIP_DISABLE_PIP_VERSION_CHECK:-1}"
