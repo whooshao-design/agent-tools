@@ -89,18 +89,24 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertIn("G={mode: waived,W:{ref,fingerprint}}", text)
         self.assertNotIn("可直接转 `dev-build-change` 并记录跳过风险", text)
 
-    def test_solution_template_uses_one_core_shell_and_chg_appendix(self):
-        template = (
-            WORKFLOW
-            / "dev-design-solution/references/solution-template.md"
-        ).read_text(encoding="utf-8")
+    def test_solution_template_is_narrative_and_traceability_is_separate(self):
+        refs = WORKFLOW / "dev-design-solution/references"
+        template = (refs / "solution-template.md").read_text(encoding="utf-8")
+        traceability = (refs / "traceability-template.md").read_text(
+            encoding="utf-8"
+        )
 
         headings = (
-            "## 0. 一页结论",
-            "## 1. 背景与现状",
-            "## 3. 方案选择",
-            "## 4. 目标技术设计",
-            "## 附录 C：CHG 变更清单与追踪矩阵",
+            "相关文档：",
+            "## 摘要",
+            "## 1. 背景与目标",
+            "## 2. 方案概览",
+            "### 2.1 一句话方案与主图",
+            "### 2.2 关键决策",
+            "## 3. 详细设计",
+            "## 4. 替代方案与取舍",
+            "## 6. 发布、验证与回滚",
+            "## 7. 风险与未决问题",
         )
         positions = [template.index(heading) for heading in headings]
         self.assertEqual(sorted(positions), positions)
@@ -110,22 +116,69 @@ class WorkflowContractTest(unittest.TestCase):
             "只使用一个 `profiles/*.md`",
             "guide-level 机制导读",
             "reference-level 契约",
-            "CHG-001",
-            "新增 / 修改 / 删除 / 保持不变",
-            "AC → 设计正文 → CHG → 验证信号 → 发布/回滚",
-            "本附录承担交付完整性，不控制正文叙事",
+            "不超过 150 字",
+            "traceability.md",
         ):
             self.assertIn(token, template)
 
         for forbidden in (
             "骨架 A：机制轴",
             "骨架 B：变更轴",
+            "## 0. 一页结论",
             "### 0.3 变更摘要",
             "### 4.1 CHG-001",
             "### 4.1 方案项一",
             "### 6.4 Redis 存储设计",
+            "## 附录 C",
+            "producer_agent_refs",
         ):
             self.assertNotIn(forbidden, template)
+
+        for token in (
+            "## 1. 身份",
+            "## 2. 验收映射",
+            "## 3. 交付单元",
+            "CHG-001",
+            "新增 / 修改 / 删除 / 保持不变",
+            "AC → 设计正文 → CHG → 验证信号 → 发布/回滚",
+            "本文件承担交付完整性，不控制正文叙事",
+            "## 6. 证据清单",
+        ):
+            self.assertIn(token, traceability)
+
+    def test_solution_skill_ships_reader_test_and_diagram_tooling(self):
+        skill_dir = WORKFLOW / "dev-design-solution"
+        skill = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
+        for reference in (
+            "references/traceability-template.md",
+            "references/reader-test-protocol.md",
+            "scripts/check_mermaid.js",
+            "scripts/doc_metrics.py",
+        ):
+            self.assertTrue((skill_dir / reference).is_file(), reference)
+            self.assertIn(Path(reference).name, skill)
+        principles = WORKFLOW / "references/writing-principles.md"
+        self.assertTrue(principles.is_file())
+        self.assertIn("writing-principles.md", skill)
+
+        protocol = (skill_dir / "references/reader-test-protocol.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("reader-test-v1", protocol)
+        self.assertIn("answer-key-v<N>.md", protocol)
+        self.assertIn("与设计方不同的模型", protocol)
+
+        identity = (WORKFLOW / "references/artifact-identity.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("### 1.1 文件集产物", identity)
+        self.assertIn("`solution.md` + `traceability.md`", identity)
+
+        contract = (WORKFLOW / "references/delegation-contract.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("清单指纹", contract)
+        self.assertIn("reader-test/agent-v<N>.md", contract)
 
     def test_solution_profiles_and_routing_stay_in_sync(self):
         skill_dir = WORKFLOW / "dev-design-solution"
@@ -208,7 +261,9 @@ class WorkflowContractTest(unittest.TestCase):
 
         for token in (
             "先做结构与追踪准入",
-            "按附录 CHG 逐项评审交付完整性",
+            "按 traceability.md 逐项评审交付完整性",
+            "读者测试结果",
+            "至少定为 Medium",
             "不得只抽查部分 CHG 后给出整体通过",
             "逐 CHG 覆盖不要求正文按 CHG 分章",
             "`profile 误选` / `正文清单化`",
@@ -222,8 +277,12 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertIn("## 3. CHG 逐项评审覆盖", template)
         self.assertIn("DEC-001 / CHG-001 / AC-001 / RISK-001", template)
         self.assertIn("### 4.2 分层阅读与信息密度", template)
+        self.assertIn("读者测试：`reader-test/agent-v<N>.md`", template)
         self.assertIn("30 秒扫描", template)
         self.assertIn("双读者测试", template)
+        for text in (skill, template):
+            self.assertNotIn("一页结论", text)
+            self.assertNotIn("附录追踪矩阵", text)
 
         headings = (
             "## 0. 一页评审结论",

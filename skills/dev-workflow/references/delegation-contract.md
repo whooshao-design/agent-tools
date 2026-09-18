@@ -42,8 +42,8 @@
 | `task_id` | 本轮稳定 ID；正常评审必须为非空字符串 |
 | `role` | 精确 reviewer role |
 | `producer_agent_refs[]` | 冻结对象的全部 producer |
-| `input_fingerprints` | 冻结输入名到精确指纹的非空映射 |
-| `inputs` | 原始需求、冻结产物、必要证据和上一轮待复核 findings |
+| `input_fingerprints` | 冻结输入名到精确指纹的非空映射；文件集产物（如方案的 `solution.md` + `traceability.md`）逐文件列出并附清单指纹（见 `artifact-identity.md` §1.1） |
+| `inputs` | 原始需求、冻结产物、必要证据和上一轮待复核 findings；方案评审还包括读者测试结果 `reader-test/agent-v<N>.md`，复审时包括上一版与当前版的 diff、触达标题列表和 `resolution.md` |
 | `runtime_requirements` | 只读 sandbox、工具/MCP 禁限和禁止嵌套委派 |
 
 信封不得包含尚未产生的 `reviewer_agent_ref`，也不得传 producer 的推理过程或预期结论。

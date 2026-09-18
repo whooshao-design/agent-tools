@@ -19,6 +19,21 @@
 - 外部文档优先使用平台不可变 revision ID；能导出正文时同时记录导出内容 SHA-256，不能导出时说明证据限制
 - `version`、日期、文件名或摘要都不能替代 `fingerprint`；版本相同但指纹变化即视为新产物
 
+### 1.1 文件集产物
+
+一个产物由多个文件构成时（技术方案 `S` = `solution.md` + `traceability.md`），身份增加 `files` 字段：
+
+| 字段 | 含义 |
+|---|---|
+| `ref` | 文件集所在目录 |
+| `files[]` | 每个文件的 `path`（相对 `ref`）与 `fingerprint`（该文件字节的 SHA-256） |
+| `fingerprint` | 清单指纹：`files` 按 `path` 字节序排序，每项写成 `path\0fingerprint\n`，对拼接结果计算 SHA-256 |
+
+- 任一文件字节变化都会改变清单指纹，审批绑定清单指纹即绑定全部文件。
+- 派发信封的 `input_fingerprints` 逐文件列出，并附清单指纹；reviewer 原样回显。
+- 只有一个文件的旧产物是只含一项的文件集，格式不变，历史审批记录不需要改写。
+- 归档旧版本时整目录归档（`versions/v<N>/`），保持文件集完整。
+
 ## 2. 仓库快照身份
 
 `repo-snapshot-v1` 至少包含：仓库路径、HEAD commit/tree、tracked patch 指纹、未跟踪文件清单指纹、显式排除项。
