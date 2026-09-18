@@ -5,13 +5,22 @@ const path = require('path');
 const https = require('https');
 const childProcess = require('child_process');
 
-const CONFIG_DIR = path.join(os.homedir(), '.config/codex-mysql-readonly');
-const CONFIG_FILE = path.join(CONFIG_DIR, 'instances.json');
-const DEFAULT_INSTANCE = 'default';
-const MYSQL_BIN = process.env.MYSQL_BIN || path.join(os.homedir(), 'tools', 'mysql-client', 'root', 'usr', 'bin', 'mysql');
-const LXCLOUD_SQL_ENDPOINT = 'https://lxcloud.oa.fenqile.com/v1/mysql/sql-query/exec-query/';
+const LXCLOUD_SQL_PATH = '/v1/mysql/sql-query/exec-query/';
+const LXCLOUD_ENV_BASE_URLS = {
+  prod: 'https://lxcloud.lexincloud.com',
+  stable: 'https://stable-lxcloud.lexincloud.com',
+};
+const LXCLOUD_ENV_ALIASES = {
+  prod: 'prod',
+  production: 'prod',
+  online: 'prod',
+  '线上': 'prod',
+  stable: 'stable',
+  test: 'stable',
+  '测试': 'stable',
+};
+const DEFAULT_LXCLOUD_ENV = 'prod';
 const LXCLOUD_DB_TYPE_MAX_LENGTH = 128;
-const LXCLOUD_URL = 'https://lxcloud.oa.fenqile.com/';
 const BROWSER_SESSION_SCRIPT = path.join(__dirname, '..', '..', 'get-browser-session', 'scripts', 'browser_session.js');
 
 function parseArgs(argv) {
@@ -39,36 +48,6 @@ function parseArgs(argv) {
   return args;
 }
 
-function ensureConfigDir() {
-  fs.mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 });
-  fs.chmodSync(CONFIG_DIR, 0o700);
-}
-
-function loadConfig() {
-  if (!fs.existsSync(CONFIG_FILE)) {
-    return { version: 1, defaultInstance: DEFAULT_INSTANCE, instances: {} };
-  }
-  return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
-}
-
-function saveConfig(config) {
-  ensureConfigDir();
-  const tmp = `${CONFIG_FILE}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(config, null, 2), { mode: 0o600 });
-  fs.renameSync(tmp, CONFIG_FILE);
-  fs.chmodSync(CONFIG_FILE, 0o600);
-}
-
-function redactInstance(instance) {
-  return {
-    ...instance,
-    host: instance.host ? '<stored>' : '',
-    port: instance.port ? '<stored>' : '',
-    user: instance.user ? '<stored>' : '',
-    password: instance.password ? '<stored>' : '',
-  };
-}
-
 function sanitize(text) {
   return String(text || '')
     .replace(/'[^']+'@'[^']+'/g, "'<user>'@'<host>'")
@@ -78,58 +57,27 @@ function sanitize(text) {
     .replace(/(cookie|authorization)\s*[:=]\s*[^,\n]+/gi, '$1=<redacted>');
 }
 
-function getInstance(config, name) {
-  const instance = config.instances[name];
-  if (!instance) {
-    throw new Error(`未找到实例配置：${name}。可先运行 --add-instance ${name} 并提供只读连接参数。`);
-  }
-  return instance;
-}
-
 function valueFrom(args, argName, envName) {
   return args[argName] || process.env[envName];
 }
 
-function requireValue(args, argName, envName) {
-  const value = valueFrom(args, argName, envName);
-  if (!value) throw new Error(`缺少 ${argName}，可传 --${argName}=... 或环境变量 ${envName}`);
-  return value;
+function resolveLxcloudEnv(raw) {
+  if (!raw || raw === true) {
+    return DEFAULT_LXCLOUD_ENV;
+  }
+  const env = LXCLOUD_ENV_ALIASES[String(raw).trim().toLowerCase()];
+  if (!env) {
+    throw new Error(`未知 lxcloud 环境：${raw}。仅支持 prod（线上）和 stable（测试/stable）。`);
+  }
+  return env;
 }
 
-function buildInstance(args, name) {
-  return {
-    displayName: args['display-name'] || args.displayName || name,
-    host: requireValue(args, 'host', 'MYSQL_HOST'),
-    port: String(valueFrom(args, 'port', 'MYSQL_PORT') || '3306'),
-    user: requireValue(args, 'user', 'MYSQL_USER'),
-    password: requireValue(args, 'password', 'MYSQL_PASSWORD'),
-    mode: args.mode || 'readonly',
-    source: args.source || 'manual',
-    updatedAt: new Date().toISOString(),
-  };
+function lxcloudBaseUrl(env) {
+  return LXCLOUD_ENV_BASE_URLS[resolveLxcloudEnv(env)];
 }
 
-function quoteOptionValue(value) {
-  return `"${String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '')}"`;
-}
-
-function writeDefaultsFile(instance) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mysql-readonly-'));
-  const file = path.join(dir, 'client.cnf');
-  fs.writeFileSync(file, [
-    '[client]',
-    `host=${quoteOptionValue(instance.host)}`,
-    `port=${quoteOptionValue(instance.port)}`,
-    `user=${quoteOptionValue(instance.user)}`,
-    `password=${quoteOptionValue(instance.password)}`,
-    'protocol=TCP',
-    '',
-  ].join('\n'), { mode: 0o600 });
-  return { dir, file };
-}
-
-function cleanupTemp(temp) {
-  if (temp) fs.rmSync(temp.dir, { recursive: true, force: true });
+function lxcloudEndpoint(env) {
+  return `${lxcloudBaseUrl(env)}${LXCLOUD_SQL_PATH}`;
 }
 
 function assertReadOnlySql(sql) {
@@ -138,55 +86,11 @@ function assertReadOnlySql(sql) {
     .replace(/--.*$/gm, ' ')
     .trim()
     .toLowerCase();
-  // 白名单 + 逐条语句校验（防多语句拼接绕过首关键字检查）；
-  // 第二道防线是连接级 SET SESSION TRANSACTION READ ONLY
+  // 白名单 + 逐条语句校验（防多语句拼接绕过首关键字检查）；最终访问权限由 lxcloud 服务端决定。
   const allowed = /^(select|show|desc|describe|explain|with|help)\b/;
   const statements = normalized.split(';').map((s) => s.trim()).filter(Boolean);
   if (!statements.length || !statements.every((s) => allowed.test(s))) {
     throw new Error('拒绝执行非只读 SQL。仅允许 SELECT/SHOW/DESCRIBE/EXPLAIN/WITH 等只读语句（逐条校验）。');
-  }
-}
-
-function buildMysqlArgs(defaultsFile, args) {
-  const base = [
-    `--defaults-extra-file=${defaultsFile}`,
-    '--connect-timeout=10',
-    '--safe-updates',
-    '--init-command=SET SESSION TRANSACTION READ ONLY',
-  ];
-
-  if (args.check) {
-    return [...base, '--batch', '--skip-column-names', '-e', 'SELECT 1 AS ok'];
-  }
-
-  if (args.query) {
-    assertReadOnlySql(args.query);
-    return [...base, '--batch', '-e', args.query];
-  }
-
-  if (args._.length) {
-    return [...base, ...args._];
-  }
-
-  return base;
-}
-
-function runMysql(instance, args) {
-  if (!fs.existsSync(MYSQL_BIN)) {
-    throw new Error(`未找到 mysql 客户端：${MYSQL_BIN}`);
-  }
-  const temp = writeDefaultsFile(instance);
-  try {
-    const mysqlArgs = buildMysqlArgs(temp.file, args);
-    const child = childProcess.spawn(MYSQL_BIN, mysqlArgs, { stdio: 'inherit' });
-    child.on('exit', (code, signal) => {
-      cleanupTemp(temp);
-      if (signal) process.kill(process.pid, signal);
-      process.exit(code ?? 1);
-    });
-  } catch (error) {
-    cleanupTemp(temp);
-    throw error;
   }
 }
 
@@ -219,15 +123,24 @@ function normalizeLxcloudDbType(raw) {
 
 function validateLxcloudDbType(raw) {
   if (!raw || raw === true) {
-    throw new Error('缺少线上实例 db_type。用户未明确提供时，应先从目标项目的运行时数据源配置中确认。');
+    throw new Error('缺少实例 db_type。用户未明确提供时，应先从目标项目的运行时数据源配置中确认。');
   }
   const dbType = normalizeLxcloudDbType(raw);
   if (!dbType) {
-    throw new Error('缺少线上实例 db_type。用户未明确提供时，应先从目标项目的运行时数据源配置中确认。');
+    throw new Error('缺少实例 db_type。用户未明确提供时，应先从目标项目的运行时数据源配置中确认。');
   }
   if (dbType.length > LXCLOUD_DB_TYPE_MAX_LENGTH || /[\x00-\x1f\x7f]/.test(dbType)) {
-    throw new Error(`非法线上实例 db_type：仅允许不超过 ${LXCLOUD_DB_TYPE_MAX_LENGTH} 个字符且不含控制字符。`);
+    throw new Error(`非法实例 db_type：仅允许不超过 ${LXCLOUD_DB_TYPE_MAX_LENGTH} 个字符且不含控制字符。`);
   }
+  return dbType;
+}
+
+function validateLxcloudQueryArgs(args) {
+  const dbType = validateLxcloudDbType(valueFrom(args, 'db-type', 'LXCLOUD_DB_TYPE'));
+  if (!args.query || args.query === true) {
+    throw new Error('缺少 --query');
+  }
+  assertReadOnlySql(args.query);
   return dbType;
 }
 
@@ -283,7 +196,7 @@ function inferLxcloudUserName(session, authorization) {
   return normalizeLxcloudUserName(accountMatch && accountMatch[1]);
 }
 
-function lxcloudAuthContextFromBrowserSession(args) {
+function lxcloudAuthContextFromBrowserSession(args, baseUrl) {
   if (args['no-browser-session'] || process.env.LXCLOUD_DISABLE_BROWSER_SESSION) {
     return { authorization: '', userName: '' };
   }
@@ -294,7 +207,7 @@ function lxcloudAuthContextFromBrowserSession(args) {
   }
 
   const storageKey = String(valueFrom(args, 'browser-storage-key', 'LXCLOUD_TOKEN_STORAGE_KEY') || 'token');
-  const browserUrl = String(valueFrom(args, 'browser-url', 'LXCLOUD_URL') || LXCLOUD_URL);
+  const browserUrl = String(valueFrom(args, 'browser-url', 'LXCLOUD_URL') || `${baseUrl}/`);
   const timeoutMs = Number(valueFrom(args, 'browser-timeout-ms', 'LXCLOUD_BROWSER_TIMEOUT_MS') || 60000);
   const childArgs = [
     browserSessionScript,
@@ -335,7 +248,7 @@ function lxcloudAuthContextFromBrowserSession(args) {
     throw new Error('缺少 lxcloud 授权，且浏览器 session token 输出不是合法 JSON。');
   }
   if (!parsed.sessionReady) {
-    throw new Error('缺少 lxcloud 授权，且 lxcloud 浏览器登录态不可用。请先刷新 lxcloud 登录态。');
+    throw new Error(`缺少 lxcloud 授权，且 ${browserUrl} 浏览器登录态不可用。请先刷新该环境的登录态。`);
   }
   const tokenRow = (parsed.storage || []).find((item) => item.type === 'local' && item.key === storageKey && item.exists && item.value);
   const authorization = normalizeAuthorization(tokenRow && tokenRow.value);
@@ -345,7 +258,7 @@ function lxcloudAuthContextFromBrowserSession(args) {
   };
 }
 
-function resolveLxcloudAuthContext(args) {
+function resolveLxcloudAuthContext(args, baseUrl) {
   const raw = valueFrom(args, 'authorization', 'LXCLOUD_AUTHORIZATION')
     || valueFrom(args, 'bearer-token', 'LXCLOUD_BEARER_TOKEN');
   const directAuth = normalizeAuthorization(raw);
@@ -356,20 +269,16 @@ function resolveLxcloudAuthContext(args) {
     };
   }
 
-  const browserAuthContext = lxcloudAuthContextFromBrowserSession(args);
+  const browserAuthContext = lxcloudAuthContextFromBrowserSession(args, baseUrl);
   if (browserAuthContext.authorization) {
     return browserAuthContext;
   }
 
-  throw new Error('缺少 lxcloud 授权。可配置环境变量 LXCLOUD_BEARER_TOKEN/LXCLOUD_AUTHORIZATION，或先用浏览器登录 https://lxcloud.oa.fenqile.com/ 后自动复用 localStorage token。');
+  throw new Error(`缺少 lxcloud 授权。可配置环境变量 LXCLOUD_BEARER_TOKEN/LXCLOUD_AUTHORIZATION，或先用浏览器登录 ${baseUrl}/ 后自动复用 localStorage token。`);
 }
 
 function buildLxcloudPayload(args, inferredUserName = '') {
-  const dbType = validateLxcloudDbType(valueFrom(args, 'db-type', 'LXCLOUD_DB_TYPE'));
-  if (!args.query) {
-    throw new Error('缺少 --query');
-  }
-  assertReadOnlySql(args.query);
+  const dbType = validateLxcloudQueryArgs(args);
   return {
     db_type: dbType,
     user_name: String(valueFrom(args, 'user-name', 'LXCLOUD_USER_NAME') || inferredUserName || os.userInfo().username),
@@ -381,7 +290,7 @@ function buildLxcloudPayload(args, inferredUserName = '') {
   };
 }
 
-function postJson(url, headers, payload, timeoutMs) {
+function postJson(url, originUrl, headers, payload, timeoutMs) {
   const body = JSON.stringify(payload);
   return new Promise((resolve, reject) => {
     const request = https.request(url, {
@@ -390,8 +299,8 @@ function postJson(url, headers, payload, timeoutMs) {
       headers: {
         accept: 'application/json, text/plain, */*',
         'content-type': 'application/json',
-        origin: 'https://lxcloud.oa.fenqile.com',
-        referer: 'https://lxcloud.oa.fenqile.com/',
+        origin: originUrl,
+        referer: `${originUrl}/`,
         'user-agent': 'codex-agent-tools/mysql-readonly',
         'content-length': Buffer.byteLength(body),
         ...headers,
@@ -420,7 +329,12 @@ function postJson(url, headers, payload, timeoutMs) {
 }
 
 async function runLxcloudQuery(args) {
-  const authContext = resolveLxcloudAuthContext(args);
+  const env = resolveLxcloudEnv(valueFrom(args, 'env', 'LXCLOUD_ENV'));
+  const baseUrl = LXCLOUD_ENV_BASE_URLS[env];
+  const endpoint = `${baseUrl}${LXCLOUD_SQL_PATH}`;
+  // 先校验实例和 SQL，避免在参数错误时白白拉起浏览器 session。
+  validateLxcloudQueryArgs(args);
+  const authContext = resolveLxcloudAuthContext(args, baseUrl);
   const payload = buildLxcloudPayload(args, authContext.userName);
   const cookie = valueFrom(args, 'cookie', 'LXCLOUD_COOKIE');
   const mid = valueFrom(args, 'mid', 'LXCLOUD_MID');
@@ -431,9 +345,10 @@ async function runLxcloudQuery(args) {
   if (mid && mid !== true) headers.mid = String(mid);
 
   const timeoutMs = Number(args['timeout-ms'] || process.env.LXCLOUD_TIMEOUT_MS || 120000);
-  const response = await postJson(LXCLOUD_SQL_ENDPOINT, headers, payload, timeoutMs);
+  const response = await postJson(endpoint, baseUrl, headers, payload, timeoutMs);
   console.log(JSON.stringify({
-    endpoint: LXCLOUD_SQL_ENDPOINT,
+    env,
+    endpoint,
     db_type: payload.db_type,
     query_type: payload.query_type,
     query_role: payload.query_role,
@@ -444,17 +359,15 @@ async function runLxcloudQuery(args) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const config = loadConfig();
-  const instanceName = String(args.instance || config.defaultInstance || DEFAULT_INSTANCE).toLowerCase();
 
   if (args.doctor) {
     console.log(JSON.stringify({
-      configFile: CONFIG_FILE,
-      configExists: fs.existsSync(CONFIG_FILE),
-      mysqlExists: fs.existsSync(MYSQL_BIN),
-      defaultInstance: config.defaultInstance || DEFAULT_INSTANCE,
-      configuredInstances: Object.keys(config.instances || {}),
-      lxcloudEndpoint: LXCLOUD_SQL_ENDPOINT,
+      defaultEnv: DEFAULT_LXCLOUD_ENV,
+      lxcloudEnvs: Object.fromEntries(Object.keys(LXCLOUD_ENV_BASE_URLS).map((env) => [env, {
+        baseUrl: LXCLOUD_ENV_BASE_URLS[env],
+        endpoint: lxcloudEndpoint(env),
+      }])),
+      lxcloudEnvAliases: LXCLOUD_ENV_ALIASES,
       lxcloudDbTypePolicy: 'no static allowlist; non-empty values up to 128 characters without control characters',
       lxcloudKnownDbTypes: ['ProcesstestDB', 'ProcessmanageDB', 'HawkDecisionDB', 'CreditmDB', 'PostrealDB', 'StrategypfmDB', 'CreditpfmDB'],
       lxcloudAuthConfigured: Boolean(process.env.LXCLOUD_AUTHORIZATION || process.env.LXCLOUD_BEARER_TOKEN),
@@ -464,53 +377,7 @@ async function main() {
     return;
   }
 
-  if (args.lxcloud || args.online) {
-    await runLxcloudQuery(args);
-    return;
-  }
-
-  if (args.list) {
-    console.log(JSON.stringify({
-      defaultInstance: config.defaultInstance || DEFAULT_INSTANCE,
-      instances: Object.fromEntries(Object.entries(config.instances || {}).map(([name, instance]) => [name, redactInstance(instance)])),
-    }, null, 2));
-    return;
-  }
-
-  if (args['add-instance']) {
-    const instanceNameToAdd = String(args['add-instance'] === true ? (args.instance || DEFAULT_INSTANCE) : args['add-instance']).toLowerCase();
-    const instance = buildInstance(args, instanceNameToAdd);
-    config.version = 1;
-    config.instances = config.instances || {};
-    config.instances[instanceNameToAdd] = instance;
-    if (args['set-default'] || !config.defaultInstance) {
-      config.defaultInstance = instanceNameToAdd;
-    }
-    saveConfig(config);
-    console.log(JSON.stringify({
-      stored: true,
-      instance: instanceNameToAdd,
-      displayName: instance.displayName,
-      configFile: CONFIG_FILE,
-      credentialsStored: true,
-      mode: instance.mode,
-      updatedAt: instance.updatedAt,
-    }, null, 2));
-    return;
-  }
-
-  const instance = getInstance(config, instanceName);
-  if (args.status) {
-    console.log(JSON.stringify({
-      instance: instanceName,
-      configFile: CONFIG_FILE,
-      configured: true,
-      details: redactInstance(instance),
-    }, null, 2));
-    return;
-  }
-
-  runMysql(instance, args);
+  await runLxcloudQuery(args);
 }
 
 if (require.main === module) {
@@ -521,12 +388,16 @@ if (require.main === module) {
 }
 
 module.exports = {
+  LXCLOUD_ENV_BASE_URLS,
   assertReadOnlySql,
   buildLxcloudPayload,
   inferLxcloudUserName,
+  lxcloudBaseUrl,
+  lxcloudEndpoint,
   normalizeLxcloudDbType,
   normalizeLxcloudUserName,
   parseArgs,
+  resolveLxcloudEnv,
   userNameFromJwt,
   validateLxcloudDbType,
 };

@@ -22,7 +22,7 @@
 
 **数据与接口访问**
 
-- `mysql_readonly`: 复用本地只读 MySQL 实例配置，执行只读 SQL。
+- `mysql_readonly`: 通过 lxcloud HTTP SQL 只读查询 MySQL，`env=prod` 走线上 lxcloud，`env=stable` 走 stable-lxcloud。
 - `redis_query`: 通过 bianque/Dubbo `queryRedis` 只读查询 Redis。
 - `dubbo_test`: 通过 bianque 服务模拟器调用 Dubbo 接口。
 - `mq_readonly`: Kafka/RocketMQ CLI 只读查询和 MQ 控制台只读 GET。
@@ -65,7 +65,7 @@ mcp/devtools-mcp/.env
 - `ARTIFACT_REPO_ALLOWED_HOSTS`
 
 `java_app_diag` 通过 `BASTION_CONFIG` 指定堡垒机配置，默认查找 `/home/joney/projects/ai/agent-tools/mcp/bastion-mcp/config.json`。诊断工具会在首次执行时自动复用或建立堡垒机连接；如果密钥认证不可用，仍需传入 password/otp。
-`mysql_readonly` 复用 `~/.config/codex-mysql-readonly/instances.json`；lxcloud 查询接受任意经授权的 `db_type`，不维护客户端实例白名单，实例应由上层 skill 从用户输入或目标项目运行时数据源代码确认。
+`mysql_readonly` 不再使用本地 mysql 客户端和 `~/.config/codex-mysql-readonly/instances.json`；线上和 stable 都走各自域名的 lxcloud HTTP SQL，授权从对应域名的浏览器 localStorage token 复用。lxcloud 查询接受任意经授权的 `db_type`，不维护客户端实例白名单，实例应由上层 skill 从用户输入或目标项目运行时数据源代码确认。
 通用浏览器入口、`redis_query`、`dubbo_test`、`lexiao` 默认复用 `~/.local/state/agent-tools/browser-profiles/main`，接受 `BROWSER_SESSION_PROFILE` / `DEVTOOLS_BROWSER_PROFILE` 覆盖。`healthy` 保持独立的 `browser-profiles/healthy`，浏览器会话层访问 WebShell 时默认使用 `browser-profiles/webshell`；显式 `profile` 参数可覆盖默认值。
 
 ## 分层
@@ -75,7 +75,7 @@ mcp/devtools-mcp/.env
 - `browser_session`: 浏览器登录态检查与无头续期、页面快照、规范化文本点击、Cookie、带 session 的只读 GET。
 - `config_registry.internal_http_get`: 公司内网 allowlist 下的通用只读 HTTP GET。
 - `bastion`: 跳板机通道和受白名单限制的远程只读命令执行。
-- `mysql_readonly`: 只读 SQL。
+- `mysql_readonly`: lxcloud HTTP 只读 SQL（prod/stable）。
 - `dubbo_test`: Dubbo 服务模拟器调用。
 - `observability`: 指标、日志、链路追踪查询。
 - `k8s_readonly`: Kubernetes 资源、事件、pod 日志读取。

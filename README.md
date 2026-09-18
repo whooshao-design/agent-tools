@@ -98,8 +98,9 @@
 | Skill | 说明 | 配套 MCP |
 |---|---|---|
 | `redis-query` | 通过 DevService.queryRedis 只读查询 Redis | `redis_query` |
-| `query-mysql-data` | 从代码定位实例并只读查询 MySQL 测试/stable 与经授权线上数据 | `mysql_readonly` |
+| `query-mysql-data` | 从代码定位实例并通过 lxcloud HTTP 只读查询 stable 与经授权线上 MySQL 数据 | `mysql_readonly` |
 | `query-clickhouse-water` | 通过预发布/灰度/线上共用 DBA 堡垒机或 stable/测试 HTTP 接口查询 ClickHouse 流水 | `bastion_dba`、`browser_session` |
+| `query-hive-data` | 通过乐信大数据门户即席分析以 Presto/Spark 只读查询 Hive 数仓表，复用浏览器登录态 | `browser_session` |
 | `query-hippo-config` | 查看标准、stable 或墨西哥/印尼海外 Hippo 配置中心实际生效配置 | `browser_session` |
 | `configure-hippo` | 新增、修改并在明确授权后发布标准、stable 或墨西哥/印尼海外 Hippo 配置 | `browser_session` |
 
@@ -108,6 +109,7 @@
 | Skill | 说明 | 配套 MCP |
 |---|---|---|
 | `java-server-diagnostics` | Java 应用服务器只读诊断：默认先查 `error.log`，支持 warn/轮转日志及独立堡垒机会话 | `java_app_diag` |
+| `query-app-logs` | 统一查应用日志：服务器/容器日志复用 `java_app_diag` 与容器脚本，超出保存期或跨机器汇总走日志平台 | `java_app_diag`、`browser_session` |
 | `healthy-dashboard-config` | stable/线上大盘读写、版本比对、动态筛选和页面查询验证 | `healthy` |
 | `inspect-healthy-metrics` | 批量 PromQL、指标上报状态、最后样本和注册辅助信息，共用持久会话 | `healthy`, `browser_session` |
 | `inspect-healthy-jvm-dashboard` | 只读查看雷神 JVM/G1 看板，整理变量、面板、PromQL 和页面快照 | `healthy`, `browser_session` |

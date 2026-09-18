@@ -6,10 +6,28 @@ const {
   assertReadOnlySql,
   buildLxcloudPayload,
   inferLxcloudUserName,
+  lxcloudBaseUrl,
+  lxcloudEndpoint,
   normalizeLxcloudDbType,
+  resolveLxcloudEnv,
   userNameFromJwt,
   validateLxcloudDbType,
 } = require('../scripts/mysql_readonly');
+
+test('routes stable and prod to their own lxcloud domains over the same HTTP SQL path', () => {
+  assert.equal(resolveLxcloudEnv(undefined), 'prod');
+  assert.equal(resolveLxcloudEnv(''), 'prod');
+  assert.equal(resolveLxcloudEnv('online'), 'prod');
+  assert.equal(resolveLxcloudEnv('stable'), 'stable');
+  assert.equal(resolveLxcloudEnv('test'), 'stable');
+  assert.equal(resolveLxcloudEnv('STABLE'), 'stable');
+  assert.throws(() => resolveLxcloudEnv('pre'), /未知 lxcloud 环境/);
+
+  assert.equal(lxcloudBaseUrl('prod'), 'https://lxcloud.lexincloud.com');
+  assert.equal(lxcloudBaseUrl('stable'), 'https://stable-lxcloud.lexincloud.com');
+  assert.equal(lxcloudEndpoint('prod'), 'https://lxcloud.lexincloud.com/v1/mysql/sql-query/exec-query/');
+  assert.equal(lxcloudEndpoint('stable'), 'https://stable-lxcloud.lexincloud.com/v1/mysql/sql-query/exec-query/');
+});
 
 test('accepts an arbitrary authorized lxcloud instance without a static allowlist', () => {
   const payload = buildLxcloudPayload({

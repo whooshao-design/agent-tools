@@ -1,30 +1,35 @@
 ---
 name: query-mysql-data
-description: 查询和验证公司内网 MySQL 数据，支持测试/stable 本地只读实例和线上 lxcloud SQL 查询。Use when 用户要求只读查询 MySQL、查看表结构或样例记录、验证数据库数据；未明确实例时必须优先从目标项目运行时数据源代码反查实例与逻辑库，线上 db_type 不使用静态白名单，可复用浏览器 session 获取 lxcloud token/Cookie，最终必须输出 SQL 和查询结果。
+description: 查询和验证公司内网 MySQL 数据，stable/测试和线上都通过各自域名的 lxcloud HTTP SQL 只读查询。Use when 用户要求只读查询 MySQL、查看表结构或样例记录、验证数据库数据；未明确实例时必须优先从目标项目运行时数据源代码反查实例与逻辑库，db_type 不使用静态白名单，可复用浏览器 session 获取 lxcloud token，最终必须输出 SQL 和查询结果。
 metadata:
-  version: 2.7.1
+  version: 3.0.0
 ---
 
 # query-mysql-data
 
 ## 定位
 
-只读查询 MySQL 数据，覆盖两类入口：
+只读查询 MySQL 数据。两个环境都走 lxcloud 的 HTTP SQL 接口 `/v1/mysql/sql-query/exec-query/`，只是域名不同：
 
-- 测试/stable 环境：只能使用本地 mysql 客户端直连只读实例，复用 `~/.config/codex-mysql-readonly/instances.json`。
-- 线上/prod 环境：只能使用 lxcloud HTTP SQL，通过 `https://lxcloud.oa.fenqile.com/v1/mysql/sql-query/exec-query/` 查询受限线上元信息和受控业务配置/测试数据。
+| 环境 | `--env` | 站点 |
+|---|---|---|
+| 线上/prod（默认） | `prod`（别名 `online`、`production`） | `https://lxcloud.lexincloud.com/` |
+| stable/测试 | `stable`（别名 `test`） | `https://stable-lxcloud.lexincloud.com/` |
 
-MCP 优先、脚本兜底。已注册 `mysql_readonly` MCP 时，测试/stable 本地实例优先使用 MCP；线上 lxcloud 查询如 MCP 未暴露对应工具，则使用本 skill 的脚本。脚本路径固定为 `/home/joney/projects/ai/agent-tools/skills/lexin/query-mysql-data/scripts/mysql_readonly.js`。
+不再使用本地 mysql 客户端直连，也不再读取 `~/.config/codex-mysql-readonly/instances.json`；预发布/灰度等其他环境不在本 skill 范围内。
+
+MCP 优先、脚本兜底。已注册 `mysql_readonly` MCP 时优先调用 `mysql_lxcloud_query`（`env` 取 `prod`/`stable`）；MCP 不可用时使用脚本，路径固定为 `/home/joney/projects/ai/agent-tools/skills/lexin/query-mysql-data/scripts/mysql_readonly.js`。
 
 ## 核心约束
 
 - 只执行只读 SQL：`SELECT`、`SHOW`、`DESCRIBE`、`DESC`、`EXPLAIN`、`WITH`。不要执行 INSERT/UPDATE/DELETE/DDL、权限或管理类 SQL。
 - 最终回复必须包含实际执行 SQL 和查询结果。
-- 环境路由必须固定：`test/stable` 走本地 mysql 客户端直连；`online/prod/线上` 走 lxcloud HTTP SQL。不要用本地 mysql 客户端直连线上库。
-- `db_type` 表示 lxcloud 数据库实例配置键，schema/database 表示逻辑库；两者不能混用。
-- 线上 `db_type` 不设客户端静态白名单，可以使用代码确认且当前账号有权访问的任意实例；这不会绕过 lxcloud 自身鉴权。
+- 环境路由必须显式：`stable/测试` 传 `--env stable`；`online/prod/线上` 传 `--env prod` 或省略。脚本默认 `prod`，所以 stable 查询漏传 `--env` 会打到线上域名，先判断环境再执行。
+- 两个域名的登录态和 token 互相独立：stable 查询复用 `stable-lxcloud.lexincloud.com` 的浏览器 localStorage token，线上复用 `lxcloud.lexincloud.com` 的；不要把一个环境的 token 传给另一个环境。
+- `db_type` 表示 lxcloud 数据库实例配置键，schema/database 表示逻辑库；两者不能混用。stable 和线上的实例名通常一致（如 `HawkDecisionDB`、`ProcessmanageDB`），但 stable 另有 `MtHawkDecisionDB`、`MxgHawkDecisionDB`、`YnHawkDecisionDB` 等站点实例，仍按代码确认。
+- `db_type` 不设客户端静态白名单，可以使用代码确认且当前账号有权访问的任意实例；这不会绕过 lxcloud 自身鉴权。
 - 线上查询不要访问非排障必要的业务流水、用户隐私或资金交易明细；业务表必须带明确业务键并限制字段和行数。
-- 不要把 Bearer token、Cookie、oa_session、JWT、数据库密码写入 skill、仓库、命令历史或回复。线上凭据优先从环境变量读取；缺失时可由脚本在当前进程内复用浏览器 session 读取 lxcloud localStorage token，不写文件、不输出明文。
+- 不要把 Bearer token、Cookie、oa_session、JWT 写入 skill、仓库、命令历史或回复。凭据优先从环境变量读取；缺失时可由脚本在当前进程内复用浏览器 session 读取对应域名的 localStorage token，不写文件、不输出明文。
 - 用户在聊天里粘贴了 token/cookie 时，不要复制进文件；只说明不会存储，必要时让用户改用环境变量重新提供。
 
 ## 实例定位（必须先于查询）
@@ -44,62 +49,44 @@ MCP 优先、脚本兜底。已注册 `mysql_readonly` MCP 时，测试/stable �
 
 示例：`zk.db.key=ProcessmanageDB` 是实例，`db.name=process_engine_db` 是逻辑库，`t_process=process_engine_db` 是表到库映射；查询应使用 `db_type=ProcessmanageDB`，SQL 再访问 `process_engine_db.t_process`，不能因为业务属于流程引擎就改用 `ProcesstestDB`。
 
-## 测试/stable 本地直连
+## lxcloud HTTP SQL 查询
 
-常用命令：
-
-```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/query-mysql-data/scripts/mysql_readonly.js --doctor
-node /home/joney/projects/ai/agent-tools/skills/lexin/query-mysql-data/scripts/mysql_readonly.js --list
-node /home/joney/projects/ai/agent-tools/skills/lexin/query-mysql-data/scripts/mysql_readonly.js --check
-```
-
-执行只读 SQL：
-
-```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/query-mysql-data/scripts/mysql_readonly.js \
-  --query "SHOW DATABASES"
-```
-
-指定本地实例：
-
-```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/query-mysql-data/scripts/mysql_readonly.js \
-  --instance <name> \
-  --query "DESCRIBE some_db.some_table"
-```
-
-本地实例配置仍存放在：
-
-```bash
-~/.config/codex-mysql-readonly/instances.json
-```
-
-该文件必须保持 `0600`，且只能保存只读账号。
-
-## 线上/prod lxcloud HTTP SQL
-
-线上只读查询使用 `--lxcloud`。脚本按以下顺序获取授权：
+脚本按以下顺序获取授权：
 
 1. 优先读取 `LXCLOUD_AUTHORIZATION` / `LXCLOUD_BEARER_TOKEN` 或对应命令行参数。
-2. 未配置时，自动调用 `get-browser-session`，从 `https://lxcloud.oa.fenqile.com/` 的 localStorage `token` 读取授权，只在当前进程内传递。
+2. 未配置时，自动调用 `get-browser-session`，从当前 `--env` 对应站点的 localStorage `token` 读取授权，只在当前进程内传递。
 
 `user_name` 按“显式 `--user-name`/`LXCLOUD_USER_NAME` → token 中的 OA 用户字段 → lxcloud 页面显示的登录账号 → 当前系统用户”确定。浏览器会话可用时不要直接用本机用户名代替 OA 账号，否则本机账号与 OA 账号不一致时会被误判为无实例权限。
 
-如果浏览器登录态缺失，先打开 lxcloud 完成登录：
+检查环境入口和依赖：
+
+```bash
+node /home/joney/projects/ai/agent-tools/skills/lexin/query-mysql-data/scripts/mysql_readonly.js --doctor
+```
+
+如果浏览器登录态缺失，先打开对应站点完成登录（stable 换成 `https://stable-lxcloud.lexincloud.com/`）：
 
 ```bash
 node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js \
   --ensure \
-  --url=https://lxcloud.oa.fenqile.com/ \
+  --url=https://lxcloud.lexincloud.com/ \
   --success-text=none
 ```
 
-常规查询不需要手工导出 token：
+stable 查询：
 
 ```bash
 node /home/joney/projects/ai/agent-tools/skills/lexin/query-mysql-data/scripts/mysql_readonly.js \
-  --lxcloud \
+  --env stable \
+  --db-type HawkDecisionDB \
+  --query "SHOW DATABASES"
+```
+
+线上查询（`--env prod` 可省略）：
+
+```bash
+node /home/joney/projects/ai/agent-tools/skills/lexin/query-mysql-data/scripts/mysql_readonly.js \
+  --env prod \
   --db-type ProcesstestDB \
   --query "SELECT * FROM process_engine_test_db.t_test_task WHERE Ftask_id = 46349"
 ```
@@ -108,12 +95,12 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/query-mysql-data/scripts/m
 
 ```bash
 node /home/joney/projects/ai/agent-tools/skills/lexin/query-mysql-data/scripts/mysql_readonly.js \
-  --lxcloud \
+  --env prod \
   --db-type ProcessmanageDB \
   --query "SHOW TABLE STATUS FROM process_engine_db LIKE 't_process'"
 ```
 
-如需显式传入环境变量，仍可使用：
+如需显式传入环境变量，仍可使用（token 必须来自 `--env` 对应的站点）：
 
 ```bash
 read -r -s LXCLOUD_BEARER_TOKEN
@@ -121,25 +108,25 @@ export LXCLOUD_BEARER_TOKEN
 export LXCLOUD_USER_NAME="joneyshao"
 
 node /home/joney/projects/ai/agent-tools/skills/lexin/query-mysql-data/scripts/mysql_readonly.js \
-  --lxcloud \
+  --env prod \
   --db-type ProcesstestDB \
   --query "SELECT * FROM process_engine_test_db.t_test_task WHERE Ftask_id = 46349"
 
 unset LXCLOUD_BEARER_TOKEN
 ```
 
-如 lxcloud 同时要求 Cookie，不要让用户在聊天里粘贴 Cookie。先复用 `get-browser-session` 作为会话层：MCP 可用时优先调用 `browser_session` 的 `check_session`/`ensure_session` 和 `get_cookies`，目标 URL 使用 `https://lxcloud.oa.fenqile.com/`，domain 使用 `lxcloud.oa.fenqile.com`；MCP 不可用时再用脚本兜底检查或刷新登录态：
+如 lxcloud 同时要求 Cookie，不要让用户在聊天里粘贴 Cookie。先复用 `get-browser-session` 作为会话层：MCP 可用时优先调用 `browser_session` 的 `check_session`/`ensure_session` 和 `get_cookies`，目标 URL 和 domain 使用当前环境的站点（线上 `lxcloud.lexincloud.com`，stable `stable-lxcloud.lexincloud.com`）；MCP 不可用时再用脚本兜底检查或刷新登录态：
 
 ```bash
 node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js \
   --ensure \
-  --url=https://lxcloud.oa.fenqile.com/ \
+  --url=https://lxcloud.lexincloud.com/ \
   --success-text=none
 
 node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js \
   --cookies \
-  --domain=lxcloud.oa.fenqile.com \
-  --url=https://lxcloud.oa.fenqile.com/
+  --domain=lxcloud.lexincloud.com \
+  --url=https://lxcloud.lexincloud.com/
 ```
 
 以上 Cookie 检查保持默认脱敏，不能把脱敏结果当成可用凭据。不要单独执行明文导出命令；
@@ -155,6 +142,7 @@ export LXCLOUD_COOKIE
 
 参数说明：
 
+- `--env <prod|stable>` 或 `LXCLOUD_ENV`：目标环境，默认 `prod`；决定接口域名、Origin/Referer 和读取 token 的站点。
 - `--db-type <instance>`：lxcloud 实例配置键，接受任意经授权实例，不等于 schema/database 名。
 - 已知别名仅作输入归一化：`process-test -> ProcesstestDB`、`process-manage -> ProcessmanageDB`、`hawk/mihawk -> HawkDecisionDB`、`credit/creditm -> CreditmDB`、`postreal/post-real -> PostrealDB`、`strategypfm/strategy-pfm -> StrategypfmDB`、`creditpfm/credit-pfm -> CreditpfmDB`。
 - 不提供模糊的 `process` 别名，避免把流程管理库误路由到流程测试实例。
@@ -165,21 +153,20 @@ export LXCLOUD_COOKIE
 - `--no-browser-session` 或 `LXCLOUD_DISABLE_BROWSER_SESSION=1`：禁用从浏览器 session 自动读取 lxcloud token。
 - `--browser-profile` 或 `LXCLOUD_BROWSER_PROFILE`：指定复用的浏览器 profile。
 - `--browser-storage-key` 或 `LXCLOUD_TOKEN_STORAGE_KEY`：指定 localStorage token key，默认 `token`。
-- `--browser-url` 或 `LXCLOUD_URL`：指定读取 token 的 lxcloud 页面，默认 `https://lxcloud.oa.fenqile.com/`。
+- `--browser-url` 或 `LXCLOUD_URL`：覆盖读取 token 的页面，默认为 `--env` 对应站点首页；一般不需要设置。
 
 ## 查询流程
 
-1. 先判断目标环境：`test/stable` 用本地 mysql 客户端直连；`online/prod/线上` 用 lxcloud HTTP SQL。
+1. 先判断目标环境：`stable/测试` 用 `--env stable`；`online/prod/线上` 用 `--env prod`。都是 lxcloud HTTP SQL，只是域名和登录态不同。
 2. 按“实例定位”章节取得确切实例和逻辑库；没有证据时不发起查询。
-3. 线上查询默认先用环境变量授权，缺失时由脚本复用 `get-browser-session` 读取 lxcloud localStorage token；同时优先从 token/页面识别 OA 账号，登录态过期时先刷新 session。
-4. 在已确认实例上定位库表。未知表结构时优先执行 `SHOW DATABASES`、`SHOW TABLES`、`DESCRIBE <table>`；返回 SQL error 时先复核实例路由，不切换到语义相近实例碰运气。
+3. 默认先用环境变量授权，缺失时由脚本复用 `get-browser-session` 读取对应站点的 localStorage token；同时优先从 token/页面识别 OA 账号，登录态过期时先刷新该站点的 session。
+4. 在已确认实例上定位库表。未知表结构时优先执行 `SHOW DATABASES`、`SHOW TABLES`、`DESCRIBE <table>`；返回 SQL error 时先复核实例路由和环境，不切换到语义相近实例碰运气。
 5. 对大表加必要条件和 `LIMIT`；查询业务数据必须带业务键并限制字段。
-6. 回复先给“实例、逻辑库、定位证据”，再给结论、实际 SQL 和结果；结果过多时只展示关键行并说明截断。
+6. 回复先给“环境、实例、逻辑库、定位证据”，再给结论、实际 SQL 和结果；结果过多时只展示关键行并说明截断。
 
 ## 安全边界
 
 - 脚本会逐条校验 SQL 首关键字，拒绝非只读语句。
-- 本地 MySQL 客户端会启用 `--safe-updates` 和 `SET SESSION TRANSACTION READ ONLY`。
-- lxcloud 不再使用客户端实例白名单；脚本只校验 `db_type` 非空、长度和控制字符，最终访问权限由 lxcloud 服务端决定。
-- 不在本 skill 中新增任何线上 token、Cookie 或数据库账号配置文件。
+- 脚本只校验 `db_type` 非空、长度和控制字符，不维护实例白名单；最终访问权限由各环境 lxcloud 服务端决定。
+- 不在本 skill 中新增任何 token、Cookie 或数据库账号配置文件。
 - 自动读取的 localStorage token 只在当前 Node 子进程内使用；`--show-secrets` 只由脚本内部调用，不把明文 token 写入文件、日志或最终回复。

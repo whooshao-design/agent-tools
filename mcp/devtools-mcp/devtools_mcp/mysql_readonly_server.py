@@ -1,4 +1,4 @@
-"""Read-only MySQL MCP server backed by the local mysql_readonly.js script."""
+"""Read-only MySQL MCP server backed by the lxcloud HTTP SQL script (mysql_readonly.js)."""
 
 from __future__ import annotations
 
@@ -17,63 +17,28 @@ def _run(args: list[str], timeout: int = 120, max_chars: int = 20000) -> str:
 
 @mcp.tool()
 def mysql_doctor() -> str:
-    """检查 MySQL 只读脚本、配置文件和 mysql 客户端状态。"""
+    """检查 MySQL 只读脚本、lxcloud 环境入口和浏览器 session 依赖状态。"""
     return _run(["--doctor"], timeout=30)
-
-
-@mcp.tool()
-def list_mysql_instances() -> str:
-    """列出已配置的 MySQL 只读实例，敏感字段由脚本脱敏。"""
-    return _run(["--list"], timeout=30)
-
-
-@mcp.tool()
-def mysql_instance_status(instance: str = "") -> str:
-    """查看某个 MySQL 只读实例的配置状态，敏感字段脱敏。"""
-    args = ["--status"]
-    if instance:
-        args.append(f"--instance={instance}")
-    return _run(args, timeout=30)
-
-
-@mcp.tool()
-def mysql_check(instance: str = "") -> str:
-    """检查指定 MySQL 只读实例连通性。"""
-    args = ["--check"]
-    if instance:
-        args.append(f"--instance={instance}")
-    return _run(args, timeout=60)
-
-
-@mcp.tool()
-def mysql_query(query: str, instance: str = "", timeout_seconds: int = 120, max_chars: int = 20000) -> str:
-    """执行只读 SQL。脚本会拒绝 INSERT/UPDATE/DELETE/DDL 等写操作。"""
-    if not query:
-        return error_text("query is required")
-    args = [f"--query={query}"]
-    if instance:
-        args.append(f"--instance={instance}")
-    timeout = bounded_int(timeout_seconds, 120, 5, 600)
-    return _run(args, timeout=timeout, max_chars=bounded_int(max_chars, 20000, 1000, 100000))
 
 
 @mcp.tool()
 def mysql_lxcloud_query(
     query: str,
     db_type: str,
+    env: str = "prod",
     user_name: str = "",
     query_type: str = "single",
     query_role: str = "masterbackup",
     timeout_seconds: int = 120,
     max_chars: int = 20000,
 ) -> str:
-    """通过 lxcloud 只读查询线上数据。db_type 接受代码确认且当前账号有权访问的任意实例。"""
+    """通过 lxcloud HTTP SQL 只读查询 MySQL。env 为 prod（线上，默认）或 stable（测试/stable）；db_type 接受代码确认且当前账号有权访问的任意实例。"""
     if not query:
         return error_text("query is required")
     if not db_type:
         return error_text("db_type is required")
     args = [
-        "--lxcloud",
+        f"--env={env or 'prod'}",
         f"--db-type={db_type}",
         f"--query={query}",
         f"--query-type={query_type or 'single'}",
