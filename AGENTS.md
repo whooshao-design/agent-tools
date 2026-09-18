@@ -143,7 +143,7 @@ PYTHONPATH 都指向本仓库内对应 MCP 目录。新增 MCP 服务器后需�
   运行时由 `aggregate_server.py` 导入并把各自的工具合并进一个 FastMCP 实例，同名工具会直接报错。
   FastMCP 会在事件循环里直接调用同步工具，合并后这会让同一会话的工具调用互相阻塞，所以 `aggregate_server` 把同步工具
   包进 `anyio.to_thread.run_sync`；工具实现因此要能在 worker 线程里并发执行，共享连接等状态自己加锁
-  （`java_app_diag` 的 `BastionDiagSession` 用 `asyncio.Lock` 串行化那条 SSH 连接）。
+  （`java_app_diag` 的 `BastionDiagSession` 用 `asyncio.Lock` 只保护连接/重连：每条命令在同一 transport 上各开 channel，可以并发）。
   多数工具不实现业务逻辑，而是用 `common.skill_path("<skill>", "scripts", "<file>")` 定位 skill 脚本，经 `run_command` 调用、
   `command_result_text` 截断后返回；改 skill 脚本的命令行参数时必须同步对应 server 与 `mcp/devtools-mcp/tests`。
 - `skill_path()` 按 `skills/<分类>/<skill>` 搜索，`DEVTOOLS_SKILLS_DIR` 可覆盖为扁平目录，都找不到时回退 `~/.codex/skills/<skill>`。

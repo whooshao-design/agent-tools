@@ -222,23 +222,22 @@ class BastionDiagSession:
         return f"{state}（profile={profile}）"
 
     async def execute(self, ip: str, command: str, timeout: int, env: str = "", profile: str = "") -> str:
-        # One SSH connection per process, so concurrent tool calls must not
-        # interleave on it -- their output would be read back by each other.
+        # Each command opens its own channel on the shared transport
+        # (SSHManager._execute_on_target), so commands may run concurrently.
+        # Only (re)connecting swaps self.ssh_mgr, and that must not race.
         async with self._lock:
-            return await self._execute(ip, command, timeout, env=env, profile=profile)
-
-    async def _execute(self, ip: str, command: str, timeout: int, env: str = "", profile: str = "") -> str:
-        desired_profile = self._desired_profile(env=env, profile=profile)
-        profile_changed = desired_profile and desired_profile != self.active_profile
-        if not self.ssh_mgr or not self.ssh_mgr.is_connected() or profile_changed:
-            try:
-                connect_result = await self._connect(env=env, profile=profile)
-            except Exception as exc:
-                return f"错误：未连接堡垒机，自动连接失败：{exc}"
-            if connect_result.startswith("错误") or not self.ssh_mgr or not self.ssh_mgr.is_connected():
-                return f"错误：未连接堡垒机，自动连接失败：{connect_result}"
+            desired_profile = self._desired_profile(env=env, profile=profile)
+            profile_changed = desired_profile and desired_profile != self.active_profile
+            if not self.ssh_mgr or not self.ssh_mgr.is_connected() or profile_changed:
+                try:
+                    connect_result = await self._connect(env=env, profile=profile)
+                except Exception as exc:
+                    return f"错误：未连接堡垒机，自动连接失败：{exc}"
+                if connect_result.startswith("错误") or not self.ssh_mgr or not self.ssh_mgr.is_connected():
+                    return f"错误：未连接堡垒机，自动连接失败：{connect_result}"
+            ssh_mgr = self.ssh_mgr
         return await asyncio.to_thread(
-            self.ssh_mgr.execute_on_target,
+            ssh_mgr.execute_on_target,
             ip,
             command,
             bounded_int(timeout, 30, 5, 180),
