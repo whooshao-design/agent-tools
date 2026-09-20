@@ -28,8 +28,7 @@ agent-tools/
 ├── env/                 # 公共凭证 credentials.env（gitignore）与模板 credentials.env.example
 ├── tests/               # 仓库级测试：install.py、toolchain_audit、dev-workflow 契约一致性
 ├── install.py           # 符号链接安装脚本（claude + codex 双目标）
-├── AGENTS.md            # 本文件（主文档）
-└── CLAUDE.md            # 薄指针，指向本文件
+└── AGENTS.md            # 本文件（主文档）
 ```
 
 ## 安装机制
