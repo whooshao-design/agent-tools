@@ -122,8 +122,8 @@ class PickAgentTest(unittest.TestCase):
             choices.append(preview["backend"])
             reused.append(preview["reuse_of_round"])
             self.record(preview["backend"])
-        self.assertEqual(choices, ["claude-qwen", "codex-vps"] * 3)
-        self.assertEqual(reused, [None, None, 1, 2, 3, 4])
+        self.assertEqual(choices, ["claude-qwen", "codex-vps", "codex-qwen"] * 2)
+        self.assertEqual(reused, [None, None, None, 1, 2, 3])
 
     def test_explicit_exclude_is_temporary_and_does_not_record_producer(self):
         self.assertEqual(self.call(exclude=" claude-vps ")["backend"], "claude-qwen")
@@ -164,6 +164,7 @@ class PickAgentTest(unittest.TestCase):
             self.call("solution-design", exclude="codex-vps", replace_producer="不可用")
         self.record("codex-vps", "solution-design")
         self.record("claude-qwen", "solution-design")
+        self.record("codex-qwen", "solution-design")
         with self.assertRaisesRegex(ValueError, "无可用后端"):
             self.call()
 

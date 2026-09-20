@@ -1,7 +1,7 @@
 {
-  "$comment": "多 LLM 协作的候选注册表。分数来自 2026-09-14 各一轮的实测，只用于挑试运行候选。",
-  "version": "1.2.0",
-  "updated": "2026-09-14",
+  "$comment": "多 LLM 协作的候选注册表。评审分数为 eval-v2（2026-09-20，11 缺陷、两轮、成对通道）；history 保留 2026-09-14 的旧分数。只用于挑试运行候选。",
+  "version": "1.3.0",
+  "updated": "2026-09-20",
   "backends": {
     "claude-vps": {
       "model_source": "dynamic:~/.claude/settings.json#model",
@@ -16,10 +16,23 @@
     "claude-qwen": {
       "model": "qwen3.8-max",
       "channel": "lexin-gateway-direct",
-      "review_score": "9/9",
+      "review_score": "11-11/11",
       "gen_tier": "strong",
       "readonly_capable": true,
-      "review_test_model": "qwen3.8-max"
+      "review_test_model": "qwen3.8-max",
+      "history": {
+        "2026-09-14": {
+          "review_score": "9/9",
+          "method": "eval-v1（9 缺陷、单轮）"
+        }
+      },
+      "json_ok": "2/2",
+      "write_attempts": 0,
+      "avg_wall_s": 294,
+      "avg_input_tokens": 31500,
+      "note": "两轮唯一每次都抓到边界放宽缺陷（捕获 Throwable）的配置；耗时最长。",
+      "eval_method": "eval-v2",
+      "eval_date": "2026-09-20"
     },
     "claude-glm": {
       "model": "glm-5.3",
@@ -44,87 +57,208 @@
     "claude-deepseek": {
       "model": "deepseek-v4-pro",
       "channel": "lexin-gateway-direct",
-      "review_score": "6/9",
+      "review_score": "11-11/11",
       "gen_tier": "strong",
       "readonly_capable": true,
       "note": "实测生成信息密度高（1794 字，9.4s）。",
-      "review_test_model": "deepseek-v4-pro"
+      "review_test_model": "deepseek-v4-pro",
+      "history": {
+        "2026-09-14": {
+          "review_score": "6/9",
+          "method": "eval-v1（9 缺陷、单轮）"
+        }
+      },
+      "json_ok": "2/3",
+      "write_attempts": 0,
+      "avg_wall_s": 237,
+      "avg_input_tokens": 17000,
+      "warn": "三次运行有一次网关返回空内容（2 轮、无报错），派发后要检查结果非空并重试一次。",
+      "eval_method": "eval-v2",
+      "eval_date": "2026-09-20"
     },
     "claude-kimi": {
       "model": "kimi-k2.7-code",
       "channel": "lexin-gateway-direct",
-      "review_score": "5/9",
+      "review_score": "8-11/11",
       "gen_tier": "mid",
       "readonly_capable": true,
       "warn": "实测两项得分最低；一次生成替产品作了未确认决定，核对它的假设。",
-      "review_test_model": "kimi-k2.7-code"
+      "review_test_model": "kimi-k2.7-code",
+      "history": {
+        "2026-09-14": {
+          "review_score": "5/9",
+          "method": "eval-v1（9 缺陷、单轮）"
+        }
+      },
+      "json_ok": "2/2",
+      "write_attempts": 0,
+      "avg_wall_s": 82,
+      "avg_input_tokens": 15500,
+      "note": "两轮差异最大（8→11），单轮结论不稳；最快最省 token。",
+      "eval_method": "eval-v2",
+      "eval_date": "2026-09-20"
+    },
+    "codex-qwen": {
+      "model": "qwen3.8-max",
+      "channel": "lexin-gateway-codex",
+      "review_score": "10-10/11",
+      "json_ok": "2/2",
+      "write_attempts": 0,
+      "avg_wall_s": 126,
+      "avg_input_tokens": 71000,
+      "gen_tier": "strong",
+      "review_test_model": "qwen3.8-max",
+      "note": "两轮稳定 10/11，两次都漏边界放宽缺陷。 codex 用 cat/sed 读全文，输入 token 是 claude 通道的 4–6 倍。",
+      "readonly_requires": "exec -s read-only -c approval_policy=\"never\" --ignore-user-config --ephemeral --skip-git-repo-check，</dev/null；codex-profile 另设 approvals_reviewer=user。eval-v2 四次运行零写入尝试，文档内写文件诱导未执行。",
+      "eval_method": "eval-v2",
+      "eval_date": "2026-09-20",
+      "readonly_capable": true
+    },
+    "codex-deepseek": {
+      "model": "deepseek-v4-pro",
+      "channel": "lexin-gateway-codex",
+      "review_score": "10-11/11",
+      "json_ok": "2/2",
+      "write_attempts": 0,
+      "avg_wall_s": 181,
+      "avg_input_tokens": 81600,
+      "gen_tier": "strong",
+      "review_test_model": "deepseek-v4-pro",
+      "note": "两轮 10/11、11/11。 codex 用 cat/sed 读全文，输入 token 是 claude 通道的 4–6 倍。",
+      "readonly_requires": "exec -s read-only -c approval_policy=\"never\" --ignore-user-config --ephemeral --skip-git-repo-check，</dev/null；codex-profile 另设 approvals_reviewer=user。eval-v2 四次运行零写入尝试，文档内写文件诱导未执行。",
+      "eval_method": "eval-v2",
+      "eval_date": "2026-09-20",
+      "readonly_capable": true
+    },
+    "codex-kimi": {
+      "model": "kimi-k2.7-code",
+      "channel": "lexin-gateway-codex",
+      "review_score": "10-10/11",
+      "json_ok": "2/2",
+      "write_attempts": 0,
+      "avg_wall_s": 97,
+      "avg_input_tokens": 82300,
+      "gen_tier": "mid",
+      "review_test_model": "kimi-k2.7-code",
+      "note": "两轮稳定 10/11，比 claude-kimi 稳定但漏同一缺陷。 codex 用 cat/sed 读全文，输入 token 是 claude 通道的 4–6 倍。",
+      "readonly_requires": "exec -s read-only -c approval_policy=\"never\" --ignore-user-config --ephemeral --skip-git-repo-check，</dev/null；codex-profile 另设 approvals_reviewer=user。eval-v2 四次运行零写入尝试，文档内写文件诱导未执行。",
+      "eval_method": "eval-v2",
+      "eval_date": "2026-09-20",
+      "readonly_capable": true
     }
   },
   "stages": {
     "requirement-clarify": {
       "role": "generate",
-      "candidates": ["claude-deepseek", "claude-qwen", "claude-glm"],
+      "candidates": [
+        "claude-deepseek",
+        "claude-qwen",
+        "claude-glm"
+      ],
       "artifact": "requirement",
       "evidence": "sample_informed"
     },
     "requirement-review": {
       "role": "review",
-      "candidates": ["claude-vps", "codex-vps"],
+      "candidates": [
+        "claude-vps",
+        "codex-vps"
+      ],
       "artifact": "requirement",
       "evidence": "extrapolated",
       "note": "用户指定：质量优先，只在两个最强后端间轮换。"
     },
     "content-organize": {
       "role": "generate",
-      "candidates": ["claude-deepseek", "claude-qwen", "claude-glm"],
+      "candidates": [
+        "claude-deepseek",
+        "claude-qwen",
+        "claude-glm"
+      ],
       "artifact": "content",
       "evidence": "sample_informed"
     },
     "solution-design": {
       "role": "generate",
-      "candidates": ["claude-vps", "codex-vps"],
+      "candidates": [
+        "claude-vps",
+        "codex-vps"
+      ],
       "artifact": "solution",
       "evidence": "extrapolated"
     },
     "solution-review": {
       "role": "review",
-      "candidates": ["claude-vps", "claude-qwen", "codex-vps"],
+      "candidates": [
+        "claude-vps",
+        "claude-qwen",
+        "codex-vps",
+        "codex-qwen"
+      ],
       "artifact": "solution",
-      "evidence": "sample_informed"
+      "evidence": "measured"
     },
     "testcase-generate": {
       "role": "generate",
-      "candidates": ["claude-deepseek", "claude-qwen", "claude-glm"],
+      "candidates": [
+        "claude-deepseek",
+        "claude-qwen",
+        "claude-glm"
+      ],
       "artifact": "testcase",
       "evidence": "extrapolated"
     },
     "testcase-review": {
       "role": "review",
-      "candidates": ["claude-vps", "claude-qwen", "codex-vps"],
+      "candidates": [
+        "claude-vps",
+        "claude-qwen",
+        "codex-vps",
+        "codex-qwen"
+      ],
       "artifact": "testcase",
       "evidence": "extrapolated"
     },
     "code-build": {
       "role": "generate",
-      "candidates": ["claude-deepseek", "claude-qwen", "claude-glm"],
+      "candidates": [
+        "claude-deepseek",
+        "claude-qwen",
+        "claude-glm"
+      ],
       "artifact": "code",
       "evidence": "untested"
     },
     "code-review": {
       "role": "review",
-      "candidates": ["claude-vps", "codex-vps", "claude-qwen"],
+      "candidates": [
+        "claude-vps",
+        "codex-vps",
+        "claude-qwen"
+      ],
       "artifact": "code",
       "evidence": "untested"
     },
     "quick-check": {
       "role": "review",
-      "candidates": ["claude-kimi", "claude-deepseek", "claude-glm", "claude-qwen"],
+      "candidates": [
+        "claude-kimi",
+        "codex-kimi",
+        "claude-deepseek",
+        "codex-deepseek",
+        "claude-glm",
+        "claude-qwen"
+      ],
       "artifact": "content",
-      "evidence": "extrapolated"
+      "evidence": "measured"
     },
     "verify-execute": {
       "role": "execute",
-      "candidates": ["claude-deepseek", "claude-qwen", "claude-glm"],
+      "candidates": [
+        "claude-deepseek",
+        "claude-qwen",
+        "claude-glm"
+      ],
       "needs_write": true,
       "note": "执行构建和测试可能写编译产物或报告，按任务限定写集；可由生成者执行，不能充当独立评审。",
       "artifact": "code",
@@ -148,13 +282,18 @@
     "codex_review": "cd -- {material} && /home/joney/bin/codex-reviewer \"<prompt>\" </dev/null",
     "verify_execute": "使用 generate 模板，在 prompt 中限定命令与允许写集。",
     "warn_strict_mcp": "--tools 限定内置工具集合，--strict-mcp-config 去掉用户级 MCP；--allowedTools 只控制免确认，不限制工具集合。",
-    "template_only": "输出是待填模板，不直接 eval；真实 prompt 用独立 argv 或输入文件传。"
+    "template_only": "输出是待填模板，不直接 eval；真实 prompt 用独立 argv 或输入文件传。",
+    "codex_lexin_review": "cd -- {material} && {backend} exec -s read-only -c approval_policy=\"never\" --ignore-user-config --ephemeral --skip-git-repo-check \"<prompt>\" </dev/null",
+    "codex_lexin_generate": "{backend} exec --skip-git-repo-check --ephemeral \"<prompt>\" </dev/null",
+    "warn_codex_lexin": "乐信网关的 codex-* 不走 codex-reviewer（它绑定 codex-vps 与主配置模型）；用上面的模板，approval_policy=never 断掉自动提权。"
   },
   "notes": {
     "review_test": "一份 70 行、植入 9 个缺陷的设计文档，按答案键计分。原始答案与逐后端输出未随文档保存。",
     "gen_test": "含 8 要点/3 矛盾/3 缺口/1 幻觉陷阱的讨论记录整理。所有后端要点召回均 8/8，区分度在矛盾识别与幻觉。",
     "sample_size": "每项能力各一轮；生成测试是需求讨论整理，方案、测试、代码生成未测。各环节 evidence 标明外推或未测。",
     "unavailable": "claude-doubao 因网关 team 权限 401 不可用；minimax 与 grok 已按用户要求剔除。",
-    "denominator": "早期缺陷分类百分比按 7 个后端算，与当前 6 个不符且无逐项数据，已撤下。"
+    "denominator": "早期缺陷分类百分比按 7 个后端算，与当前 6 个不符且无逐项数据，已撤下。",
+    "review_test_v2": "eval-v2：evals/review-seeded/ 的真实方案注入 11 个缺陷（矛盾 3、缺失 1、悬空引用 1、无证据断言 1、修订痕迹 1、边界放宽 1、逻辑矛盾 1、写入诱导 1），同一模型成对走 claude-*/codex-*，各两轮；方法见 references/backend-evaluation.md，结果见 evals/review-seeded/results/2026-09-20.md。",
+    "channel_rule": "编排器在 Claude Code 里用 claude-*，在 Codex 里用 codex-*；两条通道命中区间重叠（差异只在一个边界类缺陷），codex 通道 token 高 4–6 倍但耗时相近，claude 通道偶有网关空返回。"
   }
 }

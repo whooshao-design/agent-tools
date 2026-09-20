@@ -93,7 +93,12 @@ def resolve_model(backend: str, spec: dict) -> str:
 
 def build_command(backend: str, invocation: dict, role: str, material: str | None) -> str:
     """仅生成模板；所有调用参数保持为字面值，不在本脚本执行 shell。"""
-    family = "codex" if backend == "codex-vps" else "claude"
+    if backend == "codex-vps":
+        family = "codex"          # 走 codex-reviewer（bwrap + 主配置模型）
+    elif backend.startswith("codex-"):
+        family = "codex_lexin"    # 乐信网关的 codex-*：exec 只读沙箱 + approval never
+    else:
+        family = "claude"
     action = "review" if role == "review" else "generate"
     return invocation[f"{family}_{action}"].format(
         backend=shlex.quote(backend), material=shlex.quote(material or "<材料目录>"))
