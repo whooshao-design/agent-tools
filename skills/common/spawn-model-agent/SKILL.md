@@ -40,7 +40,7 @@ python3 /home/joney/projects/ai/agent-tools/skills/common/spawn-model-agent/scri
 ## 边界
 
 - 权限与主会话的子 agent 相同：Claude 侧 `--dangerously-skip-permissions`，Codex 侧 `-s workspace-write -c approval_policy="never"`，工作目录内可读写。要限制时加 `--readonly`。
-- 联网搜索只有 claude-* 有（WebSearch / WebFetch），codex-* 没有；需要联网的任务在 Codex 里也用 `--client claude`。
+- 两条通道都能联网：claude-* 有 WebSearch / WebFetch，codex-* 由脚本加上全局 `--search`，乐信网关实测能用原生 `web_search` 工具。
 - 每次启动约 30–60 秒开销（加载全局说明、记忆和 skill 索引）；不适合几秒钟的小问题。
 - 乐信网关约 20 分钟会断连，长任务让 agent 边做边写文件；`meta.json` 的 `subtype`/`exit_code` 不正常时看 `raw.*`。
 - 后端能力与成本见 `build-codeagent/references/backend-evaluation.md` 与 `model-routing.json`。

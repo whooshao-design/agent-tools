@@ -40,7 +40,7 @@ class SpawnModelAgentTest(unittest.TestCase):
         self.assertNotIn("--dangerously-skip-permissions", r)
 
         x = sma.build_command("codex-qwen", "do it", readonly=False)
-        self.assertEqual(x[:2], ["codex-qwen", "exec"])
+        self.assertEqual(x[:3], ["codex-qwen", "--search", "exec"])
         self.assertIn("workspace-write", x)
         self.assertIn('approval_policy="never"', x)
         self.assertIn("read-only", sma.build_command("codex-qwen", "do it", readonly=True))

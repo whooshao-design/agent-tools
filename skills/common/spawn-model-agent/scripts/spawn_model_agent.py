@@ -40,7 +40,8 @@ def build_command(backend, task, readonly):
         else:
             cmd += ['--dangerously-skip-permissions']
         return cmd
-    cmd = [backend, 'exec', '--skip-git-repo-check', '--ephemeral', '--json',
+    # --search is a global codex flag (before the subcommand); the lexin gateway serves the web_search tool.
+    cmd = [backend, '--search', 'exec', '--skip-git-repo-check', '--ephemeral', '--json',
            '-s', 'read-only' if readonly else 'workspace-write', '-c', 'approval_policy="never"', task]
     return cmd
 
