@@ -58,6 +58,7 @@ python3 $S/scripts/score_backend_eval.py --key $S/evals/review-seeded/answer-key
 - 每个运行用独立的材料目录，目录里只放被评文件，`material_changed` 才有意义。
 - claude-* 以 `--tools Read,Grep,Glob --strict-mcp-config` 限定工具集合；codex-* 以 `exec -s read-only -c approval_policy="never" --ignore-user-config --ephemeral` 限定，`</dev/null` 由脚本处理。两者都是脚本内置，不要手改。
 - 同一配置跑 `r1`、`r2` 两轮；分数取区间而不是平均。
+- codex 通道的 `.raw.jsonl` 里出现 `Reconnecting... (reason: max_output_tokens)` 说明网关单次响应输出上限（glm-5.3 为 8192）被思考占满；codex 不发 `max_output_tokens`，只能在 `~/.config/ai-providers/codex/lexin-<family>.env` 用 `CODEX_PROFILE_ARGS` 降 `model_reasoning_effort`，并把失败运行改名保留后重跑。
 - 原始输出留在 `~/.local/state/agent-routing/evals/<日期>/results/`，不进仓库；汇总表和结论写进 `evals/review-seeded/results/<日期>.md`。
 
 ## 5. 计分与判定

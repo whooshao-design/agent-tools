@@ -113,7 +113,7 @@ python3 .../pick_agent.py --task <任务ID> --show-record
 
 `model-routing.json` 三块内容：
 
-- `backends`：9 个后端的通道、模型来源、评审实测分数（eval-v2，见 `references/backend-evaluation.md`，材料与脚本在 `evals/` 与 `scripts/backend_eval.py`）、生成能力分档和只读调用要求。`claude-vps` 和 `codex-vps`
+- `backends`：10 个后端的通道、模型来源、评审实测分数（eval-v2，见 `references/backend-evaluation.md`，材料与脚本在 `evals/` 与 `scripts/backend_eval.py`）、生成能力分档和只读调用要求。`claude-vps` 和 `codex-vps`
   的模型写成 `dynamic:<路径>#<键>`，跟随本机配置。同一模型的 `claude-*` 与 `codex-*` 是两条通道：编排器在哪个客户端就用哪一套。
 - `stages`：11 个环节的候选集与 `artifact` 归属。`evidence` 标 `extrapolated` 或 `untested` 的环节，
   候选是外推来的，试运行后再调。
@@ -132,7 +132,7 @@ python3 .../pick_agent.py --task <任务ID> --show-record
 
 **provider 是进程级的。** 一个 Claude Code 会话连哪个网关由启动时的 `ANTHROPIC_BASE_URL` 决定，进程内 subagent 换不到别家模型。要不同模型的视角只能跨进程派发：`claude-vps` 经 `ai-vps-exec` 启动 `claude`，其他 `claude-*` 经 `claude-profile` 按各自 env 启动。
 
-**`codex-vps` 评审必须走 `/home/joney/bin/codex-reviewer`；乐信网关的 `codex-qwen` / `codex-deepseek` / `codex-kimi` 用脚本给出的 `codex_lexin_review` 模板（`exec -s read-only -c approval_policy="never" --ignore-user-config --ephemeral --skip-git-repo-check`，`</dev/null`），2026-09-20 的 eval-v2 六次运行零写入。** 裸 `codex exec -s read-only` 不安全：沙箱拦住第一次写入后，本机配置 `approval_policy = "on-request"` 加 `approvals_reviewer = "auto_review"` 会自动批准提权，同一条命令重试即成功（2026-09-14 复现：第一次报 Read-only file system，第二次 exit 0）。`codex-reviewer` 叠加三层：bwrap 只读绑定 home（`~/.codex` 除外）和材料目录；`approval_policy=never` 断掉提权，home 外的写入由 codex 自身只读沙箱拦住；`--ignore-user-config` 不挂用户级 MCP。它内部从主配置取模型传 `-m`，是封装例外。
+**`codex-vps` 评审必须走 `/home/joney/bin/codex-reviewer`；乐信网关的 `codex-qwen` / `codex-deepseek` / `codex-kimi` / `codex-glm` 用脚本给出的 `codex_lexin_review` 模板（`exec -s read-only -c approval_policy="never" --ignore-user-config --ephemeral --skip-git-repo-check`，`</dev/null`），2026-09-20 的 eval-v2 八次运行零写入。** 裸 `codex exec -s read-only` 不安全：沙箱拦住第一次写入后，本机配置 `approval_policy = "on-request"` 加 `approvals_reviewer = "auto_review"` 会自动批准提权，同一条命令重试即成功（2026-09-14 复现：第一次报 Read-only file system，第二次 exit 0）。`codex-reviewer` 叠加三层：bwrap 只读绑定 home（`~/.codex` 除外）和材料目录；`approval_policy=never` 断掉提权，home 外的写入由 codex 自身只读沙箱拦住；`--ignore-user-config` 不挂用户级 MCP。它内部从主配置取模型传 `-m`，是封装例外。
 
 **Claude 评审用 `--tools "Read,Grep,Glob"` 加 `--strict-mcp-config`。** 前者把工具集合限到三个只读工具，后者去掉用户级 MCP；实测 claude-qwen 在此配置下工具面只有这三个、MCP 为空、skill 仍可加载。`--allowedTools` 只控制免确认，不限制工具集合，不要拿它当隔离。
 
