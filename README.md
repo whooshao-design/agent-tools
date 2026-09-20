@@ -10,6 +10,7 @@
 | Skill | 说明 |
 |---|---|
 | `build-codeagent` | 跨模型生成与轻量互审；支持 dev-workflow 正式委派、候选轮换和实际参与登记 |
+| `spawn-model-agent` | 用户点名某个模型做子任务时，另起该模型的 agent 进程（Claude/Codex 宿主自动选包装器），权限同普通子 agent |
 | `debug-systematic` | 系统化调试方法论：复现→定位→根因→验证 |
 | `convert-epub-to-markdown` | EPUB 转 Markdown，保留原件与图片，自动选择全文或分卷并校验正文 |
 | `skill-authoring` | 按仓库约定创建/维护 skill 的元技能 |
