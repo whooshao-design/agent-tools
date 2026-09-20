@@ -1,7 +1,8 @@
 # 开发执行清单契约
 
 本契约供 `dev-build-change` 在编码前把稳定目标拆成可执行的 `DEV-*`，并供 `build-codeagent`、`dev-auto-loop`
-消费执行状态。它不是新的需求、方案、测试清单或审批产物，不增加独立门禁。
+消费执行状态。它不是新的需求、方案、测试清单或审批产物，不增加独立门禁。清单文件的表达遵循
+`/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/writing-principles.md`（第一屏、段落、表格、标识引用），本契约只规定结构。
 
 ## 1. 定位与追踪
 

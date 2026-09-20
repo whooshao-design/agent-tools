@@ -76,6 +76,8 @@ metadata:
 
 ## 输出物
 
+表达遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/writing-principles.md`：头部一行、相关文档、摘要在前，段落优先，表格只承载映射，ID 跟在自然语言名称后。
+
 默认输出一份轻量需求澄清结果，建议包含：
 - 需求身份：`R` 的引用、版本/内容指纹、一句话摘要和 `producer_agent_refs[]`；对话模式可使用消息引用
 - 任务目标：一句话说明这次要解决什么问题
