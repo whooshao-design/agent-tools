@@ -97,7 +97,9 @@ cd <只含 solution.md 的目录> && codex-<backend> exec -s read-only --ephemer
   "$(cat <prompt 文件>)" </dev/null > ../agent-v<N>.raw.jsonl
 ```
 
-Codex 没有 Read 工具，读者会在只读沙箱里用 `cat`/`sed` 分段读，同一份 170 行的方案消耗约 137k 输入 token（Claude 侧约 40k）；结果在 `--json` 输出里最后一个 `agent_message` 的 JSON 代码块。`</dev/null` 必须加。不要给 `codex-<backend>` 加 `--ignore-user-config`：`~/bin/codex-profile` 会为主配置里的每个 MCP server 追加 `enabled=false`，不加载主配置时这些覆盖会变成只有 `enabled` 字段的空条目，codex 以 `invalid transport` 拒绝启动。
+Codex 没有 Read 工具，读者会在只读沙箱里用 `cat`/`sed` 分段读，同一份 170 行的方案消耗约 137k 输入 token（Claude 侧约 40k）；结果在 `--json` 输出里最后一个 `agent_message` 的 JSON 代码块。`</dev/null` 必须加。加 `--ignore-user-config` 可以不挂载主配置里的 MCP server（2026-09-20 起 `~/bin/codex-profile` 已兼容该参数）。
+
+编排器在 Codex 里时，读者测试和正式评审都用 `codex-<backend>`，不从 Codex 会话里再拉起 Claude Code；只有需要 WebSearch 的调研类任务仍用 `claude-<backend>`，codex exec 没有联网搜索。
 
 ## 7. 人的读者测试
 
