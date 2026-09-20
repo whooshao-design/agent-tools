@@ -2,7 +2,7 @@
 name: spawn-model-agent
 description: Use when 用户点名用某个国内模型或其他后端（qwen、deepseek、kimi、glm 等）做一个子任务，例如"用 kimi 总结这个文件""让 deepseek 起草说明""用 qwen 联网查一下"，或显式调用 /spawn-model-agent；在 Claude Code 与 Codex 里都另起一个该模型的 agent 进程执行，主会话只读结果。不做模型自动路由。
 metadata:
-  version: 1.0.0
+  version: 1.1.0
 ---
 
 # spawn-model-agent
@@ -20,15 +20,18 @@ python3 /home/joney/projects/ai/agent-tools/skills/common/spawn-model-agent/scri
   --backend kimi --task "总结 docs/design.md 的前三章，写成 10 行以内的要点" --cwd /home/joney/projects/xxx
 ```
 
-- `--backend`：`qwen` / `deepseek` / `kimi` / `glm` / `minimax` 这类短名按宿主自动补成 `claude-<名>` 或 `codex-<名>`；也可以写完整包装器名如 `claude-qwen`、`codex-vps`。
+- `--backend`：短名（`qwen` / `deepseek` / `kimi` / `glm` / `minimax` / `doubao` / `vps`）按宿主补成 `claude-<名>` 或 `codex-<名>`；也可以写完整包装器名如 `claude-qwen`、`codex-vps`。可用列表来自 PATH 上指向 `claude-profile` / `codex-profile` 的包装器，不是写死的。
+- `--list`：列出可用后端，附 `build-codeagent/model-routing.json` 里的评审分与备注（未评测的显示"未测"，仍可用）。
 - `--task`：任务文本，或 `@文件路径` 从文件读。写清目标、输入位置、期望输出形式。
 - `--cwd`：agent 的工作目录，默认当前目录。它能读写这个目录，和主会话的子 agent 权限一致。
+- `--slim`：仅 claude-*。用空配置目录启动，不加载全局 CLAUDE.md、记忆、skill 索引和 MCP；实测同一小任务 20.7s/66k token 降到 10.6s/34k。任务不依赖全局规则或 MCP 时默认加上。
+- `--resume <作业目录>`：在上一次的 agent 会话里继续追问（claude 用 `--resume session_id`，codex 用 `exec resume thread_id`），不用重发材料。
 - `--readonly`：可选，只读模式。
 - `--wait`：前台等待结束；默认后台运行，命令立即返回作业目录。
-- `--client claude|codex`：宿主自动检测失败时手动指定。
+- `--client claude|codex`：宿主检测顺序是 `CLAUDECODE` / `CODEX_*` 环境变量、父进程链里的 claude / codex 进程；都判不出时短名报错，用完整名或加这个参数。
 - `--status <作业目录>`：查看一个后台作业的状态和结果。
 
-作业目录在 `~/.local/state/spawn-model-agent/<时间>-<后端>/`：`task.md` 是任务原文，`result.md` 是 agent 的最终回复，`meta.json` 记录模型、耗时、token、退出码，`raw.*` 是原始输出。
+作业目录在 `~/.local/state/spawn-model-agent/<时间>-<后端>/`：`task.md` 是任务原文，`result.md` 是 agent 的最终回复，`meta.json` 记录模型、耗时、token、退出码、会话 ID（供 `--resume`），`raw.*` 是原始输出。
 
 ## 主会话的流程
 
@@ -39,8 +42,8 @@ python3 /home/joney/projects/ai/agent-tools/skills/common/spawn-model-agent/scri
 
 ## 边界
 
-- 权限与主会话的子 agent 相同：Claude 侧 `--dangerously-skip-permissions`，Codex 侧 `-s workspace-write -c approval_policy="never"`，工作目录内可读写。要限制时加 `--readonly`。
+- 权限与主会话的子 agent 相同：Claude 侧 `--dangerously-skip-permissions`，MCP 按用户配置继承；Codex 侧 `-s workspace-write -c approval_policy="never"`，MCP 由 `codex-profile` 关闭（网关不支持）。要限制时加 `--readonly`（claude 侧同时不接 MCP）。
 - 两条通道都能联网：claude-* 有 WebSearch / WebFetch，codex-* 由脚本加上全局 `--search`，乐信网关实测能用原生 `web_search` 工具。
-- 每次启动约 30–60 秒开销（加载全局说明、记忆和 skill 索引）；不适合几秒钟的小问题。
+- 启动开销：claude-* 默认约 20 秒 / 65k token，`--slim` 约 10 秒 / 34k；codex-* 约 20 秒 / 45k。几秒钟能答的小问题不值得派发；追问用 `--resume` 省掉重发材料。
 - 乐信网关约 20 分钟会断连，长任务让 agent 边做边写文件；`meta.json` 的 `subtype`/`exit_code` 不正常时看 `raw.*`。
 - 后端能力与成本见 `build-codeagent/references/backend-evaluation.md` 与 `model-routing.json`。
