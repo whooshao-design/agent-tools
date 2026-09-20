@@ -48,6 +48,7 @@
 
 - mermaid 只用稳定子集：`flowchart` / `graph`、`sequenceDiagram`（含 `autonumber`、`Note`、`alt`/`loop`、激活）、`stateDiagram` / `stateDiagram-v2`、`erDiagram`、`classDiagram`。不用 beta 图型、`%%{init}%%` 指令和主题配置。2026-09-18 在飞书文本绘图小组件实测：flowchart、带 autonumber/alt/loop 的 sequenceDiagram、stateDiagram-v2 都能出图；erDiagram、classDiagram 只在本地 mermaid 8.13 与 11 下校验通过，未在飞书实测。
 - 节点文本避免全角冒号和箭头符号，mermaid 8.13 会报词法错误；用逗号或空格分隔。
+- 前后对照图用 `flowchart TB` 加两个 `subgraph`，两组会并排显示；渲染时后声明的组排在左边，所以先写"迁移后"再写"迁移前"，"迁移前"才会在左侧。
 - 一张图节点不超过 15 个、消息不超过 12 条；超过就拆图或提升抽象层级。
 - 等宽文本块画的时序、调用树、时间线与 mermaid 同为正式形式，设计方可以直接选用；它在本地、GitLab 和飞书三端表现一致，飞书导入时保留为代码块。
 - 非文本图（draw.io、图片）只在 mermaid 明显失真时使用，且必须提交可编辑源；不因此引入新的渲染依赖。
