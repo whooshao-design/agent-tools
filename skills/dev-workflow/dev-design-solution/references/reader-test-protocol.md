@@ -58,7 +58,7 @@
 ## 6. agent 提示词模板
 
 ```text
-你是一位第一次读到这份技术方案的后端工程师，对项目没有任何背景，也拿不到其他材料。当前目录下只有一个文件 `solution.md`，请用 Read 工具完整读一遍，然后只依据它回答下面的问题。不要搜索其他文件，不要写文件，不要猜测文档之外的信息。
+你是一位第一次读到这份技术方案的后端工程师，对项目没有任何背景，也拿不到其他材料。当前目录下只有一个文件 `solution.md`，请完整读一遍（用你能用的文件读取方式，分段读也可以），然后只依据它回答下面的问题。不要读其他文件，不要写文件，不要猜测文档之外的信息。
 
 七个问题，每题回答不超过两句话，并附一句原文引用（逐字复制，不超过一句）和它所在的标题；如果文档里找不到答案，答案写"找不到"，引用留空：
 
@@ -81,12 +81,23 @@
 {"answers": [{"q": 1, "answer": "", "quote": "", "heading": ""}], "ambiguities": [], "assumed_knowledge": [], "contradictions": []}
 ```
 
-Claude Code 后端的派发命令形如：
+派发命令跟随编排器所在的客户端；模型按角色选（强模型全文、中等模型截断），与客户端无关。
+
+Claude Code 编排时用 `claude-<backend>`：
 
 ```bash
 cd <只含 solution.md 的目录> && claude-<backend> -p "$(cat <prompt 文件>)" --allowedTools Read \
   --disallowedTools 'Bash,Write,Edit,WebSearch,WebFetch,Glob,Grep,Task' --max-turns 12 --output-format json
 ```
+
+Codex 编排时用 `codex-<backend> exec`（2026-09-20 用 codex-qwen 对同一份冻结方案实测 7/7）：
+
+```bash
+cd <只含 solution.md 的目录> && codex-<backend> exec -s read-only --ephemeral --skip-git-repo-check --json \
+  "$(cat <prompt 文件>)" </dev/null > ../agent-v<N>.raw.jsonl
+```
+
+Codex 没有 Read 工具，读者会在只读沙箱里用 `cat`/`sed` 分段读，同一份 170 行的方案消耗约 137k 输入 token（Claude 侧约 40k）；结果在 `--json` 输出里最后一个 `agent_message` 的 JSON 代码块。`</dev/null` 必须加。不要给 `codex-<backend>` 加 `--ignore-user-config`：`~/bin/codex-profile` 会为主配置里的每个 MCP server 追加 `enabled=false`，不加载主配置时这些覆盖会变成只有 `enabled` 字段的空条目，codex 以 `invalid transport` 拒绝启动。
 
 ## 7. 人的读者测试
 
