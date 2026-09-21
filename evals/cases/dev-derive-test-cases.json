@@ -1,0 +1,29 @@
+{
+  "skill_name": "dev-derive-test-cases",
+  "trigger": {
+    "positive": [
+      {
+        "prompt": "方案评审通过了，基于验收标准编写测试清单",
+        "top_k": 1
+      },
+      {
+        "prompt": "把需求、方案和检查项做三向追踪，列出待验证的检查项",
+        "top_k": 3
+      },
+      {
+        "prompt": "编写可独立复核的测试清单作为编码依据",
+        "top_k": 3
+      }
+    ],
+    "negative": [
+      {
+        "prompt": "独立复核这份测试清单有没有漏项",
+        "owner": "dev-review-test-cases"
+      },
+      {
+        "prompt": "跑一下这次改动的测试",
+        "owner": "dev-verify-change"
+      }
+    ]
+  }
+}

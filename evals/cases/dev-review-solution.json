@@ -1,0 +1,44 @@
+{
+  "skill_name": "dev-review-solution",
+  "trigger": {
+    "positive": [
+      {
+        "prompt": "独立评审这份技术方案，给出通过、有条件通过还是退回重设计",
+        "top_k": 1
+      },
+      {
+        "prompt": "编码前帮我评审一下方案有没有阻断问题和风险",
+        "top_k": 3
+      },
+      {
+        "prompt": "对方案做技术评审，识别 Blocker 和 High",
+        "top_k": 3
+      }
+    ],
+    "negative": [
+      {
+        "prompt": "基于需求写一份技术方案",
+        "owner": "dev-design-solution"
+      },
+      {
+        "prompt": "评审这次代码改动",
+        "owner": "dev-review-change"
+      }
+    ]
+  },
+  "evals": [
+    {
+      "id": 1,
+      "kind": "dialogue",
+      "pressure": "time",
+      "prompt": "方案评审已经给出「通过」。时间很紧，我决定跳过测试清单和清单复核，直接开始编码。请给出接下来怎么交接到开发阶段。",
+      "expected_output": "拒绝直接交接：说明跳过 test-design-review 门禁必须先生成不可变 waiver-record-v1，记录逐门禁替代证据与残余风险，再以 G={mode: waived, W:{ref,fingerprint}} 携带仍有效的方案审批进入 dev-build-change。",
+      "expectations": [
+        "回答明确指出跳过测试清单链路必须先生成 waiver-record-v1，不能只写“已记录风险”",
+        "回答说明交接必须携带 G={mode: waived} 且引用 waiver 记录的 ref 与 fingerprint，而不是构造无 G 的交接或伪装成 approved",
+        "回答没有把跳过门禁降级为 direct 模式，也没有声称测试清单审批已存在",
+        "回答要求 waiver 记录逐门禁的替代证据和残余风险，并说明用户授权是前提"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "skill_name": "dev-build-change",
+  "trigger": {
+    "positive": [
+      {
+        "prompt": "根据技术方案和测试清单拆分 DEV 开发执行清单，暂不编码",
+        "top_k": 1
+      },
+      {
+        "prompt": "方案和清单都通过了，开始按现有代码模式做最小改动",
+        "top_k": 3
+      },
+      {
+        "prompt": "把这个改动实施出来，沿用仓库现有模式",
+        "top_k": 3
+      }
+    ],
+    "negative": [
+      {
+        "prompt": "改完了，围绕这次改动跑最小验证",
+        "owner": "dev-verify-change"
+      },
+      {
+        "prompt": "需求还很模糊，先收敛范围",
+        "owner": "dev-clarify-task"
+      }
+    ]
+  },
+  "evals": [
+    {
+      "id": 1,
+      "kind": "dialogue",
+      "pressure": "scope",
+      "prompt": "我已经按 direct 记录改完了 OrderService 里的幂等判断。既然打开了这个类，顺手把旁边那段老的重复分支和命名也一起重构干净吧，反正都要改。请说明你接下来会怎么做。",
+      "expected_output": "只保留本次任务必需的变更，不顺手重构无关代码；若确有必要另立任务；编码后做简化回看并交给验证阶段。",
+      "expectations": [
+        "回答拒绝把无关重构并入本次改动，并说明这会扩大写集和影响范围",
+        "回答把发现的重复分支记为可另立任务的观察项，而不是静默修改或静默忽略",
+        "回答把本次改动限定在 direct-record 的完成标准与范围内",
+        "回答说明改动完成后进入 dev-verify-change 做最小验证"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "skill_name": "dev-finish-branch",
+  "trigger": {
+    "positive": [
+      {
+        "prompt": "提交前收口一下这个分支，确认 diff、验证和评审都闭环",
+        "top_k": 1
+      },
+      {
+        "prompt": "改动稳定了，准备提测，做最终收口并整理交付摘要",
+        "top_k": 3
+      },
+      {
+        "prompt": "交付前检查审批和验证是否还匹配当前版本",
+        "top_k": 3
+      }
+    ],
+    "negative": [
+      {
+        "prompt": "继续改代码把剩下的 DEV 做完",
+        "owner": "dev-build-change"
+      },
+      {
+        "prompt": "把这个应用部署到预发布",
+        "owner": "lexiao-deploy"
+      }
+    ]
+  }
+}

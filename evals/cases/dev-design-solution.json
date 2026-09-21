@@ -1,0 +1,29 @@
+{
+  "skill_name": "dev-design-solution",
+  "trigger": {
+    "positive": [
+      {
+        "prompt": "需求已经清楚了，基于代码写一份技术方案",
+        "top_k": 1
+      },
+      {
+        "prompt": "把技术方案写出来，比较两三个实现路径并给出推荐",
+        "top_k": 3
+      },
+      {
+        "prompt": "帮我出技术方案，说明机制、影响、发布和回滚",
+        "top_k": 3
+      }
+    ],
+    "negative": [
+      {
+        "prompt": "对这份技术方案做独立评审，给出通过还是退回",
+        "owner": "dev-review-solution"
+      },
+      {
+        "prompt": "需求边界还没定，先帮我澄清范围",
+        "owner": "dev-clarify-task"
+      }
+    ]
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "skill_name": "dev-review-test-cases",
+  "trigger": {
+    "positive": [
+      {
+        "prompt": "独立复核一下这份测试清单的三向追踪和风险覆盖",
+        "top_k": 1
+      },
+      {
+        "prompt": "由非产出者复核测试清单，给出编码准入结论",
+        "top_k": 3
+      },
+      {
+        "prompt": "检查测试清单有没有漏项、错项或不可执行项",
+        "top_k": 3
+      }
+    ],
+    "negative": [
+      {
+        "prompt": "基于方案编写测试清单",
+        "owner": "dev-derive-test-cases"
+      },
+      {
+        "prompt": "围绕本次改动执行验证",
+        "owner": "dev-verify-change"
+      }
+    ]
+  }
+}

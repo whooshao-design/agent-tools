@@ -1,0 +1,29 @@
+{
+  "skill_name": "dev-clarify-task",
+  "trigger": {
+    "positive": [
+      {
+        "prompt": "这个需求还不清楚，先帮我理清范围、非目标和验收标准",
+        "top_k": 1
+      },
+      {
+        "prompt": "先别写代码，把这次要做什么、不做什么定下来",
+        "top_k": 3
+      },
+      {
+        "prompt": "需求描述很口语，帮我改写成可验收的标准并列出开放问题",
+        "top_k": 3
+      }
+    ],
+    "negative": [
+      {
+        "prompt": "已经有方案了，帮我独立评审这个技术方案",
+        "owner": "dev-review-solution"
+      },
+      {
+        "prompt": "评审这份 PRD 是否完整",
+        "owner": "requirements-review"
+      }
+    ]
+  }
+}

@@ -1,8 +1,8 @@
 ---
 name: dev-design-solution
-description: Use when 需求边界和验收标准已基本明确，需要基于代码上下文产出可评审、可实施、可验证的技术方案，比较存在实质取舍的实现路径并收敛设计决策。
+description: Use when 需求边界和验收标准已基本明确，需要写技术方案、出方案或做方案设计：基于代码上下文产出可评审、可实施、可验证的技术方案，比较存在实质取舍的实现路径并收敛设计决策。
 metadata:
-  version: 4.0.0
+  version: 4.0.1
 ---
 
 # dev-design-solution

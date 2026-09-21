@@ -1,0 +1,29 @@
+{
+  "skill_name": "dev-review-change",
+  "trigger": {
+    "positive": [
+      {
+        "prompt": "帮我评审一下这个 MR 的代码改动",
+        "top_k": 1
+      },
+      {
+        "prompt": "基于 diff 和验证结果做代码评审，看正确性、架构、安全和稳定性",
+        "top_k": 3
+      },
+      {
+        "prompt": "对这次变更做正式代码评审并给出后续动作",
+        "top_k": 3
+      }
+    ],
+    "negative": [
+      {
+        "prompt": "对技术方案做独立评审",
+        "owner": "dev-review-solution"
+      },
+      {
+        "prompt": "SQL 和索引改动做数据库专项评审",
+        "owner": "review-db-change"
+      }
+    ]
+  }
+}

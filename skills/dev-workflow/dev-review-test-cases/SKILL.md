@@ -1,8 +1,8 @@
 ---
 name: dev-review-test-cases
-description: Use when 已有版本化测试清单，需要由非清单产出者独立复核需求、验收标准、已审批方案与检查项的三向追踪和风险覆盖，并形成绑定具体产物版本与代码基线的编码准入结论。
+description: Use when 已有版本化测试清单，需要独立复核测试清单（检查漏项、错项、不可执行项）：由非清单产出者复核需求、验收标准、已审批方案与检查项的三向追踪和风险覆盖，并形成绑定具体产物版本与代码基线的编码准入结论。
 metadata:
-  version: 1.9.0
+  version: 1.9.1
 ---
 
 # dev-review-test-cases

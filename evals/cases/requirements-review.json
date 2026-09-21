@@ -1,0 +1,29 @@
+{
+  "skill_name": "requirements-review",
+  "trigger": {
+    "positive": [
+      {
+        "prompt": "评审这份 PRD 是否完整，检查边界、异常、验收标准",
+        "top_k": 1
+      },
+      {
+        "prompt": "对需求文档做独立评审，看风险和依赖有没有遗漏",
+        "top_k": 3
+      },
+      {
+        "prompt": "规格评审：这份接口需求能不能进入开发",
+        "top_k": 3
+      }
+    ],
+    "negative": [
+      {
+        "prompt": "需求太模糊，先帮我收敛范围",
+        "owner": "dev-clarify-task"
+      },
+      {
+        "prompt": "评审技术方案",
+        "owner": "dev-review-solution"
+      }
+    ]
+  }
+}

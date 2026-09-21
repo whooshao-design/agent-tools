@@ -28,3 +28,6 @@ mcp/bastion-mcp/config.dba.json
 env/*
 !env/.gitkeep
 !env/*.example
+
+# skill 行为评测输出（含模型回答与成本）
+evals/results/

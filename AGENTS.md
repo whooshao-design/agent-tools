@@ -24,9 +24,10 @@ agent-tools/
 │   ├── devtools-mcp/    # 研发工具链 MCP（16 个 server；查询为主，部分工具可写）
 │   ├── bastion-mcp/     # 堡垒机 SSH 通道 MCP（config.json 本地化）
 │   └── third-party-mcp/ # 第三方通用 MCP wrapper/remote 配置（Context7、GitHub、Lark、MarkItDown、Sonatype）
-├── bin/                 # with-env（加载 env/credentials.env 后执行命令）、toolchain_audit.py（双端只读盘点）
+├── bin/                 # with-env、toolchain_audit.py（双端只读盘点）、skill_routing_eval.py / skill_behavior_eval.py（skill 评测）
 ├── env/                 # 公共凭证 credentials.env（gitignore）与模板 credentials.env.example
-├── tests/               # 仓库级测试：install.py、toolchain_audit、dev-workflow 契约一致性
+├── evals/               # skill 评测：cases/<skill>.json 触发/路由用例与行为压力用例（README 说明三层）
+├── tests/               # 仓库级测试：install.py、toolchain_audit、dev-workflow 契约一致性、skill 路由评测
 ├── install.py           # 符号链接安装脚本（claude + codex 双目标）
 └── AGENTS.md            # 本文件（主文档）
 ```
@@ -51,13 +52,15 @@ python3 install.py --with-subagents --uninstall
 - 安装器把自己拥有的链接/副本记录在 `~/.claude/.agent-tools-install.json` 与 `~/.codex/.agent-tools-install.json`；
   `--uninstall` 只删除清单内且未被修改的内容。hook 脚本按内容哈希安装到 `<client>/hooks/agent-tools/subagent_result_guard-<sha256>.py`。
 - 新增或改名 skill 后重新跑 `python3 install.py`（可先 `--dry-run`），确认双端均为 `linked`，并同步 `README.md` 对应分类表格。
+- `dev-workflow` 下新增 skill 必须同时加 `evals/cases/<skill>.json`（≥3 正向、≥2 带 owner 的负向提示）；改 description 后跑 `python3 bin/skill_routing_eval.py`，失败就改 description 不改提示。
 
 ## 验证与测试
 
 测试只用标准库 `unittest` 和 Node 内置 `node:test`；不依赖 pytest（当前 Python 环境也未安装），仓库没有统一的 lint 配置。
 
 ```bash
-python3 -m unittest discover -s tests                    # 仓库级：install.py、bin/toolchain_audit.py、dev-workflow 契约一致性
+python3 -m unittest discover -s tests                    # 仓库级：install.py、bin/toolchain_audit.py、dev-workflow 契约一致性、skill 路由评测
+python3 bin/skill_routing_eval.py [--probe "一句话"]        # skill 触发/路由评测报告；行为评测见 evals/README.md（花 token，不进单测）
 python3 -m unittest discover -s hooks/tests              # SubagentStop 结果守卫
 python3 -m unittest discover -s mcp/devtools-mcp/tests   # devtools_mcp（测试自行把包目录加入 sys.path）
 (cd mcp/bastion-mcp && python3 -m unittest discover -s tests)   # 需已安装 mcp、paramiko

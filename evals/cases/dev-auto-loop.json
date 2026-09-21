@@ -1,0 +1,29 @@
+{
+  "skill_name": "dev-auto-loop",
+  "trigger": {
+    "positive": [
+      {
+        "prompt": "目标和边界明确了，按审批基线自动串联方案评审、测试清单和开发交付",
+        "top_k": 1
+      },
+      {
+        "prompt": "启动自动编排跑完设计闭环和交付闭环，预算耗尽或阻塞就停",
+        "top_k": 3
+      },
+      {
+        "prompt": "用 dev-auto-loop 自动推进这个需求",
+        "top_k": 3
+      }
+    ],
+    "negative": [
+      {
+        "prompt": "只做一次代码评审",
+        "owner": "dev-review-change"
+      },
+      {
+        "prompt": "帮我澄清这个需求的范围",
+        "owner": "dev-clarify-task"
+      }
+    ]
+  }
+}
