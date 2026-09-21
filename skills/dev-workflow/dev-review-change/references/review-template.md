@@ -13,6 +13,7 @@
 | 运行时检查 | independence / read_only / write_set_empty / tool_surface = Pass / Fail |
 | 评审执行 | <task_id；input_fingerprints；status；structure_check；valid / formal_reviewer_unavailable / invalid> |
 | 验证报告 / 结论 | |
+| 外部评审证据 | 无 / rounds/round-<N>/ocr.json + fingerprint（provider/model，与 producer 模型不同） |
 | 评审范围 / 排除范围 | |
 | 上一轮审批记录 | 无 / rounds/round-<N-1>/approval-record.json + fingerprint |
 | 日期 | YYYY-MM-DD |
@@ -42,6 +43,12 @@ High 不允许 Accepted；Medium Accepted 必须在第 5 节存在匹配授权�
 | 安全 | | |
 | 稳定性与发布风险 | | |
 | 复杂度与冗余 | | |
+
+逐文件覆盖（信封提供可评审文件清单时必填）：
+
+| 文件 | 状态 | 已评审 / 跳过原因 |
+|---|---|---|
+| | | |
 
 ## 5. 已接受风险
 

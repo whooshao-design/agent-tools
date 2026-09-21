@@ -78,6 +78,8 @@ python3 -m unittest discover -s skills/lexin/get-browser-session/tests -p 'test_
 
 - 需求、方案、测试清单和代码的正式评审分别使用 `agent-tools-requirements-reviewer`、
   `agent-tools-solution-reviewer`、`agent-tools-test-design-reviewer`、`agent-tools-change-reviewer`。
+- 外部评审工具 `ocr`（alibaba/open-code-review）的输出只作候选线索与逐文件覆盖基线，由编排器放进冻结信封，不构成审批事实；
+  用法见 `skills/dev-workflow/dev-review-change/references/ocr-evidence.md`。
 - reviewer 的运行时身份必须与对应 `producer_agent_refs[]` 不相交，并保持实际有效的只读沙箱与最小工具面；
   写入即成为 producer，本轮评审失效。Codex 父会话权限可能覆盖 agent 静态沙箱，编排器必须核验生效配置，
   不能仅凭配置文件声明认定隔离成立。完整约定见 `skills/dev-workflow/references/delegation-contract.md`。

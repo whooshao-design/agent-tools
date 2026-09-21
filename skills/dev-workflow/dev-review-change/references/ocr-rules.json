@@ -1,0 +1,14 @@
+{
+  "include": ["**/src/test/java/**/*.java"],
+  "rules": [
+    {
+      "path": "**/src/test/java/**/*.java",
+      "rule": "This is test code. Only report: assertions that cannot fail (asserting on the input, no-throw checks, mocked value asserted back), tests that swallow exceptions, tests whose name promises behavior the body does not exercise, and shared mutable state between tests. Do not report style, naming, or missing coverage of unrelated classes."
+    },
+    {
+      "path": "**/*.java",
+      "rule": "Service-layer checks in addition to the system rule. Idempotency: write paths reachable from retries, MQ redelivery, or duplicate requests must be idempotent or guarded. Transactions: no remote calls (RPC, HTTP, MQ send) inside a database transaction; transactional work that fails must roll back. Exceptions: no empty catch, no converting failures into null/empty-collection defaults, no lost stack traces or generic rethrow at layer boundaries. External calls: network, file, and database calls need timeouts and failure handling. Configuration: config keys read at runtime must have a defined fallback and must not be hard-coded. Report only with concrete evidence from the changed lines and their call chain; prefer false negatives over false positives.",
+      "merge_system_rule": true
+    }
+  ]
+}
