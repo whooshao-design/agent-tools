@@ -2,7 +2,7 @@
 name: spawn-model-agent
 description: Use when 用户点名用某个国内模型或其他后端（qwen、deepseek、kimi、glm 等）做一个子任务，例如"用 kimi 总结这个文件""让 deepseek 起草说明""用 qwen 联网查一下"，或显式调用 /spawn-model-agent；在 Claude Code 与 Codex 里都另起一个该模型的 agent 进程执行，主会话只读结果。不做模型自动路由。
 metadata:
-  version: 1.1.0
+  version: 1.2.0
 ---
 
 # spawn-model-agent
@@ -33,11 +33,21 @@ python3 /home/joney/projects/ai/agent-tools/skills/common/spawn-model-agent/scri
 
 作业目录在 `~/.local/state/spawn-model-agent/<时间>-<后端>/`：`task.md` 是任务原文，`result.md` 是 agent 的最终回复，`meta.json` 记录模型、耗时、token、退出码、会话 ID（供 `--resume`），`raw.*` 是原始输出。
 
+## 后端适用性判断
+
+派发前先看 `--list` 的"适用性"列（来自 `build-codeagent/model-routing.json` 的 `fit` 字段），有内容的后端要按它判断任务是否合适；脚本启动时也会在 stderr 打同一条提醒。
+
+目前只有 `codex-glm` 有限制：乐信网关给 glm-5.3 的单次响应上限是 8192 输出 token，codex 不发 `max_output_tokens`，思考段占满就截断重连，最多五次后失败（2026-09-20 实测；`model_reasoning_effort=low` 也压不短它的思考）。用户说"用 glm"时：
+
+- 宿主是 Claude Code：短名解析为 `claude-glm`（32k 上限），直接派。
+- 宿主是 Codex 且任务是轻任务（单步、回复 2k 字以内：总结、抽取、小改动、查资料）：派 `codex-glm`。
+- 宿主是 Codex 且任务重（整份文档或长代码生成、多缺陷评审、多步深度推理）：改派 `--backend claude-glm`（脚本接受完整名，跨客户端可用），并在转述时说明改派原因；用户坚持 `codex-glm` 就照做，结果出现 `Reconnecting`/`turn.failed` 时如实报告。
+
 ## 主会话的流程
 
 1. 把用户的话整理成任务文本：要做什么、材料在哪、输出到哪、什么算完成。材料路径用绝对路径。
 2. 运行脚本。默认后台，用 Monitor 或 `--status` 等它结束；短任务可以 `--wait`。
-3. 读 `result.md`，核对它有没有按任务做（看 `meta.json` 的退出码和写入的文件），把结论转述给用户，附作业目录路径。
+3. 读 `result.md`，核对它有没有按任务做（看 `meta.json` 的退出码和写入的文件），把结论转述给用户，附作业目录路径。codex-* 的 `raw.jsonl` 里有 `Reconnecting`/`turn.failed` 时一并说明。
 4. 结果不可用时告诉用户是哪个模型、什么原因，不静默换模型重跑。
 
 ## 边界

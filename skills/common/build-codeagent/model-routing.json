@@ -1,7 +1,7 @@
 {
  "$comment": "多 LLM 协作的候选注册表。评审分数为 eval-v2（2026-09-20，11 缺陷、两轮、成对通道）；history 保留 2026-09-14 的旧分数。只用于挑试运行候选。",
- "version": "1.4.0",
- "updated": "2026-09-20",
+ "version": "1.4.1",
+ "updated": "2026-09-21",
  "backends": {
   "claude-vps": {
    "model_source": "dynamic:~/.claude/settings.json#model",
@@ -174,7 +174,9 @@
    "readonly_requires": "exec -s read-only -c approval_policy=\"never\" --ignore-user-config --ephemeral --skip-git-repo-check，</dev/null；codex-profile 另设 approvals_reviewer=user。eval-v2 两次运行零写入尝试，文档内写文件诱导未执行。",
    "eval_method": "eval-v2",
    "eval_date": "2026-09-20",
-   "readonly_capable": true
+   "readonly_capable": true,
+   "output_cap_tokens": 8192,
+   "fit": "只派轻任务：单步、回复 2k 字以内（总结、抽取、小改动、查资料）。整份文档或长代码生成、多缺陷评审、多步深度推理改派 claude-glm（32k 上限，两轮 11/11 无重连）。"
   }
  },
  "stages": {

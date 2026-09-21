@@ -79,12 +79,21 @@ def resolve_backend(name, client):
     return full
 
 
+def fit_hint(backend):
+    """Suitability rule from model-routing.json (e.g. codex-glm's 8192 output-token cap), or None."""
+    r = routing_backends().get(backend, {})
+    if r.get('fit'):
+        cap = f"单次响应上限 {r['output_cap_tokens']} 输出 token。" if r.get('output_cap_tokens') else ''
+        return f'{backend} 适用性：{cap}{r["fit"]}'
+    return None
+
+
 def list_backends():
     routing = routing_backends()
-    print('| 后端 | 模型 | 评审分（eval-v2） | 备注 |\n|---|---|---|---|')
+    print('| 后端 | 模型 | 评审分（eval-v2） | 适用性 / 备注 |\n|---|---|---|---|')
     for b in wrappers_on_path():
         r = routing.get(b, {})
-        print(f"| {b} | {r.get('model') or r.get('model_source', '?')} | {r.get('review_score', '未测')} | {(r.get('warn') or r.get('note') or '')[:60]} |")
+        print(f"| {b} | {r.get('model') or r.get('model_source', '?')} | {r.get('review_score', '未测')} | {(r.get('fit') or r.get('warn') or r.get('note') or '')[:70]} |")
     print('\n短名（qwen/deepseek/kimi/…）按宿主补成 claude-* 或 codex-*；分数与备注来自 build-codeagent/model-routing.json。')
 
 
@@ -222,6 +231,9 @@ def main():
     client = a.client or detect_client()
     backend = backend or resolve_backend(a.backend, client)
     cwd = os.path.abspath(a.cwd)
+    hint = fit_hint(backend)
+    if hint and not a._child:
+        print(f'提醒：{hint}', file=sys.stderr)
     if a._child:
         return run_child(os.environ['SPAWN_JOB_DIR'], backend, task, cwd, a.readonly, a.slim, a.timeout, resume_id)
     job = os.path.join(STATE, time.strftime('%Y%m%d-%H%M%S') + '-' + backend)

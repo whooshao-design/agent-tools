@@ -80,6 +80,13 @@ class SpawnModelAgentTest(unittest.TestCase):
         meta, text = sma.parse_codex(raw)
         self.assertEqual((meta["session_id"], meta["input_tokens"], text), ("t1", 3, "hi"))
 
+    def test_fit_hint_comes_from_routing(self):
+        with mock.patch.object(sma, "routing_backends", return_value={"codex-glm": {"fit": "只派轻任务", "output_cap_tokens": 8192}}):
+            self.assertIn("8192", sma.fit_hint("codex-glm"))
+            self.assertIn("只派轻任务", sma.fit_hint("codex-glm"))
+            self.assertIsNone(sma.fit_hint("codex-kimi"))
+        self.assertIsNotNone(sma.fit_hint("codex-glm"))  # real routing file carries the rule
+
 
 if __name__ == "__main__":
     unittest.main()
