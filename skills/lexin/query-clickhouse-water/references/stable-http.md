@@ -21,26 +21,20 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/script
 
 只有 `sessionReady: true` 才继续。登录失效时使用同一 URL 和 profile 执行 `ensure_session`，让用户在浏览器窗口完成登录；不要在对话中索取密码、OTP、Cookie 或 token。
 
-## HTTP 接口
+## HTTP 查询
 
-页面 Hash URL 只是前端入口，实际查询使用同域接口，并在同一个浏览器 BrowserContext/profile 中发起请求以复用 session：
+共用接口、认证、响应判定和脚本见 `/home/joney/projects/ai/agent-tools/skills/lexin/query-clickhouse-water/references/lxcloud-http.md`。使用 `--env stable`，默认实例为 `ABTestCK`，不需要改写请求或复制登录流程：
 
-| 用途 | 方法与路径 | 请求体/查询参数 |
-|---|---|---|
-| 列实例 | `GET /v1/clickhouse/instance_list/` | `page=1&size=2000&user_name=<当前登录用户>` |
-| 列数据库 | `POST /v1/clickhouse/sql_exec/showdatabases` | `{"clickhouse_type":"ABTestCK"}` |
-| 列表 | `POST /v1/clickhouse/sql_exec/showtables` | `{"clickhouse_type":"ABTestCK","db_name":"risk_control_base_db"}` |
-| 执行查询 | `POST /v1/clickhouse/sql_exec/exec_query` | `{"clickhouse_type":"ABTestCK","user_name":"<当前登录用户>","sql":"<只读 SQL>"}` |
-
-`user_name` 从已登录页面的 `localStorage.userInfo[0].min` 获取；不要硬编码用户名，也不要把完整 localStorage 或 session 凭据输出到终端或最终回复。不要用未携带浏览器 session 的普通 `curl` 直接调用接口。
+```bash
+node /home/joney/projects/ai/agent-tools/skills/lexin/query-clickhouse-water/scripts/clickhouse_http.js \
+  --env stable --action tables --database risk_control_base_db
+```
 
 ## 查询约束与响应
 
 - 只发送本 skill 允许的只读 SQL；stable 接口的明细 `SELECT` 需要带 `WHERE`，同时主动加上绝对时间范围和合理的 `LIMIT`。
 - 显式写 `database.table`。表或库不确定时，先调用 `showdatabases`、`showtables`，不要猜名称。
-- HTTP 200 只代表请求到达。查询成功还要求外层 `code = 200`、`data.code = 200` 且 `data.query_code = 0`。
-- 成功结果位于 `data.data.columns` 和 `data.data.data`；`data.query_time` 是执行耗时。
-- `data.query_code = 1` 或内层 `code != 200` 时，保留并报告接口返回的 `error`，不要把空 `data` 误判为无流水。
+- 查看字段使用 `SHOW CREATE TABLE <database.table>`；查询失败按共用 HTTP 契约处理，不能把空 `data` 误判为无流水。
 - 最终仍需输出实际执行的 SQL 和整理后的结果；不得输出 Cookie、ticket、token 或完整认证请求头。
 
 ## 手工查看
