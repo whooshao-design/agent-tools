@@ -23,10 +23,12 @@ import json
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+SKILLS_DIR = ROOT / "skills"
 CASES_DIR = ROOT / "evals" / "cases"
 RESULTS_DIR = ROOT / "evals" / "results"
 EXECUTOR_TIMEOUT = 15 * 60
@@ -56,12 +58,17 @@ def last_json_object(stdout: str) -> dict:
     raise ValueError("no JSON object in executor output")
 
 
-def run_claude(profile: str, prompt: str, *, system_prompt: str | None, tools: str, max_turns: int, timeout: int) -> dict:
+def run_claude(profile: str, prompt: str, *, system_prompt: str | None, tools: str, max_turns: int, timeout: int,
+               cwd: Path, add_dirs: tuple[Path, ...] = ()) -> dict:
+    """Run headless claude in `cwd`. Dialogue evals use an empty scratch directory so the
+    agent sees no repository state; `add_dirs` grants read access to skill references."""
     cmd = ["claude-profile", profile, "-p", prompt, "--output-format", "json",
            "--tools", tools, "--strict-mcp-config", "--max-turns", str(max_turns)]
+    for d in add_dirs:
+        cmd += ["--add-dir", str(d)]
     if system_prompt:
         cmd += ["--append-system-prompt", system_prompt]
-    proc = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=timeout)
+    proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout)
     if proc.returncode != 0 and not proc.stdout.strip():
         raise RuntimeError(f"{profile} exited {proc.returncode}: {proc.stderr[-800:]}")
     data = last_json_object(proc.stdout)
@@ -84,7 +91,8 @@ def grade(grader: str, skill: str, ev: dict, answer: str, max_turns: int) -> dic
         f"期望：\n{numbered}\n\n"
         "只输出一个 JSON 对象：{\"results\": [{\"id\": <期望编号>, \"pass\": true|false, \"evidence\": \"引用回答中的依据或说明缺失\"}]}"
     )
-    data = run_claude(grader, prompt, system_prompt=None, tools="", max_turns=max_turns, timeout=GRADER_TIMEOUT)
+    with tempfile.TemporaryDirectory(prefix="skill-eval-grader-") as scratch:
+        data = run_claude(grader, prompt, system_prompt=None, tools="", max_turns=max_turns, timeout=GRADER_TIMEOUT, cwd=Path(scratch))
     result_text = data.get("result") or ""
     verdict = extract_json(result_text)
     results = {int(r["id"]): r for r in verdict.get("results", []) if "id" in r}
@@ -125,11 +133,14 @@ def main(argv: list[str] | None = None) -> int:
             continue
         label = f"{args.skill} eval {ev['id']}" + (f" [{ev['pressure']} pressure]" if ev.get("pressure") else "")
         if args.dry_run:
-            print(f"[dry-run] {label}: claude-profile {args.executor} -p <prompt> --tools {READ_ONLY_TOOLS} --append-system-prompt <{skill_md.relative_to(ROOT)}>; grade with {args.grader}")
+            print(f"[dry-run] {label}: cwd=<empty tmpdir> claude-profile {args.executor} -p <prompt> --tools {READ_ONLY_TOOLS} --add-dir {SKILLS_DIR} --append-system-prompt <{skill_md.relative_to(ROOT)}>; grade with {args.grader}")
             continue
         t0 = time.time()
-        data = run_claude(args.executor, ev["prompt"], system_prompt=system_prompt, tools=READ_ONLY_TOOLS,
-                          max_turns=args.max_turns, timeout=EXECUTOR_TIMEOUT)
+        with tempfile.TemporaryDirectory(prefix="skill-eval-") as scratch:
+            # Empty scratch cwd: no git status, no repo files to leak into the answer; skill
+            # references stay readable through --add-dir on the skills tree only.
+            data = run_claude(args.executor, ev["prompt"], system_prompt=system_prompt, tools=READ_ONLY_TOOLS,
+                              max_turns=args.max_turns, timeout=EXECUTOR_TIMEOUT, cwd=Path(scratch), add_dirs=(SKILLS_DIR,))
         answer = data.get("result") or ""
         exec_s = time.time() - t0
         graded = grade(args.grader, args.skill, ev, answer, max_turns=2)
