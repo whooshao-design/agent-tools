@@ -22,9 +22,10 @@ ocr review --format json --audience agent \
 ```
 
 - `--output` 必须用，不要用 `head`/`tail` 截 stdout。
-- 默认 `--effort medium`（每组 2 轮）、`--timeout 15`（分钟/轮）；小 diff 可 `--effort low`。
+- 建议审查默认 `--effort low`；正式准入、或范围内有 `TC-*` 要核对测试代码时用 `--effort medium`。2026-09-21 试点（7 文件 Java 变更）：medium 30 分钟、非缓存输入加输出约 25 万 token、4 条线索；low 13 分钟、约 12 万 token、2 条线索，保住了生产代码的 medium 级问题，丢掉了测试断言质量类问题和同根因的次要项。`--timeout 15` 是每轮分钟数，medium 两轮。
+- ocr 的 severity 偏高（SNAPSHOT 版本给 high、null message 给 medium），一律按本地口径重判，不沿用它的等级。
 - 读取 `comments[]`：`path`、`start_line`/`end_line`（都为 0 表示定位失败，要自己回文件定位）、`severity`（critical/high/medium/low）、`category`、`content`、`suggestion_code`、`existing_code`。`summary` 有文件数与失败文件；`session_id` 供复审对比。
-- 每条 comment 都按 `severity-and-complexity.md` 的写入前自检重新判级，映射到 High/Medium/Low；ocr 的 `critical` 与 `high` 合并到 High 候选，`low` 默认丢弃。ocr 无发现不等于无问题：它有意偏向精确率，默认排除测试文件和 `.md`、`.properties` 以外的非代码文件。
+- 每条 comment 都按 `severity-and-complexity.md` 的写入前自检重新判级，映射到 High/Medium/Low；ocr 的 `critical` 与 `high` 只是 High 候选。它不核对旧实现与验收标准：试点里"`e.getMessage()` 可能为 null"在 AC 要求与旧实现一致时并不成立，这类要先查原实现再定。`low` 不默认丢弃，试点中 low 级的自证式断言问题恰是既有评审的盲区。ocr 无发现不等于无问题：它有意偏向精确率，默认排除测试文件和 `.md`、`.properties` 以外的非代码文件。
 
 ## 正式准入
 
