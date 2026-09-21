@@ -2,14 +2,14 @@
 name: test-dubbo-api
 description: 通过 bianque 服务模拟器 HTTP 接口调用和编排 Dubbo 服务测试。Use when 用户要求调用或测试某个 Dubbo/FSOF 接口、编排多接口验收场景、在 stable/pre 环境验证服务；支持从项目配置提取 Dubbo 元信息、按 targets.json 复用 IP:Port、自动获取 Cookie，并用 JSON 场景复用多接口验收流程。
 metadata:
-  version: 1.2.3
+  version: 1.3.0
 ---
 
 # Dubbo 接口测试
 
 ## 工具优先级
 
-已注册 `dubbo_test` MCP 时，优先使用其工具完成本 skill 的查询与操作；MCP 不可用或未注册时，再按下文的脚本/HTTP 方式兜底。两者底层能力一致。
+devtools MCP 可用时（工具 `dubbo_call`、`dubbo_dry_run`，Claude 侧带 `mcp__devtools__` 前缀），优先用它完成本 skill 的查询与操作；MCP 不可用或未注册时，再按下文的脚本/HTTP 方式兜底。两者底层能力一致。
 
 
 ## 核心原则
@@ -75,19 +75,17 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/script
 
 如果默认 profile 登录态不可用，打开 headed 浏览器让用户完成 SSO/MOA 登录；不要在聊天中索要密码、OTP 或 Cookie。
 
-### 手动获取
+### 自动获取失败时
 
-如果自动获取失败，手动复制：打开对应环境的服务模拟器页面 → F12 → Application → Cookies → 复制 `JSESSIONID` 和 `ltrace_sessionId`。
-
-Cookie 保存在会话上下文中，过期时可自动或手动重新获取。
+用 `get-browser-session` 在 headed 浏览器里重新登录同一 profile 后重试；Cookie 只在脚本进程内使用，不粘贴到会话或聊天里。
 
 ## 工作流程
 
 ### 步骤 1：收集参数
 
-1. **环境** — 按上表归一到 stable/pre；如果是 Redis key 且用户未说明，先从 key 推断，推断不到再问。
+1. **环境** — 线路按上表归一到 stable/pre；部署环境（stable/pre/gray/prod）单独保留，脚本用它查 `targets.json`；如果是 Redis key 且用户未说明，先从 key 推断，推断不到再问。
 2. **应用名** — 当前项目自动识别，否则询问
-3. **IP:Port** — 查 `targets.json` 中 `<app>.<env>` 的默认值：
+3. **IP:Port** — 查 `targets.json` 中 `<app>.<部署环境>` 的默认值（prod/gray 没有条目时脚本拒绝借用 pre 地址，让用户给 IP:Port）：
    - 有默认值：「使用默认 IP:Port `<ip>:<port>`？直接回车确认，或输入新的 IP:Port 覆盖」
    - 无默认值：「请从服务模拟器页面搜索接口名，提供可用提供者的 IP 和 Port」
 4. **Dubbo 接口 + 方法 + 参数** — 当前项目列出可用接口供选择，外部项目手动输入
@@ -184,7 +182,7 @@ python3 /home/joney/projects/ai/agent-tools/skills/lexin/test-dubbo-api/scripts/
 - `--var name=value` 覆盖 `vars`；`--target name=ip:port` 覆盖目标地址。
 - `assert` 支持 `equals`、`notEquals`、`exists`、`contains`、`notContains`、`truthy`、`falsey`、`in`、`regex`。
 - 主流程失败后仍会执行 `cleanup`；清理失败只记录在结果中。
-- 用 `--dry-run` 预览参数替换后的调用内容，用 `--no-cleanup` 跳过清理。
+- 用 `--dry-run` 预览参数替换后的调用内容，用 `--no-cleanup` 跳过清理。`--dry-run` 不发请求，依赖前序步骤 `extract` 变量的后续步骤会报 `template variable not found`，预览时用 `--var <name>=<占位值>` 补上；这是预览限制，不代表场景无效。
 
 ## Dubbo 元信息发现
 

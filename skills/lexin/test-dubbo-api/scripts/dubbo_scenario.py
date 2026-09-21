@@ -169,11 +169,11 @@ def assert_one(assertion, response, context):
     elif "notContains" in assertion:
         ok = actual is marker or not contains(actual, render(assertion["notContains"], context))
     elif assertion.get("truthy"):
-        ok = bool(actual)
+        ok = actual is not marker and bool(actual)  # a missing field is not "truthy"
     elif assertion.get("falsey"):
         ok = not bool(actual)
     elif "in" in assertion:
-        ok = actual in render(assertion["in"], context)
+        ok = actual is not marker and actual in render(assertion["in"], context)
     elif "regex" in assertion:
         ok = actual is not marker and re.search(str(assertion["regex"]), str(actual)) is not None
     elif "value" in assertion:

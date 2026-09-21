@@ -14,9 +14,11 @@
 ## 建议审查（普通 PR / diff）
 
 ```bash
+# 范围：--from <base> --to <head>，或 -c <commit>；不带范围时评审工作区（含未跟踪文件）
+# 背景：-B <背景文件.md>（R 摘要 + AC 列表，清洗后 8000 字符内），或 -b "一句话背景"
 ocr review --format json --audience agent \
-  --from <base> --to <head> \            # 或 -c <commit>；不带范围时评审工作区（含未跟踪文件）
-  -B <背景文件.md> \                      # R 摘要 + AC 列表，清洗后 8000 字符内；或 -b "一句话背景"
+  --from <base> --to <head> \
+  -B <背景文件.md> \
   --rule /home/joney/projects/ai/agent-tools/skills/dev-workflow/dev-review-change/references/ocr-rules.json \
   --output <目录>/ocr.json
 ```
@@ -31,7 +33,7 @@ ocr review --format json --audience agent \
 
 编排器在冻结 `change_revision` 之后、派发 `agent-tools-change-reviewer` 之前执行：
 
-1. `ocr delegate preview --format json [--from/--to | -c] --output rounds/round-<N>/ocr-files.json`：不调模型，输出 `reviewable_files[]`（path/status/insertions/deletions）与 `excluded_files[]`（含 `exclude_reason`）。清单写进信封 `inputs`，reviewer 必须对每个 reviewable 文件标记已评审或跳过原因；`excluded_files` 中 `default_path`（测试文件）和 `unsupported_ext` 的项由 reviewer 按 `TC-*`/`DEV-*` 映射自行决定是否读，不因 ocr 排除而免检。
+1. `ocr delegate preview --format json [--from/--to | -c] > rounds/round-<N>/ocr-files.json`（preview 没有 `--output`，只能重定向 stdout）：不调模型，输出 `reviewable_files[]`（path/status/insertions/deletions）与 `excluded_files[]`（含 `exclude_reason`）。清单写进信封 `inputs`，reviewer 必须对每个 reviewable 文件标记已评审或跳过原因；`excluded_files` 中 `default_path`（测试文件）和 `unsupported_ext` 的项由 reviewer 按 `TC-*`/`DEV-*` 映射自行决定是否读，不因 ocr 排除而免检。
 2. `ocr review --format json --audience agent --provider lexin --model <M> ... --output rounds/round-<N>/ocr.json`，`<M>` 不得与 `change_revision` 任一 producer 的实际模型相同（对照 `pick_agent.py --task <id> --show-record`）。计算 `ocr.json` 指纹，连同 provider/model 写进信封 `input_fingerprints` 与运行记录。
 3. reviewer 只把 `ocr.json` 当候选线索：每条线索先过写入前自检与 High 反驳，绑定 DEV 或代码位置后才成为 finding；不得引用 ocr 结论作为证据本身。报告第 1 节填“外部评审证据”，第 4 节填逐文件覆盖表。
 4. 定点复审时对上一轮与本轮会话跑 `ocr session compare <before> <after>`，输出新增、持续、已解决、未评审四类，作为“上轮已关闭项非回归”的辅助证据；`session_id` 在各轮 `ocr.json` 里。

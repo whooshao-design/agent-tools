@@ -2,7 +2,7 @@
 name: diagnose-healthy-alert
 description: 从雷神告警排查告警原因。Use when 用户给出 Healthy/雷神告警 ID 或 alert-show-detail 链接、要求排查告警原因、判断告警是真实故障还是误报或规则过敏、需要把告警关联到触发指标、埋点代码和应用日志。
 metadata:
-  version: 1.0.0
+  version: 1.1.2
 ---
 
 # diagnose-healthy-alert
@@ -17,7 +17,7 @@ metadata:
 和相邻 skill 的边界：
 
 - `inspect-healthy-metrics`：入口是 metric，查上报状态；本 skill 入口是告警，按告警窗口回放 `prom_ql`。
-- `java-server-diagnostics`：本 skill 产出 `traceId`、`ident`、日志关键词作为它的输入；日志检索由它执行。
+- `query-app-logs`：本 skill 产出 `traceId`、`ident`、日志级别、关键词和时间窗作为它的输入；服务器、容器和日志平台的检索都由它路由执行，直接交接取证参数，不再从 error.log 快检门槛重走。
 - `query-app-instances`：需要把 `apps` 展开到实例清单时调用。
 - `healthy-dashboard-config` / `inspect-healthy-jvm-dashboard` / `register-healthy-metrics`：大盘与指标管理方向，与告警排查无交集。
 - `debug-systematic`：通用调试方法论；本 skill 是雷神告警场景的专用证据采集与定性层。
@@ -75,7 +75,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/diagnose-healthy-alert/scr
   --alert 16343328 --env prod --with-rule --replay --window 30m
 ```
 
-- `--alert`：告警 ID 或完整 `alert-show-detail` 链接，自动抽 ID。
+- `--alert`：告警 ID 或完整 `alert-show-detail` 链接；链接会自动抽 ID 并按主机选站点（`stable-eye` → stable，`healthy.lexincloud.com` → prod），显式 `--env` 与链接冲突时报错。
 - `--with-rule`：附带 L1 规则配置。
 - `--replay`：附带 L2 指标回放，**一次起浏览器跑两个窗口**——告警窗口回答"尖刺还是持续"，
   基线窗口（`--baseline`，默认 `24h`，`off` 关闭）回答"偶发还是反复、单实例还是多实例"。
@@ -127,8 +127,8 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/diagnose-healthy-alert/scr
   脚本生成的命令已是这个口径。
 - **根因在前一行**：埋点行往往只说"结果为空"，同 traceId 的上一条 ERROR 才是根因，所以 `--context>=2`。
   埋点用 `log.warn` 时日志在 `warn.log` 不在 `error.log`，别沿用"只看 error.log"的快检口径。
-- **区分两种空结果**：`matchedFiles: []` 是没有文件被扫到（轮转、文件名或 `--files` 写错），
-  `matchedFiles` 有值而 `matchedEvents: 0` 才是文件里确实没这个关键词。
+- **区分两种空结果**：`matchedFiles` 只列命中过关键词的文件，为空不等于没扫到文件。看 `fileCount` 与 `logDirExists`：
+  `fileCount=0` 或 `logDirExists=false` 是没有文件被扫到（轮转、文件名或 `--files` 写错），`completed=true`、`errorCode` 为空、`fileCount>0`、`matchedEvents: 0` 且 `truncated=false` 才是文件里确实没这个关键词（`completed=false` 是传输中断或路径错误，结果只覆盖已返回的部分，不能当"没有"）（`truncated=true` 表示事件或输出超限被丢弃，只能说明"返回范围内没有"，要缩小时间窗或加大 `--max-lines` 重查）。
   把前者当后者，会误判成"代码没打这条日志"而去改关键词，白跑几轮。
 - **多实例交叉验证**：L2 基线窗口报出多个实例时至少查两个。业务主键相同说明是一条固定坏数据
   被反复重试，主键不同才是系统性问题——这一步直接决定结论和修复方向。
@@ -149,7 +149,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/diagnose-healthy-alert/scr
 | 顺序 | 查什么 | 用哪个 skill | 为什么排这个位置 |
 |---|---|---|---|
 | 1 | **配置开关** | `query-hippo-config` | 代码里的开关分支决定线上实际走哪条路径。不确认开关，L3 读的代码可能根本没执行 |
-| 2 | **缓存 / Redis** | `redis-query` | key 通常在日志里直接给了；查存在性、TTL 即可区分"没写入"和"已过期" |
+| 2 | **缓存 / Redis** | `redis-query` | key 通常在日志里直接给了；只能确认当前是否存在和剩余 TTL；key 不存在时是没写入还是已过期，要靠写入日志或历史证据，没有就记未知 |
 | 3 | **元数据 / MySQL** | `query-mysql-data` | 判断主键对应的业务对象是否存在、状态是否正常，即缓存 miss 的上游真值 |
 | 4 | **业务流水 / ClickHouse** | `query-clickhouse-water` | 确认影响面：受影响的请求量、是否波及真实决策 |
 

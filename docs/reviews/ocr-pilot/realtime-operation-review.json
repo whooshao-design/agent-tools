@@ -1,0 +1,227 @@
+{
+  "status": "complete",
+  "llm": {
+    "provider": "lexin",
+    "model": "qwen3.8-max"
+  },
+  "message": "Review complete: 4 finding(s) across 7 selected item(s).",
+  "summary": {
+    "files_reviewed": 7,
+    "comments": 4,
+    "total_tokens": 2253172,
+    "input_tokens": 2191008,
+    "output_tokens": 62164,
+    "cache_read_tokens": 2006075,
+    "cache_write_tokens": 184070,
+    "elapsed": "30m16s"
+  },
+  "tool_calls": {
+    "total": 58,
+    "by_tool": {
+      "code_comment": 1,
+      "code_search": 29,
+      "file_find": 2,
+      "file_read": 26
+    },
+    "failure": 0,
+    "failure_by_tool": {},
+    "failure_details": []
+  },
+  "comments": [
+    {
+      "path": "server_rc_realtime_operation-impl/pom.xml",
+      "content": "新增依赖声明使用了 `2.1-SNAPSHOT` 快照版本，违反本次评审规则“新增代码中版本号不得包含 SNAPSHOT 限定符”。SNAPSHOT 制品内容可变，同一份代码在不同时间构建可能拉到不同的 jar，导致线上行为不可复现（本次变更又恰好依赖该包提供的 `ExpressRuleDeployService` 接口）。建议改为已发布的固定版本（若该服务尚未发版，请先推动发布正式版本再合入）。",
+      "existing_code": "            \u003cartifactId\u003eserver_credit_ser_deploy_java-service\u003c/artifactId\u003e\n            \u003cversion\u003e2.1-SNAPSHOT\u003c/version\u003e",
+      "start_line": 80,
+      "end_line": 81,
+      "thinking": "Consumer threads are configurable per topic (defaults 1-5). So an 8-thread local pool is probably adequate, though the config can be raised at runtime via Hippo without bound. Under high consumer thread config (\u003e24 concurrent), the pool could saturate. This is speculative; the design numbers were given in the requirement. I'll skip.\n\nNow let me finalize my comments. Let me get the exact diff lines to anchor them.\n\n**Comment 1: pom.xml**\n```\n+        \u003cdependency\u003e\n+            \u003cgroupId\u003ecom.fenqile\u003c/groupId\u003e\n+            \u003cartifactId\u003eserver_credit_ser_deploy_java-service\u003c/artifactId\u003e\n+            \u003cversion\u003e2.1-SNAPSHOT\u003c/version\u003e\n```\nexisting_code: `            \u003cversion\u003e2.1-SNAPSHOT\u003c/version\u003e` — but this string might match other lines? The tool matches against the diff text; `\u003cversion\u003e2.1-SNAPSHOT\u003c/version\u003e` appears only once in the added block (the existing one is `2.1.0-SNAPSHOT` at line 69 which is not in the diff). To be safe, include more context:\n```\n            \u003cartifactId\u003eserver_credit_ser_deploy_java-service\u003c/artifactId\u003e\n            \u003cversion\u003e2.1-SNAPSHOT\u003c/version\u003e\n```\n\n**Comment 2: ExpressRuleOperateLogicService.java** — anchor:\n```\n            LOGGER.warn(\"事件规则执行失败, mode:{}, ruleCode:{}, errorType:{}\", mode.getValue(),\n                    eventBean.getRuleId(), ex.getClass().getName());\n```\nSuggestion: pass `ex` as the last argument to preserve the stack trace.\n\n**Comment 3: RuleExecuteMode.java** — anchor:\n```\n        return REMOTE;\n```\nHmm, that's inside fromConfigValue. Better anchor:\n```\n    /** 精确匹配配置值；缺失或非法时沿用远程执行，不转换大小写或去除空格。 */\n    public static RuleExecuteMode fromConfigValue(String value) {\n```\nOr the return REMOTE line. `return REMOTE;` appears once. I'll use the loop + return block for precision:\n```\n        for (RuleExecuteMode mode : values()) {\n            if (mode.value.equals(value)) {\n                return mode;\n            }\n        }\n        return REMOTE;\n```\n\n**Comment 4: compareAndReport catch** — anchor:\n```\n            LOGGER.warn(\"事件规则比对失败, ruleCode:{}, errorType:{}\", eventBean.getRuleId(), ex.getClass().getName());\n```\n\nLet me double check the exact text of these lines from the diff. From the diff:\n\n```\n+        catch (Exception ex)\n+        {\n+            LOGGER.warn(\"事件规则执行失败, mode:{}, ruleCode:{}, errorType:{}\", mode.getValue(),\n+                    eventBean.getRuleId(), ex.getClass().getName());\n+            throw new RcRealTimeException(RcRealTimeErrorCode.POST_LOAN_EVENT_RULE_EXECUTE_EXIT);\n+        }\n```\nWait — the `catch (Exception ex)` and `{` lines are context (unchanged) lines in the diff. Only the LOGGER.warn lines are added (+). Let me re-read the diff:\n\n```\n         catch (Exception ex)\n         {\n-            LOGGER.warn(\"expressRuleRunnerService失败, context:{}\", JSONObject.toJSONString(context), ex);\n+            LOGGER.warn(\"事件规则执行失败, mode:{}, ruleCode:{}, errorType:{}\", mode.getValue(),\n+                    eventBean.getRuleId(), ex.getClass().getName());\n             throw new RcRealTimeException(RcRealTimeErrorCode.POST_LOAN_EVENT_RULE_EXECUTE_EXIT);\n         }\n```\nYes. So my existing_code should be the two added lines:\n```\n            LOGGER.warn(\"事件规则执行失败, mode:{}, ruleCode:{}, errorType:{}\", mode.getValue(),\n                    eventBean.getRuleId(), ex.getClass().getName());\n```\n\nFor comment 4:\n```\n+            LOGGER.warn(\"事件规则比对失败, ruleCode:{}, errorType:{}\", eventBean.getRuleId(), ex.getClass().getName());\n```\n\nNow the suggestion_code for comment 2:\n```java\n            LOGGER.warn(\"事件规则执行失败, mode:{}, ruleCode:{}\", mode.getValue(),\n                    eventBean.getRuleId(), ex);\n```\n\nLet me write the comments in Chinese.\n\nFor comment 1 (pom), suggestion_code: what version? I don't know the release version. I'll just describe it without a suggestion_code, or suggest removing the SNAPSHOT qualifier. I'll provide the content and no suggestion_code (safer than inventing a version).\n\nLet me write the final comments now.\n\nAlso, should I double-check whether `2.1-SNAPSHOT` might actually be correct/intended... The rule is mandatory: \"In newly added code, the version must not contain the snapshot qualifier\". Report it.\n\nOne more consideration for comment 3 severity: low. Category: maintainability or other. I'll use \"maintainability\".\n\nLet me write them.",
+      "category": "bug",
+      "severity": "medium"
+    },
+    {
+      "path": "server_rc_realtime_operation-impl/src/main/java/com/fenqile/rc/realtime/operation/service/logic/ExpressRuleOperateLogicService.java",
+      "content": "这里丢失了原始异常的堆栈与 message：日志只打印 `ex.getClass().getName()`，而抛出的 `RcRealTimeException` 也只有 `FqlErrorCode` 构造器（见 RcRealTimeException.java，无法携带 cause），根因在链路上彻底消失。相比改动前的 `LOGGER.warn(\"...\", JSONObject.toJSONString(context), ex)` 是一次可观测性回退：切到 local 模式后，`LocalExpressRuleExecutor.RuleExecutionException` 的 message 仅是 `localError/localTimeout/poolReject`，QLExpress 真正的编译错误、类型转换错误或 NPE 将无法定位，AC-004 回归排障会很困难。建议把 `ex` 作为最后一个参数传给 logger 以保留堆栈（该分支为失败路径，不存在日志量风险）。",
+      "suggestion_code": "            LOGGER.warn(\"事件规则执行失败, mode:{}, ruleCode:{}\", mode.getValue(),\n                    eventBean.getRuleId(), ex);",
+      "existing_code": "            LOGGER.warn(\"事件规则执行失败, mode:{}, ruleCode:{}, errorType:{}\", mode.getValue(),\n                    eventBean.getRuleId(), ex.getClass().getName());",
+      "start_line": 259,
+      "end_line": 260,
+      "thinking": "Consumer threads are configurable per topic (defaults 1-5). So an 8-thread local pool is probably adequate, though the config can be raised at runtime via Hippo without bound. Under high consumer thread config (\u003e24 concurrent), the pool could saturate. This is speculative; the design numbers were given in the requirement. I'll skip.\n\nNow let me finalize my comments. Let me get the exact diff lines to anchor them.\n\n**Comment 1: pom.xml**\n```\n+        \u003cdependency\u003e\n+            \u003cgroupId\u003ecom.fenqile\u003c/groupId\u003e\n+            \u003cartifactId\u003eserver_credit_ser_deploy_java-service\u003c/artifactId\u003e\n+            \u003cversion\u003e2.1-SNAPSHOT\u003c/version\u003e\n```\nexisting_code: `            \u003cversion\u003e2.1-SNAPSHOT\u003c/version\u003e` — but this string might match other lines? The tool matches against the diff text; `\u003cversion\u003e2.1-SNAPSHOT\u003c/version\u003e` appears only once in the added block (the existing one is `2.1.0-SNAPSHOT` at line 69 which is not in the diff). To be safe, include more context:\n```\n            \u003cartifactId\u003eserver_credit_ser_deploy_java-service\u003c/artifactId\u003e\n            \u003cversion\u003e2.1-SNAPSHOT\u003c/version\u003e\n```\n\n**Comment 2: ExpressRuleOperateLogicService.java** — anchor:\n```\n            LOGGER.warn(\"事件规则执行失败, mode:{}, ruleCode:{}, errorType:{}\", mode.getValue(),\n                    eventBean.getRuleId(), ex.getClass().getName());\n```\nSuggestion: pass `ex` as the last argument to preserve the stack trace.\n\n**Comment 3: RuleExecuteMode.java** — anchor:\n```\n        return REMOTE;\n```\nHmm, that's inside fromConfigValue. Better anchor:\n```\n    /** 精确匹配配置值；缺失或非法时沿用远程执行，不转换大小写或去除空格。 */\n    public static RuleExecuteMode fromConfigValue(String value) {\n```\nOr the return REMOTE line. `return REMOTE;` appears once. I'll use the loop + return block for precision:\n```\n        for (RuleExecuteMode mode : values()) {\n            if (mode.value.equals(value)) {\n                return mode;\n            }\n        }\n        return REMOTE;\n```\n\n**Comment 4: compareAndReport catch** — anchor:\n```\n            LOGGER.warn(\"事件规则比对失败, ruleCode:{}, errorType:{}\", eventBean.getRuleId(), ex.getClass().getName());\n```\n\nLet me double check the exact text of these lines from the diff. From the diff:\n\n```\n+        catch (Exception ex)\n+        {\n+            LOGGER.warn(\"事件规则执行失败, mode:{}, ruleCode:{}, errorType:{}\", mode.getValue(),\n+                    eventBean.getRuleId(), ex.getClass().getName());\n+            throw new RcRealTimeException(RcRealTimeErrorCode.POST_LOAN_EVENT_RULE_EXECUTE_EXIT);\n+        }\n```\nWait — the `catch (Exception ex)` and `{` lines are context (unchanged) lines in the diff. Only the LOGGER.warn lines are added (+). Let me re-read the diff:\n\n```\n         catch (Exception ex)\n         {\n-            LOGGER.warn(\"expressRuleRunnerService失败, context:{}\", JSONObject.toJSONString(context), ex);\n+            LOGGER.warn(\"事件规则执行失败, mode:{}, ruleCode:{}, errorType:{}\", mode.getValue(),\n+                    eventBean.getRuleId(), ex.getClass().getName());\n             throw new RcRealTimeException(RcRealTimeErrorCode.POST_LOAN_EVENT_RULE_EXECUTE_EXIT);\n         }\n```\nYes. So my existing_code should be the two added lines:\n```\n            LOGGER.warn(\"事件规则执行失败, mode:{}, ruleCode:{}, errorType:{}\", mode.getValue(),\n                    eventBean.getRuleId(), ex.getClass().getName());\n```\n\nFor comment 4:\n```\n+            LOGGER.warn(\"事件规则比对失败, ruleCode:{}, errorType:{}\", eventBean.getRuleId(), ex.getClass().getName());\n```\n\nNow the suggestion_code for comment 2:\n```java\n            LOGGER.warn(\"事件规则执行失败, mode:{}, ruleCode:{}\", mode.getValue(),\n                    eventBean.getRuleId(), ex);\n```\n\nLet me write the comments in Chinese.\n\nFor comment 1 (pom), suggestion_code: what version? I don't know the release version. I'll just describe it without a suggestion_code, or suggest removing the SNAPSHOT qualifier. I'll provide the content and no suggestion_code (safer than inventing a version).\n\nLet me write the final comments now.\n\nAlso, should I double-check whether `2.1-SNAPSHOT` might actually be correct/intended... The rule is mandatory: \"In newly added code, the version must not contain the snapshot qualifier\". Report it.\n\nOne more consideration for comment 3 severity: low. Category: maintainability or other. I'll use \"maintainability\".\n\nLet me write them.",
+      "category": "bug",
+      "severity": "medium"
+    },
+    {
+      "path": "server_rc_realtime_operation-impl/src/main/java/com/fenqile/rc/realtime/operation/service/logic/ExpressRuleOperateLogicService.java",
+      "content": "比对/上报分支的 catch 同样只记录异常类名，未输出 message 与堆栈。该路径是 shadow 期观测 AC-003 的主要手段，一旦 `JSON.toJSONString`、`params.keySet()` 或 `ReportConfig.counterReport` 自身出问题（例如监控 SDK 异常），日志里只有一个类名，无法判断是比对逻辑 bug 还是监控不可用。建议把 `ex` 一并输出；如担心监控长时间不可用导致日志放大，可只在此处保留堆栈但降级为 warn 并附带 `ex.getMessage()`。",
+      "suggestion_code": "            LOGGER.warn(\"事件规则比对失败, ruleCode:{}\", eventBean.getRuleId(), ex);",
+      "existing_code": "            LOGGER.warn(\"事件规则比对失败, ruleCode:{}, errorType:{}\", eventBean.getRuleId(), ex.getClass().getName());",
+      "start_line": 341,
+      "end_line": 341,
+      "thinking": "Consumer threads are configurable per topic (defaults 1-5). So an 8-thread local pool is probably adequate, though the config can be raised at runtime via Hippo without bound. Under high consumer thread config (\u003e24 concurrent), the pool could saturate. This is speculative; the design numbers were given in the requirement. I'll skip.\n\nNow let me finalize my comments. Let me get the exact diff lines to anchor them.\n\n**Comment 1: pom.xml**\n```\n+        \u003cdependency\u003e\n+            \u003cgroupId\u003ecom.fenqile\u003c/groupId\u003e\n+            \u003cartifactId\u003eserver_credit_ser_deploy_java-service\u003c/artifactId\u003e\n+            \u003cversion\u003e2.1-SNAPSHOT\u003c/version\u003e\n```\nexisting_code: `            \u003cversion\u003e2.1-SNAPSHOT\u003c/version\u003e` — but this string might match other lines? The tool matches against the diff text; `\u003cversion\u003e2.1-SNAPSHOT\u003c/version\u003e` appears only once in the added block (the existing one is `2.1.0-SNAPSHOT` at line 69 which is not in the diff). To be safe, include more context:\n```\n            \u003cartifactId\u003eserver_credit_ser_deploy_java-service\u003c/artifactId\u003e\n            \u003cversion\u003e2.1-SNAPSHOT\u003c/version\u003e\n```\n\n**Comment 2: ExpressRuleOperateLogicService.java** — anchor:\n```\n            LOGGER.warn(\"事件规则执行失败, mode:{}, ruleCode:{}, errorType:{}\", mode.getValue(),\n                    eventBean.getRuleId(), ex.getClass().getName());\n```\nSuggestion: pass `ex` as the last argument to preserve the stack trace.\n\n**Comment 3: RuleExecuteMode.java** — anchor:\n```\n        return REMOTE;\n```\nHmm, that's inside fromConfigValue. Better anchor:\n```\n    /** 精确匹配配置值；缺失或非法时沿用远程执行，不转换大小写或去除空格。 */\n    public static RuleExecuteMode fromConfigValue(String value) {\n```\nOr the return REMOTE line. `return REMOTE;` appears once. I'll use the loop + return block for precision:\n```\n        for (RuleExecuteMode mode : values()) {\n            if (mode.value.equals(value)) {\n                return mode;\n            }\n        }\n        return REMOTE;\n```\n\n**Comment 4: compareAndReport catch** — anchor:\n```\n            LOGGER.warn(\"事件规则比对失败, ruleCode:{}, errorType:{}\", eventBean.getRuleId(), ex.getClass().getName());\n```\n\nLet me double check the exact text of these lines from the diff. From the diff:\n\n```\n+        catch (Exception ex)\n+        {\n+            LOGGER.warn(\"事件规则执行失败, mode:{}, ruleCode:{}, errorType:{}\", mode.getValue(),\n+                    eventBean.getRuleId(), ex.getClass().getName());\n+            throw new RcRealTimeException(RcRealTimeErrorCode.POST_LOAN_EVENT_RULE_EXECUTE_EXIT);\n+        }\n```\nWait — the `catch (Exception ex)` and `{` lines are context (unchanged) lines in the diff. Only the LOGGER.warn lines are added (+). Let me re-read the diff:\n\n```\n         catch (Exception ex)\n         {\n-            LOGGER.warn(\"expressRuleRunnerService失败, context:{}\", JSONObject.toJSONString(context), ex);\n+            LOGGER.warn(\"事件规则执行失败, mode:{}, ruleCode:{}, errorType:{}\", mode.getValue(),\n+                    eventBean.getRuleId(), ex.getClass().getName());\n             throw new RcRealTimeException(RcRealTimeErrorCode.POST_LOAN_EVENT_RULE_EXECUTE_EXIT);\n         }\n```\nYes. So my existing_code should be the two added lines:\n```\n            LOGGER.warn(\"事件规则执行失败, mode:{}, ruleCode:{}, errorType:{}\", mode.getValue(),\n                    eventBean.getRuleId(), ex.getClass().getName());\n```\n\nFor comment 4:\n```\n+            LOGGER.warn(\"事件规则比对失败, ruleCode:{}, errorType:{}\", eventBean.getRuleId(), ex.getClass().getName());\n```\n\nNow the suggestion_code for comment 2:\n```java\n            LOGGER.warn(\"事件规则执行失败, mode:{}, ruleCode:{}\", mode.getValue(),\n                    eventBean.getRuleId(), ex);\n```\n\nLet me write the comments in Chinese.\n\nFor comment 1 (pom), suggestion_code: what version? I don't know the release version. I'll just describe it without a suggestion_code, or suggest removing the SNAPSHOT qualifier. I'll provide the content and no suggestion_code (safer than inventing a version).\n\nLet me write the final comments now.\n\nAlso, should I double-check whether `2.1-SNAPSHOT` might actually be correct/intended... The rule is mandatory: \"In newly added code, the version must not contain the snapshot qualifier\". Report it.\n\nOne more consideration for comment 3 severity: low. Category: maintainability or other. I'll use \"maintainability\".\n\nLet me write them.",
+      "category": "maintainability",
+      "severity": "low"
+    },
+    {
+      "path": "server_rc_realtime_operation-impl/src/main/java/com/fenqile/rc/realtime/operation/constants/RuleExecuteMode.java",
+      "content": "非法配置值静默回退 REMOTE，没有任何告警或打点。由于匹配是严格区分大小写且不 trim 的，运维把开关写成 `LOCAL`、`local `、`Remote` 时会“配置已改但仍走远程”，而 `executeRule` 的日志打印的是归一化后的 `mode.getValue()`（remote），从指标上完全看不出配置写错了，AC-005“开关在线切回并立即生效”的验证会失败且难以定位。建议对“非空但不识别”的取值单独打点或输出一次 warn（缺失值仍按 REMOTE 静默处理，避免日志放大）。",
+      "existing_code": "        for (RuleExecuteMode mode : values()) {\n            if (mode.value.equals(value)) {\n                return mode;\n            }\n        }\n        return REMOTE;",
+      "start_line": 20,
+      "end_line": 25,
+      "thinking": "Consumer threads are configurable per topic (defaults 1-5). So an 8-thread local pool is probably adequate, though the config can be raised at runtime via Hippo without bound. Under high consumer thread config (\u003e24 concurrent), the pool could saturate. This is speculative; the design numbers were given in the requirement. I'll skip.\n\nNow let me finalize my comments. Let me get the exact diff lines to anchor them.\n\n**Comment 1: pom.xml**\n```\n+        \u003cdependency\u003e\n+            \u003cgroupId\u003ecom.fenqile\u003c/groupId\u003e\n+            \u003cartifactId\u003eserver_credit_ser_deploy_java-service\u003c/artifactId\u003e\n+            \u003cversion\u003e2.1-SNAPSHOT\u003c/version\u003e\n```\nexisting_code: `            \u003cversion\u003e2.1-SNAPSHOT\u003c/version\u003e` — but this string might match other lines? The tool matches against the diff text; `\u003cversion\u003e2.1-SNAPSHOT\u003c/version\u003e` appears only once in the added block (the existing one is `2.1.0-SNAPSHOT` at line 69 which is not in the diff). To be safe, include more context:\n```\n            \u003cartifactId\u003eserver_credit_ser_deploy_java-service\u003c/artifactId\u003e\n            \u003cversion\u003e2.1-SNAPSHOT\u003c/version\u003e\n```\n\n**Comment 2: ExpressRuleOperateLogicService.java** — anchor:\n```\n            LOGGER.warn(\"事件规则执行失败, mode:{}, ruleCode:{}, errorType:{}\", mode.getValue(),\n                    eventBean.getRuleId(), ex.getClass().getName());\n```\nSuggestion: pass `ex` as the last argument to preserve the stack trace.\n\n**Comment 3: RuleExecuteMode.java** — anchor:\n```\n        return REMOTE;\n```\nHmm, that's inside fromConfigValue. Better anchor:\n```\n    /** 精确匹配配置值；缺失或非法时沿用远程执行，不转换大小写或去除空格。 */\n    public static RuleExecuteMode fromConfigValue(String value) {\n```\nOr the return REMOTE line. `return REMOTE;` appears once. I'll use the loop + return block for precision:\n```\n        for (RuleExecuteMode mode : values()) {\n            if (mode.value.equals(value)) {\n                return mode;\n            }\n        }\n        return REMOTE;\n```\n\n**Comment 4: compareAndReport catch** — anchor:\n```\n            LOGGER.warn(\"事件规则比对失败, ruleCode:{}, errorType:{}\", eventBean.getRuleId(), ex.getClass().getName());\n```\n\nLet me double check the exact text of these lines from the diff. From the diff:\n\n```\n+        catch (Exception ex)\n+        {\n+            LOGGER.warn(\"事件规则执行失败, mode:{}, ruleCode:{}, errorType:{}\", mode.getValue(),\n+                    eventBean.getRuleId(), ex.getClass().getName());\n+            throw new RcRealTimeException(RcRealTimeErrorCode.POST_LOAN_EVENT_RULE_EXECUTE_EXIT);\n+        }\n```\nWait — the `catch (Exception ex)` and `{` lines are context (unchanged) lines in the diff. Only the LOGGER.warn lines are added (+). Let me re-read the diff:\n\n```\n         catch (Exception ex)\n         {\n-            LOGGER.warn(\"expressRuleRunnerService失败, context:{}\", JSONObject.toJSONString(context), ex);\n+            LOGGER.warn(\"事件规则执行失败, mode:{}, ruleCode:{}, errorType:{}\", mode.getValue(),\n+                    eventBean.getRuleId(), ex.getClass().getName());\n             throw new RcRealTimeException(RcRealTimeErrorCode.POST_LOAN_EVENT_RULE_EXECUTE_EXIT);\n         }\n```\nYes. So my existing_code should be the two added lines:\n```\n            LOGGER.warn(\"事件规则执行失败, mode:{}, ruleCode:{}, errorType:{}\", mode.getValue(),\n                    eventBean.getRuleId(), ex.getClass().getName());\n```\n\nFor comment 4:\n```\n+            LOGGER.warn(\"事件规则比对失败, ruleCode:{}, errorType:{}\", eventBean.getRuleId(), ex.getClass().getName());\n```\n\nNow the suggestion_code for comment 2:\n```java\n            LOGGER.warn(\"事件规则执行失败, mode:{}, ruleCode:{}\", mode.getValue(),\n                    eventBean.getRuleId(), ex);\n```\n\nLet me write the comments in Chinese.\n\nFor comment 1 (pom), suggestion_code: what version? I don't know the release version. I'll just describe it without a suggestion_code, or suggest removing the SNAPSHOT qualifier. I'll provide the content and no suggestion_code (safer than inventing a version).\n\nLet me write the final comments now.\n\nAlso, should I double-check whether `2.1-SNAPSHOT` might actually be correct/intended... The rule is mandatory: \"In newly added code, the version must not contain the snapshot qualifier\". Report it.\n\nOne more consideration for comment 3 severity: low. Category: maintainability or other. I'll use \"maintainability\".\n\nLet me write them.",
+      "category": "maintainability",
+      "severity": "low"
+    }
+  ],
+  "groups": [
+    {
+      "label": "Local express rule execution support",
+      "files": [
+        "server_rc_realtime_operation-impl/pom.xml",
+        "server_rc_realtime_operation-impl/src/main/java/com/fenqile/rc/realtime/operation/config/CommonConfig.java",
+        "server_rc_realtime_operation-impl/src/main/java/com/fenqile/rc/realtime/operation/service/logic/ExpressRuleOperateLogicService.java",
+        "server_rc_realtime_operation-impl/src/test/java/ut/com/fenqile/rc/realtime/operation/service/real/node/ExpressRuleOperateLogicServiceTest.java",
+        "server_rc_realtime_operation-impl/src/main/java/com/fenqile/rc/realtime/operation/constants/RuleExecuteMode.java",
+        "server_rc_realtime_operation-impl/src/main/java/com/fenqile/rc/realtime/operation/service/logic/LocalExpressRuleExecutor.java",
+        "server_rc_realtime_operation-impl/src/test/java/ut/com/fenqile/rc/realtime/operation/service/logic/LocalExpressRuleExecutorTest.java"
+      ]
+    }
+  ],
+  "warnings": [
+    {
+      "file": "server_rc_realtime_operation-impl/pom.xml,server_rc_realtime_operation-impl/src/main/java/com/fenqile/rc/realtime/operation/config/CommonConfig.java,server_rc_realtime_operation-impl/src/main/java/com/fenqile/rc/realtime/operation/constants/RuleExecuteMode.java,server_rc_realtime_operation-impl/src/main/java/com/fenqile/rc/realtime/operation/service/logic/ExpressRuleOperateLogicService.java,server_rc_realtime_operation-impl/src/main/java/com/fenqile/rc/realtime/operation/service/logic/LocalExpressRuleExecutor.java,server_rc_realtime_operation-impl/src/test/java/ut/com/fenqile/rc/realtime/operation/service/logic/LocalExpressRuleExecutorTest.java,server_rc_realtime_operation-impl/src/test/java/ut/com/fenqile/rc/realtime/operation/service/real/node/ExpressRuleOperateLogicServiceTest.java",
+      "message": "round 2: LLM completion error: context deadline exceeded",
+      "type": "review_round_failed"
+    }
+  ],
+  "session_id": "5815e13c-9ae1-4666-9a77-0386526b9364",
+  "manifest": {
+    "schema_version": "ocr.run-manifest/v1",
+    "run_id": "5815e13c-9ae1-4666-9a77-0386526b9364",
+    "operation": "review",
+    "terminal_state": "complete",
+    "repository": {
+      "identity_sha256": "ef122b89912ce4ce30f5b33d78e6c22c123ec178201a5e6d7fccf289d01f1f90"
+    },
+    "input": {
+      "mode": "workspace",
+      "resolved_base": "f65136cc76616146a0b8e62e37f276ee9480a879",
+      "source_artifact_sha256": "b5cbdc3506a3b65d0358ceabc6e8fbd3cc75c260fd5cd8e1e0e8a4aaceafdf1d"
+    },
+    "execution": {
+      "ocr_version": "v1.12.7",
+      "provider": "lexin",
+      "model": "qwen3.8-max",
+      "configured_concurrency": 4,
+      "rule_config_sha256": "a8647ff094a32e1e38e7c76ff142da1492126e18b5d15707aa97f15baf3f1c1f",
+      "runtime_config_sha256": "3f38bca3809867f59ccbd37d32be823b35845cf10f1e7707366d957ec88dcb45"
+    },
+    "coverage": {
+      "selected": [
+        {
+          "item_id": "35facc892bba73a394abe18493544e5de48314be042b166ad04940d59839f460",
+          "path": "server_rc_realtime_operation-impl/src/test/java/ut/com/fenqile/rc/realtime/operation/service/logic/LocalExpressRuleExecutorTest.java",
+          "fingerprint": "e2a913d4de678f480e0ca1725dd8dd00c5c656f20a0692a0f291803c654b27d6"
+        },
+        {
+          "item_id": "6d8f4b6a54efafa6d64d17098256e7befbddaaa613cbc4eb9d81aab8663dcbfa",
+          "path": "server_rc_realtime_operation-impl/src/main/java/com/fenqile/rc/realtime/operation/service/logic/ExpressRuleOperateLogicService.java",
+          "fingerprint": "5e0095b4d3143604acd407d31b6a6b3daca0bdc7007c30f59aaba1679730d65e"
+        },
+        {
+          "item_id": "9f33f4fdf624023f32f00a6afd335b8777bee4ece61243c68d9eaaade630cb79",
+          "path": "server_rc_realtime_operation-impl/src/test/java/ut/com/fenqile/rc/realtime/operation/service/real/node/ExpressRuleOperateLogicServiceTest.java",
+          "fingerprint": "d26947dbedc921d47bcec2ed4909dd18fae7229acdba41e869d0d83bff4888e1"
+        },
+        {
+          "item_id": "b0218ae1cf7b60ea24a3b36eae27f0f2796ce24bf6d54c016d8f4a723809900a",
+          "path": "server_rc_realtime_operation-impl/pom.xml",
+          "fingerprint": "18f5c0d4c4e2b2eb4cdaccfdde0bc51dc10d661d883b533fbdae0fc9d3474e40"
+        },
+        {
+          "item_id": "c8d90727a654ec58c9850f0373000efba4abb0d240a619f85fd31fa75aea7bde",
+          "path": "server_rc_realtime_operation-impl/src/main/java/com/fenqile/rc/realtime/operation/config/CommonConfig.java",
+          "fingerprint": "2c283e3dff95c7a4d6f963a497c9e7f847e4414048396a2632d752087d136205"
+        },
+        {
+          "item_id": "d4b65168a70b39602ff8074292212f4c4c4551f7d04a5c6b67a58225e15cca52",
+          "path": "server_rc_realtime_operation-impl/src/main/java/com/fenqile/rc/realtime/operation/service/logic/LocalExpressRuleExecutor.java",
+          "fingerprint": "05e0f8809662fae88153524e95901c97691796bbf1bc06a1a58a394b727a1414"
+        },
+        {
+          "item_id": "fe07f70c24f5f50058c9af7e60c0b79469d8695ce5014806dbb275bdf66767c2",
+          "path": "server_rc_realtime_operation-impl/src/main/java/com/fenqile/rc/realtime/operation/constants/RuleExecuteMode.java",
+          "fingerprint": "5be2022b539d56d6d86d1eb068a69e9076711b2fa3f34d6f45fcbf1f85d3624e"
+        }
+      ],
+      "completed": [
+        {
+          "item_id": "35facc892bba73a394abe18493544e5de48314be042b166ad04940d59839f460",
+          "path": "server_rc_realtime_operation-impl/src/test/java/ut/com/fenqile/rc/realtime/operation/service/logic/LocalExpressRuleExecutorTest.java",
+          "fingerprint": "e2a913d4de678f480e0ca1725dd8dd00c5c656f20a0692a0f291803c654b27d6"
+        },
+        {
+          "item_id": "6d8f4b6a54efafa6d64d17098256e7befbddaaa613cbc4eb9d81aab8663dcbfa",
+          "path": "server_rc_realtime_operation-impl/src/main/java/com/fenqile/rc/realtime/operation/service/logic/ExpressRuleOperateLogicService.java",
+          "fingerprint": "5e0095b4d3143604acd407d31b6a6b3daca0bdc7007c30f59aaba1679730d65e"
+        },
+        {
+          "item_id": "9f33f4fdf624023f32f00a6afd335b8777bee4ece61243c68d9eaaade630cb79",
+          "path": "server_rc_realtime_operation-impl/src/test/java/ut/com/fenqile/rc/realtime/operation/service/real/node/ExpressRuleOperateLogicServiceTest.java",
+          "fingerprint": "d26947dbedc921d47bcec2ed4909dd18fae7229acdba41e869d0d83bff4888e1"
+        },
+        {
+          "item_id": "b0218ae1cf7b60ea24a3b36eae27f0f2796ce24bf6d54c016d8f4a723809900a",
+          "path": "server_rc_realtime_operation-impl/pom.xml",
+          "fingerprint": "18f5c0d4c4e2b2eb4cdaccfdde0bc51dc10d661d883b533fbdae0fc9d3474e40"
+        },
+        {
+          "item_id": "c8d90727a654ec58c9850f0373000efba4abb0d240a619f85fd31fa75aea7bde",
+          "path": "server_rc_realtime_operation-impl/src/main/java/com/fenqile/rc/realtime/operation/config/CommonConfig.java",
+          "fingerprint": "2c283e3dff95c7a4d6f963a497c9e7f847e4414048396a2632d752087d136205"
+        },
+        {
+          "item_id": "d4b65168a70b39602ff8074292212f4c4c4551f7d04a5c6b67a58225e15cca52",
+          "path": "server_rc_realtime_operation-impl/src/main/java/com/fenqile/rc/realtime/operation/service/logic/LocalExpressRuleExecutor.java",
+          "fingerprint": "05e0f8809662fae88153524e95901c97691796bbf1bc06a1a58a394b727a1414"
+        },
+        {
+          "item_id": "fe07f70c24f5f50058c9af7e60c0b79469d8695ce5014806dbb275bdf66767c2",
+          "path": "server_rc_realtime_operation-impl/src/main/java/com/fenqile/rc/realtime/operation/constants/RuleExecuteMode.java",
+          "fingerprint": "5be2022b539d56d6d86d1eb068a69e9076711b2fa3f34d6f45fcbf1f85d3624e"
+        }
+      ],
+      "reused": [],
+      "failed": [],
+      "waived": []
+    },
+    "elapsed_ms": 1816258
+  },
+  "retry_report": {
+    "schema_version": "ocr.llm-retry-report/v1",
+    "total_requests": 45,
+    "retried_requests": 0,
+    "total_retries": 0,
+    "recovered_requests": 0,
+    "failed_requests": 1,
+    "cancelled_requests": 0,
+    "requests": [
+      {
+        "logical_request_id": "455a53a5e48e7dacdd5d6b2274e35f13d45a9f2564dd061e8b2df5b36fffe68c",
+        "provider": "lexin",
+        "model": "qwen3.8-max",
+        "file_path": "server_rc_realtime_operation-impl/pom.xml,server_rc_realtime_operation-impl/src/main/java/com/fenqile/rc/realtime/operation/config/CommonConfig.java,server_rc_realtime_operation-impl/src/main/java/com/fenqile/rc/realtime/operation/constants/RuleExecuteMode.java,server_rc_realtime_operation-impl/src/main/java/com/fenqile/rc/realtime/operation/service/logic/ExpressRuleOperateLogicService.java,server_rc_realtime_operation-impl/src/main/java/com/fenqile/rc/realtime/operation/service/logic/LocalExpressRuleExecutor.java,server_rc_realtime_operation-impl/src/test/java/ut/com/fenqile/rc/realtime/operation/service/logic/LocalExpressRuleExecutorTest.java,server_rc_realtime_operation-impl/src/test/java/ut/com/fenqile/rc/realtime/operation/service/real/node/ExpressRuleOperateLogicServiceTest.java",
+        "task_type": "main_task",
+        "request_no": 42,
+        "outcome": "failed",
+        "attempts": [
+          {
+            "attempt": 1,
+            "outcome": "error",
+            "error_class": "timeout",
+            "failure_phase": "context",
+            "duration_to_headers_ms": 23741
+          }
+        ]
+      }
+    ]
+  }
+}

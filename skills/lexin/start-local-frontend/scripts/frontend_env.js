@@ -10,7 +10,7 @@
  *   open     打印真实域名访问地址，并探测本地实例与网关当前指向
  *
  * 只使用 Node 内置模块，无第三方依赖。
- * 知识来源：/home/joney/projects/web/web_mihawk_oa/AGENTS.md（本地开发环境搭建、启动前资源门禁）。
+ * 知识来源：/home/joney/projects/frontend/web_mihawk_oa/AGENTS.md（本地开发环境搭建、启动前资源门禁）。
  * 说明：Node 内置 http/https 不读取 http_proxy/https_proxy 环境变量，
  * 因此脚本内所有探测请求天然直连；换成 curl 调试时需 --noproxy '*'。
  */
@@ -23,7 +23,7 @@ const https = require('https');
 const querystring = require('querystring');
 const { spawn, spawnSync } = require('child_process');
 
-const PROJECT_DIR = '/home/joney/projects/web/web_mihawk_oa';
+const PROJECT_DIR = '/home/joney/projects/frontend/web_mihawk_oa';
 const DEV_PORT = 8116;
 const DOMAIN = 'mihawk.oa.fenqile.com';
 const GATEWAY_PATH = '/rc_oa_gateway';

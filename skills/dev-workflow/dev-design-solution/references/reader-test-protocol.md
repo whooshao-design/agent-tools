@@ -30,7 +30,7 @@
 
 ## 4. agent 读者
 
-- 新会话，与设计方不同的模型。模型对自己写的文本有系统性偏好，同模型读自己的方案会高估可读性。优先选实测能发现结构问题的后端，选模用 `skills/common/build-codeagent/scripts/pick_agent.py quick-check` 预览。
+- 新会话，与设计方不同的模型。模型对自己写的文本有系统性偏好，同模型读自己的方案会高估可读性。优先选实测能发现结构问题的后端，选模用 `python3 /home/joney/projects/ai/agent-tools/skills/common/build-codeagent/scripts/pick_agent.py quick-check --task <task_id>` 预览（只预览，不登记参与历史）。
 - 工具面只有 Read，工作目录只含 `solution.md` 副本，不联网、不写文件、不委派。
 - 提示词固定为本文件第 6 节的模板；每问回答不超过两句，附一句逐字引用和所在标题，找不到就写"找不到"。
 - 输出只有一个 JSON 代码块，原样保存为 `reader-test/agent-v<N>.raw.json`。
@@ -86,18 +86,18 @@
 Claude Code 编排时用 `claude-<backend>`：
 
 ```bash
-cd <只含 solution.md 的目录> && claude-<backend> -p "$(cat <prompt 文件>)" --allowedTools Read \
+cd <只含 solution.md 的目录> && claude-<backend> -p "$(cat <prompt 文件>)" --allowedTools Read --strict-mcp-config \
   --disallowedTools 'Bash,Write,Edit,WebSearch,WebFetch,Glob,Grep,Task' --max-turns 12 --output-format json
 ```
 
 Codex 编排时用 `codex-<backend> exec`（2026-09-20 用 codex-qwen 对同一份冻结方案实测 7/7）：
 
 ```bash
-cd <只含 solution.md 的目录> && codex-<backend> exec -s read-only --ephemeral --skip-git-repo-check --json \
+cd <只含 solution.md 的目录> && codex-<backend> exec -s read-only --ephemeral --skip-git-repo-check --ignore-user-config --json \
   "$(cat <prompt 文件>)" </dev/null > ../agent-v<N>.raw.jsonl
 ```
 
-Codex 没有 Read 工具，读者会在只读沙箱里用 `cat`/`sed` 分段读，同一份 170 行的方案消耗约 137k 输入 token（Claude 侧约 40k）；结果在 `--json` 输出里最后一个 `agent_message` 的 JSON 代码块。`</dev/null` 必须加。加 `--ignore-user-config` 可以不挂载主配置里的 MCP server（2026-09-20 起 `~/bin/codex-profile` 已兼容该参数）。
+Codex 没有 Read 工具，读者会在只读沙箱里用 `cat`/`sed` 分段读，同一份 170 行的方案消耗约 137k 输入 token（Claude 侧约 40k）；结果在 `--json` 输出里最后一个 `agent_message` 的 JSON 代码块。`</dev/null` 必须加。`--ignore-user-config` 必须加：不挂载主配置里的 MCP server（2026-09-20 起 `~/bin/codex-profile` 已兼容该参数）。派发前核对实际工具面只剩读文件（Claude 侧 `--strict-mcp-config` 且无 MCP，Codex 侧无 MCP、只读沙箱）；做不到就不做读者测试，只读沙箱本身不算满足第 4 节的隔离要求。
 
 编排器在 Codex 里时，读者测试和正式评审都用 `codex-<backend>`，不从 Codex 会话里再拉起 Claude Code；只有需要 WebSearch 的调研类任务仍用 `claude-<backend>`，codex exec 没有联网搜索。
 

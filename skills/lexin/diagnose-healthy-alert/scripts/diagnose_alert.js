@@ -99,12 +99,34 @@ function expandHome(value) {
   return value;
 }
 
+// 完整告警链接自带站点：stable-eye 是 stable，healthy.lexincloud.com 是 prod。只抽 ID 不抽站点会拿 stable 的 ID 去查生产。
+function baseUrlFromAlertLink(value) {
+  const match = String(value || '').match(/^(https?:\/\/[^/]+)\/.*alert-show-detail\/\d+/);
+  if (!match) return '';
+  const origin = match[1].replace(/\/+$/, '');
+  // 只接受已知的两个站点：凭据（token/ticket）随请求发出，不能因为链接长得像就发给任意域名。
+  if (!Object.values(BASE_URLS).includes(origin)) {
+    throw new Error(`--alert link host ${origin} is not a supported Healthy site (${[...new Set(Object.values(BASE_URLS))].join(', ')})`);
+  }
+  return origin;
+}
+
+function envForBaseUrl(baseUrl) {
+  return Object.keys(BASE_URLS).find((key) => BASE_URLS[key] === baseUrl) || 'custom';
+}
+
 function resolveBaseUrl(args) {
   if (args['base-url']) return String(args['base-url']).replace(/\/+$/, '');
-  const env = String(args.env || 'prod').toLowerCase();
-  const base = BASE_URLS[env];
-  if (!base) throw new Error(`Unknown env: ${args.env}`);
-  return base;
+  const fromLink = baseUrlFromAlertLink(args.alert);
+  const env = args.env ? String(args.env).toLowerCase() : '';
+  if (env && !BASE_URLS[env]) throw new Error(`Unknown env: ${args.env}`);
+  if (fromLink) {
+    if (env && BASE_URLS[env] !== fromLink) {
+      throw new Error(`--env=${env} points at ${BASE_URLS[env]} but --alert link is on ${fromLink}; drop one of them`);
+    }
+    return fromLink;
+  }
+  return BASE_URLS[env || 'prod'];
 }
 
 function resolveAlertId(value) {
@@ -187,7 +209,7 @@ async function extractAuthFromProfile(args, baseUrl, alertId) {
     await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
     const auth = await page.evaluate(() => {
       const keys = Object.keys(localStorage);
-      const tokenKey = keys.find((key) => /access.?token|token/i.test(key) && localStorage.getItem(key));
+      const tokenKey = localStorage.getItem('access_token') ? 'access_token' : null; // exact key; never fall back to refresh_token
       const ticketKey = keys.find((key) => /ticket/i.test(key) && localStorage.getItem(key));
       return {
         token: tokenKey ? localStorage.getItem(tokenKey) : '',
@@ -264,6 +286,10 @@ async function requestJson(url, auth, args, redirectsLeft = 3) {
   const response = await fetch(url, { headers: authHeaders(auth, args), redirect: 'manual' });
   if ([301, 302, 307, 308].includes(response.status) && response.headers.get('location') && redirectsLeft > 0) {
     const nextUrl = new URL(response.headers.get('location'), url).toString();
+    // 请求带 Bearer/ticket：跨源重定向会把凭据发给别的域名，直接拒绝。
+    if (new URL(nextUrl).origin !== new URL(url).origin) {
+      throw new Error(`GET ${redactUrl(url)} redirected to another origin (${new URL(nextUrl).origin}); refusing to forward credentials`);
+    }
     return requestJson(nextUrl, auth, args, redirectsLeft - 1);
   }
   const text = await response.text();
@@ -536,8 +562,8 @@ function renderAccessHint(hint) {
   if (hint.traceIds.length) lines.push(`traceId         ${hint.traceIds.join(', ')}`);
   lines.push('  ! --files must match the log level at the report site (log.warn -> warn.log, not error.log)');
   lines.push('  ! keep --context>=2: the root cause is usually the ERROR line right before the match');
-  lines.push('  ! info.log rotates hourly -> --include-rotated, or matchedFiles comes back empty');
-  lines.push('  ! matchedFiles=[] means no file matched (rotation/name), not \"keyword absent\"');
+  lines.push('  ! info.log rotates hourly -> --include-rotated, or fileCount comes back 0');
+  lines.push('  ! matchedFiles only lists files with hits; use fileCount/logDirExists to tell "no file scanned" from "keyword absent"');
   lines.push('command');
   for (const item of hint.command) lines.push(`  ${item}`);
   return lines.join('\n');
@@ -695,7 +721,7 @@ async function main() {
   const list = (detail.dat && detail.dat.list) || [];
   if (!list.length) throw new Error(`Alert ${alertId} returned an empty event list`);
 
-  const output = { alertId, env: args.env || 'prod', events: [] };
+  const output = { alertId, env: envForBaseUrl(baseUrl), baseUrl, events: [] };
   const chunks = [];
   if (list.length > 1) chunks.push(`# alert ${alertId} contains ${list.length} events`);
 
@@ -761,7 +787,11 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(`ERROR: ${error.message}`);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(`ERROR: ${error.message}`);
+    process.exit(1);
+  });
+}
+
+module.exports = { requestJson, baseUrlFromAlertLink, resolveBaseUrl };

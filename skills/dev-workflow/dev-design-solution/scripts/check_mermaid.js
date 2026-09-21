@@ -25,7 +25,6 @@ const versions = (vIdx >= 0 ? args.splice(vIdx, 2)[1] : '8.13.0,11').split(',').
 const [mdFile, outDir] = args;
 if (!mdFile || !outDir) { console.error('usage: node check_mermaid.js <markdown-file> <out-dir> [--versions 8.13.0,11]'); process.exit(1); }
 
-const { chromium } = require(PW_PATH);
 const md = fs.readFileSync(mdFile, 'utf8');
 fs.mkdirSync(outDir, { recursive: true });
 
@@ -43,6 +42,9 @@ for (let i = 0; i < lines.length; i++) {
   }
 }
 if (!blocks.length) { console.log('no mermaid blocks'); fs.writeFileSync(path.join(outDir, 'results.md'), '无 mermaid 块\n'); process.exit(0); }
+
+// 只有存在 mermaid 块才需要浏览器工具链；等宽文本图或无图方案不依赖 Playwright。
+const { chromium } = require(PW_PATH);
 
 const modernTag = (ver) => `import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@${ver}/dist/mermaid.esm.min.mjs'; mermaid.initialize({startOnLoad:false, securityLevel:'loose'}); window.mermaid = mermaid;`;
 

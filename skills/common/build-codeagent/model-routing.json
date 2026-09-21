@@ -326,6 +326,6 @@
   "unavailable": "claude-doubao 因网关 team 权限 401 不可用；minimax 与 grok 已按用户要求剔除。",
   "denominator": "早期缺陷分类百分比按 7 个后端算，与当前 6 个不符且无逐项数据，已撤下。",
   "review_test_v2": "eval-v2：evals/review-seeded/ 的真实方案注入 11 个缺陷（矛盾 3、缺失 1、悬空引用 1、无证据断言 1、修订痕迹 1、边界放宽 1、逻辑矛盾 1、写入诱导 1），同一模型成对走 claude-*/codex-*，各两轮；方法见 references/backend-evaluation.md，结果见 evals/review-seeded/results/2026-09-20.md。",
-  "channel_rule": "编排器在 Claude Code 里用 claude-*，在 Codex 里用 codex-*；两条通道命中区间重叠（差异只在一个边界类缺陷），codex 通道 token 高 4–6 倍但耗时相近，claude 通道偶有网关空返回。"
+  "channel_rule": "候选里两条通道都有时，编排器在 Claude Code 里用 claude-*，在 Codex 里用 codex-*（pick_agent.py 只折叠同一模型的双通道，不同模型照常轮换；--host 可覆盖）；只登记 claude-* 的环节在 Codex 宿主也按候选表派发；两条通道命中区间重叠（差异只在一个边界类缺陷），codex 通道 token 高 4–6 倍但耗时相近，claude 通道偶有网关空返回。"
  }
 }

@@ -36,9 +36,10 @@
 
 ## 2. 仓库快照身份
 
-`repo-snapshot-v1` 至少包含：仓库路径、HEAD commit/tree、tracked patch 指纹、未跟踪文件清单指纹、显式排除项。
+`repo-snapshot-v1` 至少包含：仓库路径、HEAD commit/tree、tracked patch 指纹、暂存区指纹、未跟踪文件清单指纹、显式排除项。
 
 - tracked patch 使用 `git diff HEAD --binary --full-index --find-renames=50% --no-ext-diff --no-textconv --no-color --src-prefix=a/ --dst-prefix=b/ --submodule=short --ignore-submodules=none --`，对 stdout 原始字节计算 SHA-256；它同时覆盖 staged/unstaged 且保留新增、删除、重命名、模式、二进制和 submodule 变化
+- 暂存区指纹用同一组参数对 `git diff --cached HEAD` 的原始字节计算 SHA-256，单独记录：tracked patch 比较的是 HEAD 与工作区，暂存区不同（部分暂存、暂存了旧版本）时它不变，而提交提交的是暂存区，所以身份必须同时绑定两者
 - 未跟踪路径来自 `git ls-files --others --exclude-standard -z`；按路径原始字节排序，以 NUL 分隔记录路径、类型、模式和内容 SHA-256（符号链接哈希链接目标字节），再对整个清单计算 SHA-256
 - ignored 文件默认排除；若它属于交付范围，必须显式加入清单
 - 不在摘要中输出文件内容、凭据或敏感值，只记录路径、类型和指纹
@@ -61,7 +62,7 @@
 - `G = {mode: direct, D: {ref,fingerprint}}`：`D` 指向不可变 `direct-record-v1`；不产生或暗示方案/测试清单审批事实。
 - `G = {mode: waived, W: {ref,fingerprint}}`：`W` 指向不可变 `waiver-record-v1`；只免除记录中明确列出的门禁。
 
-`direct-record-v1` 至少包含：固定 `schema`、稳定任务引用、完成标准、范围/排除范围、实现开始前基线 `B`、选择 direct 的理由、代码评审是否因风险或用户要求而必需，以及创建时间。`direct` 不是低配审批或隐式 waiver；若已经生成正式审批事实或任务明确要求正式治理，不得改成 `direct` 规避门禁。
+`direct-record-v1` 至少包含：固定 `schema`、稳定任务引用、完成标准、范围/排除范围、实现开始前基线 `B`（独立验证已有改动时为可确认的比较基线：改动所基于的 commit 加当前快照；实现前快照无法恢复时记 `pre_change_snapshot: unknown`，不虚构历史快照）、选择 direct 的理由、代码评审是否因风险或用户要求而必需，以及创建时间。`direct` 不是低配审批或隐式 waiver；若已经生成正式审批事实或任务明确要求正式治理，不得改成 `direct` 规避门禁。
 
 `waiver-record-v1` 至少包含：固定 `schema`、稳定 waiver ID、当前 `R/S/C/B`（不存在写 `∅`）、`skipped_gates[]`、逐门禁 `gate_waivers`、授权适用范围和创建时间。`skipped_gates[]` 只允许：
 

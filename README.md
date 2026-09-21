@@ -100,7 +100,7 @@
 |---|---|---|
 | `redis-query` | 通过 DevService.queryRedis 只读查询 Redis | `redis_query` |
 | `query-mysql-data` | 从代码定位实例并通过 lxcloud HTTP 只读查询 stable 与经授权线上 MySQL 数据 | `mysql_readonly` |
-| `query-clickhouse-water` | 通过预发布/灰度/线上共用 DBA 堡垒机或 stable/测试 HTTP 接口查询 ClickHouse 流水 | `bastion_dba`、`browser_session` |
+| `query-clickhouse-water` | ClickHouse 流水查询：DecisionWaterHawkCK 默认 DBA，其他实例默认乐信云 HTTP，支持显式指定通道 | `bastion_dba`、`browser_session` |
 | `query-hive-data` | 通过乐信大数据门户即席分析以 Presto/Spark 只读查询 Hive 数仓表，复用浏览器登录态 | `browser_session` |
 | `query-hippo-config` | 查看标准、stable 或墨西哥/印尼海外 Hippo 配置中心实际生效配置 | `browser_session` |
 | `configure-hippo` | 新增、修改并在明确授权后发布标准、stable 或墨西哥/印尼海外 Hippo 配置 | `browser_session` |

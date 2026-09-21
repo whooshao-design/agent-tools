@@ -2,7 +2,7 @@
 name: configure-hippo
 description: 安全新增、修改并在明确授权后发布 Hippo 配置，并支持在明确授权后为应用新建 namespace；支持标准 Hippo、stable/测试/项目环境以及墨西哥、印尼海外站点的独立域名；默认使用预发布 fql_pre 且只保存草稿、不发布；stable/测试环境保存后自动按 key 发布。Use when 用户要求在 Hippo 配置中心新增 key、修改配置值、更新预发布或 stable 配置、修改墨西哥或印尼海外配置、把本地文件写入 namespace、给某个 appId 新建 namespace、给 namespace 授修改权或发布权，或明确授权“修改并发布”；内置变更前检查、并发草稿保护、非目标项保护、key 粒度发布、新建 namespace 与授权的二次确认和 active release 校验。
 metadata:
-  version: 1.9.3
+  version: 1.9.6
 ---
 
 # configure-hippo
@@ -77,7 +77,7 @@ namespace 归到分组时，角色接口里的 namespace 名要写成 `<groupPat
 - namespace 名称只能包含字母、数字和下划线，含部门前缀不超过 64 字符；备注必填且 10-64 字符；加密存储只支持 `properties` 格式。public/private 由应用类型决定（实体应用=private，虚拟应用=public 且自动加 `<orgId>.` 前缀），不接受手工指定。
 - 默认名单（`joneyshao`）的授权随 `namespace-create` 自动执行，不要再问用户；给默认名单以外的人授权只能通过 `namespace-grant --grant-authorization=explicit`，且必须显式传 `--grant-users`，不要凭猜测扩大名单。
 - `namespace-create` 上的 `--grant-users` 只在同时传 `--grant-authorization=explicit` 时才生效；否则脚本报 `GRANT_AUTHORIZATION_REQUIRED`，不会静默按默认名单处理。
-- 写配置前先看 `plan` 里的 `hasModifyPermission`（要发布再看 `hasReleasePermission`）。为 false 时自动跑一次 `namespace-grant` 自助补权限再重试，这一步不用问用户；`namespace-grant` 报 `ASSIGN_ROLE_PERMISSION_DENIED` 就停止，把 `appId`、`namespace`、`appOwners` 报给用户让其申请权限，不要再重试、不要试图用别的接口写入。
+- 写配置前先看 `plan` 里的 `hasModifyPermission`（要发布再看 `hasReleasePermission`）。为 false 时按脚本给出的 `grantCommand` 自动跑一次 `namespace-grant` 自助补权限再重试，这一步不用问用户；`grantCommand` 已带 `--roles`，只补本次操作缺的角色（存草稿只补 modify，要发布才连 release 一起补），不要自行加角色；`namespace-grant` 报 `ASSIGN_ROLE_PERMISSION_DENIED` 就停止，把 `appId`、`namespace`、`appOwners` 报给用户让其申请权限，不要再重试、不要试图用别的接口写入。
 - 授权只做加法。脚本不调用任何 remove role 接口；已经有该角色的用户直接跳过并计入 `alreadyGranted`，授权后必须验证 `nonTargetRoleUsersUnchanged=true`（没有用户被移除、没有非目标用户被加进来）。
 - 发布权（`ReleaseNamespace`）意味着该用户可以对这个 namespace 的所有环境发起发布；除上述默认名单规则外，授权前要向用户确认名单，不要顺手把整组人都加上。
 
@@ -152,7 +152,7 @@ namespace 命令的专用参数：
 2. 把目标值保存到本地 UTF-8 文件。若值已在仓库文件中，直接使用该文件，不创建临时副本。
 3. 可先运行 `doctor`（可加 `--hippo-site` 检查目标站点）；登录失效时调用 `get-browser-session`，标准环境目标 URL 使用 `http://hippo.oa.fenqile.com/#/app/dashboard`，stable/测试/项目环境使用 `http://stable-hippo.oa.fenqile.com/#/app/dashboard`，墨西哥使用 `https://hippo.oa.wowcredito.com/#/app/dashboard`，印尼使用 `https://hippo.oa.kredito.id/#/app/dashboard`，profile 保持 `/home/joney/.local/state/agent-tools/browser-profiles/healthy`。四个站点共用同一个 passport 登录态和同一个 profile。
 4. 运行 `plan`，检查 `operation`、`targetHasUnpublishedDraft`、`draftDiffKeys`。非目标草稿只保留并报告，不得清除。
-5. 若 `operation=noop`，无需写入，直接运行 `verify`。若目标有未发布草稿且需覆盖，将刚返回的 `currentStateToken` 原样传给 `upsert`；用户没有明确授权覆盖目标草稿时先说明并等待确认。
+5. 若 `operation=noop`，草稿不必再写：`targetHasUnpublishedDraft=false` 时直接运行 `verify`；有未发布草稿且本次要发布（stable 自动发布或用户已授权）时仍运行 `upsert`（带 token），脚本在 noop 路径上只做发布并回读 active，不要跳过。若目标有未发布草稿且需覆盖，将刚返回的 `currentStateToken` 原样传给 `upsert`；用户没有明确授权覆盖目标草稿时先说明并等待确认。
 6. 未授权发布时，运行 `upsert`。必须看到 `publishAttempted=false`、`activeReleaseKeyUnchanged=true`、`activeConfigurationsUnchanged=true`、`otherItemsUnchanged=true`；实际写入时还必须有 `targetItemValidated=true`。stable 站点例外：`upsert --env=stable` 会自动发布，输出应是 `autoPublish=true`，实际发布时 `published=true`、`activeChangedKeys` 只有目标 key、`nonTargetActiveConfigurationsUnchanged=true`；active 已等于目标值时是 `publishSkipped=true`。最终措辞写“stable 已自动发布目标 key”。
 7. 用户已明确授权发布时，运行 `upsert --publish --publish-authorization=explicit --expected-current-token=<plan token>`。必须看到 `publishAttempted=true`、`published=true`、`activeChangedKeys` 只有目标 key、`nonTargetActiveConfigurationsUnchanged=true`。
 8. 再运行 `verify`，确认草稿仍等于目标文件。最终明确写出“仅保存草稿，未发布”、“已按授权发布目标 key”或“stable 已自动发布目标 key”，不能模糊表述。
@@ -178,8 +178,8 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/configure-hippo/scripts/hi
 ## 已有 namespace 但没有权限
 
 1. `status` 或 `plan` 输出 `hasModifyPermission=false`（或要发布时 `hasReleasePermission=false`），或 `upsert` 报 `NAMESPACE_MODIFY_PERMISSION_DENIED` / `NAMESPACE_RELEASE_PERMISSION_DENIED`。
-2. 使用原请求的 `--hippo-site=<site> --env=<env> --cluster=<cluster>` 跑 `namespace-grant --app-id=<appId> --namespace=<namespace>`（不传 `--grant-users`，即给默认名单自助补权限），不需要再询问用户。优先复用错误里的 `details.grantArgv` 或已安全引用的 `grantCommand`；不能丢失站点后落入 standard 默认值。
-3. 成功（`granted` 或 `alreadyGranted` 覆盖两个角色、`nonTargetRoleUsersUnchanged=true`）就回到原流程重跑 `plan`/`upsert`。
+2. 直接跑输出里的 `grantCommand`（`plan` 缺权限时也会给出，带 `--roles=`：存草稿只补 modify，要发布才 modify,release）；没有 `grantCommand` 时用原请求的 `--hippo-site=<site> --env=<env> --cluster=<cluster>` 跑 `namespace-grant --app-id=<appId> --namespace=<namespace> --roles=<本次需要的角色>`（不传 `--grant-users`，即给默认名单自助补权限），不需要再询问用户。优先复用错误里的 `details.grantArgv` 或已安全引用的 `grantCommand`；不能丢失站点后落入 standard 默认值。
+3. 成功（`granted` 或 `alreadyGranted` 覆盖本次补的角色、`nonTargetRoleUsersUnchanged=true`）就回到原流程重跑 `plan`/`upsert`；不要为了"两个角色都有"再补一次 release。
 4. 报 `ASSIGN_ROLE_PERMISSION_DENIED`：当前账号没有该应用的 Hippo 权限。停止，向用户说明“需要申请 `<appId>` 的 Hippo 权限”，并把 `details.appOwners` 列出来作为申请对象；不要重试，不要绕过。
 
 ## 新建 namespace 流程

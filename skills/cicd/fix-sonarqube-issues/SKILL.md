@@ -2,7 +2,7 @@
 name: fix-sonarqube-issues
 description: 评估并修复 SonarQube 新代码周期的 BLOCKER/CRITICAL 问题。Use when 用户要求看 SonarQube 质量门禁、评估或修复 Sonar 问题；按规则与代码证据区分真实问题、误报和无法确认的风险，修复后执行最小验证。只要求评估时不改代码。
 metadata:
-  version: 1.2.1
+  version: 1.3.0
 ---
 
 # fix-sonarqube-issues
@@ -25,6 +25,8 @@ MCP 优先、脚本兜底。已有 `sonarqube` MCP 支持项目解析、分页 i
 MCP 不可用时可在本机脚本内使用同一认证与 API；不要把凭据放入命令参数、日志或产物。
 
 ## 查询与评估
+
+用户问的是质量门禁时，先调 `get_sonarqube_quality_gate_status`（同一 `project_key`、`branch` 或 `pull_request`）拿到门禁状态与失败条件，按失败条件决定是否进入 issue 分析并在输出里报告门禁结论；只问 issue 时直接从第 1 步开始。
 
 1. 调用 `list_sonarqube_issues`，固定 `project_key`、`base_url`、`branch` 或 `pull_request`，
    默认 `severities=BLOCKER,CRITICAL`、`in_new_code_period=true`、`resolved=false`。

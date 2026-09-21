@@ -2,7 +2,7 @@
 name: inspect-app-call-topology
 description: 只读梳理应用的 FSOF/Dubbo 上下游调用关系、流量和接口健康度；异常实例与时间点下钻默认关闭，仅在用户明确要求时开启。Use when 用户要求查某个应用被谁调用、调用了哪些外部服务、某个 service 的客户端应用是谁、应用的接口调用量与错误率耗时、梳理服务依赖拓扑、排查上下游故障影响面、对比发布前后接口变化。
 metadata:
-  version: 1.4.1
+  version: 1.4.2
 ---
 
 # inspect-app-call-topology
@@ -90,7 +90,7 @@ node .../inspect_call_topology.js --app=xxx --range=6h --baseline=7d
 
 | 参数 | 默认 | 说明 |
 |---|---|---|
-| `--app` | — | 目标应用名（app 标签值，可含连字符）；与 `--service` 二选一 |
+| `--app` | — | 目标应用名（app 标签值，可含连字符）；可与 `--service` 同时传：`--app` 限定应用，`--service` 限定接口。多提供方时脚本会要求这样传 |
 | `--apps` | — | 多个应用名，以逗号分隔；与 `--app`/`--service` 互斥，共享查询并分别生成报告 |
 | `--service` | — | 聚焦单个 service；不给 `--app` 时先反查它属于哪个应用 |
 | `--site` | `prod` | `prod`/`online` 已验证，`stable`/`test` 未验证 |

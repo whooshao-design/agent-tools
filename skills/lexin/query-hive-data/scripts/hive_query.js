@@ -70,23 +70,31 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function stripSqlComments(sql) {
-  return String(sql || '')
-    .replace(/\/\*[\s\S]*?\*\//g, ' ')
-    .replace(/--[^\n]*/g, ' ');
+// 字符串里的 -- 或 /* 不是注释：用 query-mysql-data 的顺序扫描器（字面量替换成 ''、注释去掉），
+// 否则 WITH c AS (SELECT '--' AS x) INSERT ... 会把写语句藏在"注释"后面绕过下面的写关键字检查。
+const { stripSqlLiteralsAndComments } = require('/home/joney/projects/ai/agent-tools/skills/lexin/query-mysql-data/scripts/mysql_readonly');
+
+function stripSqlComments(sql, engineKey = 'presto') {
+  // Presto/Spark：`--` 到行尾都是注释，不像 MySQL 要求后跟空白。
+  // Presto 字符串只用 '' 转义、`\` 是普通字符；Spark 的 `\` 才是转义符。按引擎切换，否则字符串边界错位会把注释当 SQL。
+  return stripSqlLiteralsAndComments(sql, { dashCommentNeedsSpace: false, backslashEscapes: engineKey === 'spark' });
 }
 
-function assertReadOnlySql(rawSql) {
+function assertReadOnlySql(rawSql, engineKey = 'presto') {
   const sql = String(rawSql || '').trim().replace(/;+\s*$/, '').trim();
   if (!sql) throw new Error('SQL is empty');
-  const stripped = stripSqlComments(sql).trim();
+  const stripped = stripSqlComments(sql, engineKey).trim();
   if (!stripped) throw new Error('SQL contains only comments');
   if (stripped.includes(';')) throw new Error('only a single SQL statement is allowed');
   const keyword = (stripped.match(/^[A-Za-z]+/) || [''])[0].toUpperCase();
   if (!READ_ONLY_KEYWORDS.has(keyword)) {
     throw new Error(`only read-only SQL is allowed (SELECT/WITH/SHOW/DESCRIBE/EXPLAIN), got: ${keyword || stripped.slice(0, 20)}`);
   }
-  // Spark accepts "WITH ... INSERT INTO"; SHOW CREATE TABLE / DESCRIBE / EXPLAIN never write.
+  // EXPLAIN ANALYZE 会真正执行语句（Presto 文档明确），带写语句时等于执行写入；普通 EXPLAIN 只出计划。
+  if (keyword === 'EXPLAIN' && /^explain\s+analyze\b/i.test(stripped)) {
+    throw new Error('EXPLAIN ANALYZE executes the statement and is not allowed in read-only mode; use plain EXPLAIN');
+  }
+  // Spark accepts "WITH ... INSERT INTO"; SHOW CREATE TABLE / DESCRIBE / plain EXPLAIN never write.
   if (keyword === 'SELECT' || keyword === 'WITH') {
     const write = stripped.match(WRITE_KEYWORD_PATTERN);
     if (write) throw new Error(`write keyword is not allowed in read-only SQL: ${write[1].toUpperCase()}`);
@@ -295,7 +303,7 @@ async function main(argv) {
   const timeoutMs = boundedNumber(args.timeout, 600, 5, 3600) * 1000;
   const pollMs = boundedNumber(args.poll, 2, 1, 30) * 1000;
   const maxRows = boundedNumber(args['max-rows'], 200, 1, 100000);
-  if (sql) sql = assertReadOnlySql(sql);
+  if (sql) sql = assertReadOnlySql(sql, String(args.engine || 'presto').trim().toLowerCase());
 
   const paths = resolvePaths(args, PAGE_URL);
   const chromium = loadPlaywright(paths);

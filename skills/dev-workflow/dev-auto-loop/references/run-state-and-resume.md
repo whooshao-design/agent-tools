@@ -35,7 +35,7 @@ auto-loop/
 | `progress_key` | 用于 `no_progress` / `inconsistent_review` 比较的规范化键 |
 | `resume` | 终态、最早恢复阶段和要求的最小外部变化 |
 
-执行有预算成本或写能力的动作前，先原子写入 checkpoint，记录计数预占和 `action_started=true`，再启动动作；进程中断不能通过重放逃避预算。派发在动作真正启动前失败时不预占领域预算。
+执行有预算成本或写能力的动作前，先原子写入 checkpoint，记录计数预占和 `action_started=true`，再启动动作；进程中断不能通过重放逃避预算。派发在动作真正启动前失败时不预占领域预算：这类失败追加一条取消预占的 checkpoint（引用被取消的预占、失败原因、工作区无变化的证据），恢复时以最后一条 checkpoint 的计数为准。
 
 ## 2. Producer 阶段结果
 

@@ -2,7 +2,7 @@
 name: query-hive-data
 description: 通过乐信大数据门户「即席分析」（data.oa.fenqile.com）以 Presto/Spark 引擎只读查询 Hive 数仓表并整理结果。Use when 用户要求查 Hive 表、数仓表、dp_ods/dp_snap/rt_ods/lx_dwd/rt_mart 等库的数据、米霍克离线流水或规则元数据、SHOW SCHEMAS/SHOW TABLES/DESCRIBE 表结构，或让即席分析跑一条 SQL；最终必须同时输出执行 SQL 和查询结果。
 metadata:
-  version: 1.0.0
+  version: 1.0.1
 ---
 
 # query-hive-data
@@ -39,7 +39,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/script
 ## 核心约束
 
 - 只执行只读 SQL：`SELECT`、`WITH`、`SHOW`、`DESCRIBE`、`DESC`、`EXPLAIN`，且一次一条语句。脚本按首关键字拦截，
-  `SELECT/WITH` 语句中出现 `INSERT/UPDATE/DELETE/DROP/CREATE/ALTER/TRUNCATE/MERGE/GRANT/REVOKE` 也会被拒绝。
+  `SELECT/WITH` 语句中出现 `INSERT/UPDATE/DELETE/DROP/CREATE/ALTER/TRUNCATE/MERGE/GRANT/REVOKE` 也会被拒绝（字符串里的 `--`/`/*` 不算注释，藏在"注释"后的写语句同样会被识别）；`EXPLAIN ANALYZE` 会真正执行语句，只读入口拒绝它，只允许普通 `EXPLAIN`。
   页面本身允许写操作，不要绕过脚本改用页面或接口执行写 SQL。
 - 最终回复必须包含本次实际执行的 SQL 和查询结果；对用户 SQL 做过改写时说明保留和调整的口径。
 - 流水表必须带分区条件（多数表是 `f_p_date`，`rt_mart.t_process_decision_log` 是 `fdate`），再叠加业务键；

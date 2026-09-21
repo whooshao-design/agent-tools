@@ -1358,13 +1358,13 @@ async function publicNamePrefixHint(page, target) {
     + `若传入的是不带前缀的名字，请先改用 --namespace=${full} 重试，再判断是否真的缺权限`;
 }
 
-async function namespacePermissionDetails(page, target, access) {
+async function namespacePermissionDetails(page, target, access, roles = 'modify,release') {
   const app = await fetchRaw(page, `/apps/${encodeSegment(target.appId)}`);
   const site = Object.entries(SITE_BASE_URLS).find(([, baseUrl]) => baseUrl === target.baseUrl)?.[0];
   assert(site, 'HIPPO_SITE_INVALID', '无法确定原请求站点，禁止生成默认站点的补授权命令');
   const grantArgv = [process.execPath, __filename, 'namespace-grant',
     `--hippo-site=${site}`, `--env=${target.env}`, `--cluster=${target.cluster}`,
-    `--app-id=${target.appId}`, `--namespace=${target.namespaceName}`];
+    `--app-id=${target.appId}`, `--namespace=${target.namespaceName}`, `--roles=${roles}`];
   return {
     site,
     env: target.env,
@@ -1385,7 +1385,8 @@ async function assertNamespaceWriteAccess(page, target, access, options) {
       '当前账号没有该 namespace 的修改权限；先运行 namespace-grant 自助补授权，'
       + '若 namespace-grant 报 ASSIGN_ROLE_PERMISSION_DENIED，说明没有该应用的 Hippo 权限，需要向应用负责人申请后再重试'
       + await publicNamePrefixHint(page, target),
-      await namespacePermissionDetails(page, target, access));
+      // 只补本次操作缺的角色：存草稿只要 modify，要发布才连 release 一起补。
+      await namespacePermissionDetails(page, target, access, options.requirePublish ? 'modify,release' : 'modify'));
   }
   if (options.requirePublish && !access.hasReleasePermission) {
     fail('NAMESPACE_RELEASE_PERMISSION_DENIED',
@@ -2554,7 +2555,16 @@ async function runBrowserCommand(command, args) {
       commentWillChange: plan.commentWillChange,
       expectedDraftDiffKeys: plan.expectedDraftDiffKeys,
     };
-    if (command === 'plan') return common;
+    if (command === 'plan') {
+      // 缺权限时把补权命令直接给出（只补本次需要的角色），agent 不必自己拼命令、也不会默认补两种角色。
+      const wantsPublish = runtime.site === 'stable' ? !flagEnabled(args['no-publish']) : flagEnabled(args.publish);
+      if (!access.hasModifyPermission || (wantsPublish && !access.hasReleasePermission)) {
+        const roles = wantsPublish && !access.hasReleasePermission ? 'modify,release' : 'modify';
+        const details = await namespacePermissionDetails(browser.page, runtime.target, access, roles);
+        return { ...common, missingRoles: roles, grantCommand: details.grantCommand, appOwners: details.appOwners };
+      }
+      return common;
+    }
 
     if (command === 'verify') {
       assert(plan.draftEqualsDesired && !plan.commentWillChange, 'VERIFY_FAILED',

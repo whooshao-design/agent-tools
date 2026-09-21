@@ -2,14 +2,14 @@
 name: start-local-frontend
 description: 米霍克 OA 前端(web_mihawk_oa)本地开发会话管理：启动前资源门禁、安全启动本地 webpack(127.0.0.1:8116)、把 whistle 网关规则切到预发布或项目环境（项目环境 IP 每次动态发现，不硬编码）、用真实域名打开本地页面。Use when 用户要求本地启动米霍克前端、npm run dev:index、检查 webpack 启动条件、把 rc_oa_gateway 切到预发布/项目环境、生成或写入 whistle 网关规则、验证本地页面访问链路。
 metadata:
-  version: 1.0.0
+  version: 1.0.1
 ---
 
 # start-local-frontend
 
 ## 定位
 
-管理 `web_mihawk_oa`（米霍克 OA 前端，`/home/joney/projects/web/web_mihawk_oa`）的本地开发会话：
+管理 `web_mihawk_oa`（米霍克 OA 前端，`/home/joney/projects/frontend/web_mihawk_oa`）的本地开发会话：
 启动前门禁 -> 启动本地 webpack -> 把后端网关切到预发布(pre)或项目环境(prj) -> 用真实域名访问本地页面。
 核心价值是**项目环境 IP 随时在变，每次执行时动态发现，不硬编码**。
 
@@ -21,7 +21,7 @@ metadata:
 - 不管理用户在 whistle 里手工维护的分组（见下方“whistle 分组模型”）。
 - **纯看已部署整站**（不需要本地前端改动）时，hosts 直接指项目环境 IP 就够了，不需要本 skill。
 
-知识来源：`/home/joney/projects/web/web_mihawk_oa/AGENTS.md`（本地开发环境搭建一节，已实测跑通）。
+知识来源：`/home/joney/projects/frontend/web_mihawk_oa/AGENTS.md`（本地开发环境搭建一节，已实测跑通）。
 
 ## 快速使用
 
@@ -60,7 +60,7 @@ node $SCRIPT open                   # 4. 打印访问地址，并探测本地实
 - 8116 已有本项目健康实例（cwd 属于本项目且 HTTPS 有响应）时**复用不重启**。
 - 冷启动命令（与 AGENTS.md 完全一致，用精确 Node 版本覆盖整个进程树）：
   `env PATH="$HOME/.nvm/versions/node/v16.16.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" npm run dev:index`，
-  工作目录 `/home/joney/projects/web/web_mihawk_oa`。
+  工作目录 `/home/joney/projects/frontend/web_mihawk_oa`。
 - 长驻进程：由 agent 执行时放后台运行。端口开始监听不代表编译完成，等 webpack 明确输出编译完成再访问。
 
 ### connect --env pre|prj [--app <name>] [--ip <ip>] [--apply]

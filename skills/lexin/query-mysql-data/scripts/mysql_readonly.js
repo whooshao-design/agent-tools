@@ -80,10 +80,53 @@ function lxcloudEndpoint(env) {
   return `${lxcloudBaseUrl(env)}${LXCLOUD_SQL_PATH}`;
 }
 
+// 顺序扫描：字符串字面量替换成 ''（-- 或 /* 出现在字符串里不算注释），注释去掉，
+// MySQL 会执行的 /*! ... */ 只去标记、内容递归处理。正则分步替换做不到这三条同时成立。
+// options.dashCommentNeedsSpace：MySQL 要求 `--` 后跟空白才是注释（默认）；Presto/Spark 的 `--` 到行尾都是注释。
+// options.backslashEscapes：MySQL/Spark 字符串里 `\` 转义下一个字符（默认）；Presto 只用连续两个引号转义，`\` 是普通字符。
+function stripSqlLiteralsAndComments(sql, options = {}) {
+  const dashNeedsSpace = options.dashCommentNeedsSpace !== false;
+  const backslashEscapes = options.backslashEscapes !== false;
+  const src = String(sql || '');
+  let out = '';
+  let i = 0;
+  while (i < src.length) {
+    const ch = src[i];
+    const next = src[i + 1];
+    if (ch === "'" || ch === '"' || ch === '`') {
+      let j = i + 1;
+      while (j < src.length) {
+        if (backslashEscapes && src[j] === '\\') { j += 2; continue; }
+        if (src[j] === ch) { if (src[j + 1] === ch) { j += 2; continue; } break; }
+        j += 1;
+      }
+      out += ch === '`' ? ' ' : "''";
+      i = j + 1;
+      continue;
+    }
+    // MySQL：`--` 后必须跟空白/控制字符（或行尾）才是注释，`1--1` 是表达式；`#` 到行尾都是注释。
+    const dashComment = ch === '-' && next === '-' && (!dashNeedsSpace || i + 2 >= src.length || /[\s\x00-\x1f]/.test(src[i + 2]));
+    if (dashComment || ch === '#') {
+      const end = src.indexOf('\n', i);
+      i = end === -1 ? src.length : end;
+      out += ' ';
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      const end = src.indexOf('*/', i + 2);
+      const body = src.slice(i + 2, end === -1 ? src.length : end);
+      out += body.startsWith('!') ? ` ${stripSqlLiteralsAndComments(body.replace(/^!\d*/, ''), options)} ` : ' ';
+      i = end === -1 ? src.length : end + 2;
+      continue;
+    }
+    out += ch;
+    i += 1;
+  }
+  return out;
+}
+
 function assertReadOnlySql(sql) {
-  const normalized = String(sql || '')
-    .replace(/\/\*[\s\S]*?\*\//g, ' ')
-    .replace(/--.*$/gm, ' ')
+  const normalized = stripSqlLiteralsAndComments(sql)
     .trim()
     .toLowerCase();
   // 白名单 + 逐条语句校验（防多语句拼接绕过首关键字检查）；最终访问权限由 lxcloud 服务端决定。
@@ -91,6 +134,14 @@ function assertReadOnlySql(sql) {
   const statements = normalized.split(';').map((s) => s.trim()).filter(Boolean);
   if (!statements.length || !statements.every((s) => allowed.test(s))) {
     throw new Error('拒绝执行非只读 SQL。仅允许 SELECT/SHOW/DESCRIBE/EXPLAIN/WITH 等只读语句（逐条校验）。');
+  }
+  // 首关键字挡不住 WITH ... DELETE、SELECT ... INTO OUTFILE、SELECT ... FOR UPDATE：字面量已替换掉，再查写关键字。
+  // INSERT()/REPLACE()/TRUNCATE() 是字符串或数学函数：后面紧跟 ( 的不算写语句。
+  const forbidden = /\b(update|delete|create|alter|drop|rename|grant|revoke)\b|\b(insert|replace|truncate)\b(?!\s*\()|\binto\s+(outfile|dumpfile)\b|\bfor\s+update\b|\block\s+in\s+share\s+mode\b/;
+  for (const statement of statements) {
+    if (!/^(select|with)\b/.test(statement)) continue; // SHOW CREATE TABLE / DESC / EXPLAIN 不执行写操作
+    const hit = statement.match(forbidden);
+    if (hit) throw new Error(`拒绝执行非只读 SQL：语句里出现写操作或锁定/导出子句（${hit[0].trim()}）。`);
   }
 }
 
@@ -171,7 +222,7 @@ function userNameFromJwt(authorization) {
     const padding = '='.repeat((4 - (encoded.length % 4)) % 4);
     const payload = JSON.parse(Buffer.from(`${encoded}${padding}`, 'base64').toString('utf8'));
     const containers = [payload, payload.user, payload.userInfo, payload.data].filter(Boolean);
-    const keys = ['user_name', 'username', 'userName', 'preferred_username', 'account'];
+    const keys = ['user_name', 'username', 'userName', 'preferred_username', 'account', 'sub'];
     for (const container of containers) {
       for (const key of keys) {
         const userName = normalizeLxcloudUserName(container[key]);
@@ -355,6 +406,21 @@ async function runLxcloudQuery(args) {
     statusCode: response.statusCode,
     body: response.body,
   }, null, 2));
+  // 请求失败不能以 0 退出：HTTP 4xx/5xx、业务错误码或 success=false 都算失败；只有成功响应里的空结果才是"零行"。
+  const body = response.body;
+  const isObject = Boolean(body) && typeof body === 'object';
+  const okValues = ['0', 0, 200, '200', 'ok', 'success', 'succeed'];
+  const codeFields = isObject ? ['code', 'retcode', 'errcode', 'status'].filter((k) => body[k] !== undefined) : [];
+  const badCodes = codeFields.filter((k) => !okValues.includes(typeof body[k] === 'string' ? body[k].toLowerCase() : body[k]));
+  const bizCode = badCodes.length ? `${badCodes[0]}=${body[badCodes[0]]}` : undefined;
+  const bizFailed = badCodes.length > 0 || (isObject && body.success === false);
+  const notJson = !isObject || !Object.keys(body).length; // 空对象不是查询结果
+  // lxcloud 系列接口把结果放在 data（对象或数组）里；没有结果容器的 2xx（如 {message:'denied'}）不是查询成功。
+  const hasResult = isObject && (Array.isArray(body.data) || (body.data && typeof body.data === 'object') || Array.isArray(body.rows) || Array.isArray(body.result));
+  if (response.statusCode < 200 || response.statusCode >= 300 || notJson || bizFailed || !hasResult) {
+    console.error(`lxcloud query failed: HTTP ${response.statusCode}${notJson ? ' (non-JSON body, usually a login/redirect page)' : (!hasResult ? ' (no data/rows/result container in response)' : '')}${bizCode !== undefined ? ` ${bizCode}` : ''}${body && typeof body === 'object' && (body.msg || body.message) ? ` msg=${body.msg || body.message}` : ''}`);
+    process.exitCode = 2;
+  }
 }
 
 async function main() {
@@ -390,6 +456,7 @@ if (require.main === module) {
 module.exports = {
   LXCLOUD_ENV_BASE_URLS,
   assertReadOnlySql,
+  stripSqlLiteralsAndComments,
   buildLxcloudPayload,
   inferLxcloudUserName,
   lxcloudBaseUrl,

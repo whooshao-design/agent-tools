@@ -2,7 +2,7 @@
 name: dev-verify-change
 description: Use when 代码改动已完成，需要跑测试、执行构建检查或做验证：围绕本次变更做最小必要验证，给出验证结论，并决定是否需要扩大验证范围。
 metadata:
-  version: 1.7.0
+  version: 1.8.2
 ---
 
 # dev-verify-change
@@ -53,7 +53,9 @@ metadata:
 
 缺少与所选模式匹配的上下文时停止，不静默切换模式。
 
-验证前确认所有范围内 DEV 均为 `Done` 或具有充分“无需代码”依据的 `Skipped`，且实际写集能归属到 DEV。存在
+独立验证入口：本 skill 被直接调用、只要求验证一处已有改动，且没有 `G`、正式治理产物或 waiver 迹象时，按 `dev-build-change` 的 direct 入口规则构造最小 `direct-record-v1`（任务引用、完成标准、范围；`B` 取该改动所基于的基线，即改动前的 commit，无法确定时取当前 HEAD 并注明工作区含未提交改动；实现前快照无法恢复时按契约记 `pre_change_snapshot: unknown`，不虚构；记录里标注 `standalone_verification: true`），以当前工作区或用户指定的 diff 为验证对象继续后续步骤。这条入口没有 DEV：后文要求的 DEV 映射与写集归属改为归属到用户指定的改动范围，报告写明没有 DEV 与审批的证据边界，不补造 DEV 状态或审批事实；验证结论交付后停止，不进入正式收口，除非用户另行要求。
+
+存在 `change_revision` 时，验证前确认所有范围内 DEV 均为 `Done` 或具有充分“无需代码”依据的 `Skipped`，且实际写集能归属到 DEV。存在
 `Planned` / `InProgress` 时回 `dev-build-change`；`Blocked` 按其恢复条件归类为实现、材料、环境或人工阻塞，
 不得用测试通过掩盖未完成开发项。
 
@@ -73,7 +75,7 @@ metadata:
 - 失败：失败发生在哪里、是否明显与本次改动相关
 - 未覆盖：哪些风险点尚未被验证到
 
-approved 逐条输出“检查项 ID (`TC-*`) → 对应 `DEV-*`/实现位置 → 自动测试或人工检查 → 结果与证据/未覆盖原因”；direct 逐条映射 `D` 的完成标准与 DEV；waived 逐项验证替代证据、DEV 和仍适用门禁。失败不能默认判定为代码问题：应区分实现缺陷、检查项错误和方案缺口，不能为变绿而扭曲代码或放宽断言。
+approved 逐条输出“检查项 ID (`TC-*`) → 对应 `DEV-*`/实现位置 → 自动测试或人工检查 → 结果与证据/未覆盖原因”；direct 逐条映射 `D` 的完成标准与 DEV（独立验证入口没有 DEV 时映射到实际改动位置）；waived 逐项验证替代证据、DEV 和仍适用门禁。失败不能默认判定为代码问题：应区分实现缺陷、检查项错误和方案缺口，不能为变绿而扭曲代码或放宽断言。
 
 若仅缺非必需证据而考虑 `受限通过`，必须为每项限制分配稳定 ID（如 `VL-001`）和内容指纹，并记录缺失证据、关联检查项/门禁、影响、接受条件、当前 `G` 与 `change_revision`。限制内容、绑定对象或条件变化后旧授权失效；用户仅说“继续”不构成风险授权。
 
@@ -123,7 +125,7 @@ approved 逐条输出“检查项 ID (`TC-*`) → 对应 `DEV-*`/实现位置 �
 
 一份合格的验证结果应满足：
 - 能说明验证是围绕本次改动展开，而不是泛泛跑一遍
-- 能确认不存在被测试结果掩盖的未完成 DEV，且实际写集均有开发项归属
+- 能确认不存在被测试结果掩盖的未完成 DEV，且实际写集均有开发项归属（独立验证入口：写集归属到用户指定的改动范围，并声明无 DEV）
 - 能明确测试是否通过，以及通过结论建立在哪些证据上
 - approved 的每个范围内检查项、direct 的每条完成标准、waived 的每项替代验证都有结果或未覆盖原因；`G` 陈旧或失效时没有继续给出通过结论
 - 能以实际发现证据说明单测布局是否符合仓库约束
@@ -139,7 +141,7 @@ approved 逐条输出“检查项 ID (`TC-*`) → 对应 `DEV-*`/实现位置 �
 
 ## 交接建议
 
-- `通过` → approved 进入 `dev-review-change`；direct 重读并校验 `G.D={ref,fingerprint}` 指向的 `direct-record-v1`，在其中 `code_review_required=true`、风险较高或用户要求时进入独立代码评审，否则可直接进入 `dev-finish-branch` 并记录依据；waived 重读 `G.W` 指向的记录，按未豁免门禁和任务风险决定
+- `通过` → 独立验证入口（`standalone_verification: true`）交付结论后停止；approved 进入 `dev-review-change`；direct 重读并校验 `G.D={ref,fingerprint}` 指向的 `direct-record-v1`，在其中 `code_review_required=true`、风险较高或用户要求时进入独立代码评审，否则可直接进入 `dev-finish-branch` 并记录依据；waived 重读 `G.W` 指向的记录，按未豁免门禁和任务风险决定
 - `受限通过` → 只有用户对每个 `VL-*` 的当前指纹、`G`、`change_revision` 和条件作出明确授权后才进入 `dev-review-change`，否则等待风险决策
 - `需修复后重验` → 回 `dev-build-change`；修复后必须重新验证
 - `阻塞` → 停止并报告阻塞类型、已有替代证据和恢复条件，不原地重复相同命令

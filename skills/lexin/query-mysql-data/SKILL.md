@@ -2,7 +2,7 @@
 name: query-mysql-data
 description: 查询和验证公司内网 MySQL 数据，stable/测试和线上都通过各自域名的 lxcloud HTTP SQL 只读查询。Use when 用户要求只读查询 MySQL、查看表结构或样例记录、验证数据库数据；未明确实例时必须优先从目标项目运行时数据源代码反查实例与逻辑库，db_type 不使用静态白名单，可复用浏览器 session 获取 lxcloud token，最终必须输出 SQL 和查询结果。
 metadata:
-  version: 3.0.0
+  version: 3.0.4
 ---
 
 # query-mysql-data
@@ -159,7 +159,8 @@ export LXCLOUD_COOKIE
 
 1. 先判断目标环境：`stable/测试` 用 `--env stable`；`online/prod/线上` 用 `--env prod`。都是 lxcloud HTTP SQL，只是域名和登录态不同。
 2. 按“实例定位”章节取得确切实例和逻辑库；没有证据时不发起查询。
-3. 默认先用环境变量授权，缺失时由脚本复用 `get-browser-session` 读取对应站点的 localStorage token；同时优先从 token/页面识别 OA 账号，登录态过期时先刷新该站点的 session。
+3. 成功判定：HTTP 2xx、响应体是非空 JSON 对象（HTML/重定向页、`{}` 都不算）、带结果容器 `data`（或 `rows`/`result`）、`code`/`retcode`/`errcode`/`status` 全都不是错误值、没有 `success=false`；不满足时脚本打印失败原因并以退出码 2 结束，这类结果不是“查到零行”。只有成功响应里的空结果才解释为零行。
+4. 默认先用环境变量授权，缺失时由脚本复用 `get-browser-session` 读取对应站点的 localStorage token；同时优先从 token/页面识别 OA 账号，登录态过期时先刷新该站点的 session。
 4. 在已确认实例上定位库表。未知表结构时优先执行 `SHOW DATABASES`、`SHOW TABLES`、`DESCRIBE <table>`；返回 SQL error 时先复核实例路由和环境，不切换到语义相近实例碰运气。
 5. 对大表加必要条件和 `LIMIT`；查询业务数据必须带业务键并限制字段。
 6. 回复先给“环境、实例、逻辑库、定位证据”，再给结论、实际 SQL 和结果；结果过多时只展示关键行并说明截断。

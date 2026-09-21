@@ -2,7 +2,7 @@
 name: inspect-healthy-jvm-dashboard
 description: "Use when 需要只读查看、理解或对比 Healthy/雷神 JVM、JVM 内存、G1 GC 监控看板，例如 https://healthy.lexincloud.com/show/dashboard/11147 或 /dashboards/14333；自动复用浏览器登录态，回读大盘配置，整理变量、面板、PromQL、页面快照、明显配置问题，并可按 app/env 拉取实例级 JVM 指标摘要。"
 metadata:
-  version: 1.1.1
+  version: 1.1.2
 ---
 
 # inspect-healthy-jvm-dashboard
@@ -18,7 +18,7 @@ metadata:
 MCP 优先、脚本兜底：
 
 1. 先用 `browser_session.ensure_session` 复用或刷新 Healthy 登录态，默认 profile 是 `/home/joney/.local/state/agent-tools/browser-profiles/healthy`。
-2. 用 `healthy.healthy_read_board` 只读回读大盘配置，确认 `/tmp/healthy-dashboard-{boardId}-after.json` 已生成。
+2. 用 devtools MCP 的 `healthy_read_board`（或脚本 `healthy_dashboard_config.js --read`）只读回读大盘配置；输出里的 `backupDir/before.json` 就是大盘 JSON，本 skill 脚本会自己调用它取路径。
 3. 用本 skill 脚本汇总变量、分区、面板、PromQL 和页面快照。
 4. 如果用户指定应用或当前仓库能识别 `application.name`，传 `--app` 和 `--env` 拉取 Prometheus 只读指标摘要；默认 `--env=prod`、`--range=1h`。
 
@@ -46,7 +46,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/inspect-healthy-jvm-dashbo
 
 ```bash
 node /home/joney/projects/ai/agent-tools/skills/lexin/inspect-healthy-jvm-dashboard/scripts/inspect_dashboard.js \
-  --from=/tmp/healthy-dashboard-11147-after.json \
+  --from=<backupDir>/before.json \
   --no-page
 ```
 

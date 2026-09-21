@@ -1,0 +1,146 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "乐包 edition 隔离的目标运行模型",
+    "locale": "zh-CN",
+    "quality_profile": "showcase"
+  },
+  "components": [
+    {
+      "id": "req",
+      "type": "external",
+      "label": "决策请求",
+      "sublabel": "packageId + 原始 nodeId",
+      "row": 1,
+      "col": 0
+    },
+    {
+      "id": "ab",
+      "type": "security",
+      "label": "package AB 分流",
+      "sublabel": "选择 edition",
+      "row": 1,
+      "col": 1
+    },
+    {
+      "id": "e0",
+      "type": "backend",
+      "label": "线上 edition E0",
+      "row": 0,
+      "col": 2
+    },
+    {
+      "id": "e1",
+      "type": "backend",
+      "label": "灰度 edition E1",
+      "row": 2,
+      "col": 2
+    },
+    {
+      "id": "p0",
+      "type": "database",
+      "label": "PackageCacheInfo E0",
+      "sublabel": "manifest",
+      "row": 0,
+      "col": 3
+    },
+    {
+      "id": "p1",
+      "type": "database",
+      "label": "PackageCacheInfo E1",
+      "sublabel": "manifest",
+      "row": 2,
+      "col": 3
+    },
+    {
+      "id": "s0",
+      "type": "backend",
+      "label": "只使用 E0 数据",
+      "sublabel": "节点/顺序/映射/拓扑",
+      "row": 0,
+      "col": 4
+    },
+    {
+      "id": "s1",
+      "type": "backend",
+      "label": "只使用 E1 数据",
+      "sublabel": "节点/顺序/映射/拓扑",
+      "row": 2,
+      "col": 4
+    }
+  ],
+  "connections": [
+    {
+      "id": "req-ab",
+      "from": "req",
+      "to": "ab",
+      "variant": "emphasis"
+    },
+    {
+      "id": "ab-e0",
+      "from": "ab",
+      "to": "e0",
+      "label": "命中 E0"
+    },
+    {
+      "id": "ab-e1",
+      "from": "ab",
+      "to": "e1",
+      "label": "命中 E1"
+    },
+    {
+      "id": "e0-p0",
+      "from": "e0",
+      "to": "p0"
+    },
+    {
+      "id": "e1-p1",
+      "from": "e1",
+      "to": "p1"
+    },
+    {
+      "id": "p0-s0",
+      "from": "p0",
+      "to": "s0"
+    },
+    {
+      "id": "p1-s1",
+      "from": "p1",
+      "to": "s1"
+    },
+    {
+      "id": "no-mix",
+      "from": "s0",
+      "to": "s1",
+      "label": "禁止混用",
+      "variant": "dashed",
+      "labelDy": 64
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "先选版再取数",
+      "items": [
+        "package AB 决定 edition，之后只读该 edition 的 manifest 与节点版本"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "禁止回退与拼装",
+      "items": [
+        "灰度缺节点不回退线上同名节点",
+        "不拼装线上与灰度数据形成混合版本"
+      ]
+    }
+  ],
+  "layout": {
+    "mode": "grid",
+    "cols": 5,
+    "cellW": 170,
+    "cellH": 64,
+    "gapX": 70,
+    "gapY": 40
+  }
+}

@@ -182,7 +182,7 @@ async function fetchText(ctx, url) {
 }
 
 // 治理平台原始查询。name 支持短名模糊匹配。
-async function queryRegistry(ctx, { name = '', appName = '', role = 'provider' }) {
+async function queryRegistryPage(ctx, { name = '', appName = '', role = 'provider' }, pageIndex) {
   const url = new URL('/governance/services/list', ctx.baseUrl);
   url.searchParams.set('name', name);
   url.searchParams.set('ip', '');
@@ -191,7 +191,7 @@ async function queryRegistry(ctx, { name = '', appName = '', role = 'provider' }
   url.searchParams.set('version', '');
   url.searchParams.set('group', '');
   url.searchParams.set(CATEGORY_PARAM, role);
-  url.searchParams.set('pageIndex', '1');
+  url.searchParams.set('pageIndex', String(pageIndex));
   url.searchParams.set('pageSize', String(ctx.pageSize));
 
   const { status, text } = await fetchText(ctx, url.toString());
@@ -210,6 +210,22 @@ async function queryRegistry(ctx, { name = '', appName = '', role = 'provider' }
   }
   const data = json.data || {};
   return { total: data.total || 0, list: data.list || [] };
+}
+
+const MAX_REGISTRY_PAGES = 50;
+
+// 平台分页返回 {total, list}：按 total 翻完，翻不完（页数上限或平台少给）就标 truncated，消费方不得据此声称清单完整。
+async function queryRegistry(ctx, opts) {
+  const first = await queryRegistryPage(ctx, opts, 1);
+  const list = [...first.list];
+  let page = 1;
+  while (list.length < first.total && page < MAX_REGISTRY_PAGES) {
+    page += 1;
+    const next = await queryRegistryPage(ctx, opts, page);
+    if (!next.list.length) break;
+    list.push(...next.list);
+  }
+  return { total: first.total, list, truncated: list.length < first.total };
 }
 
 // consumer 类目下 application 是逗号拼接的多个应用，必须拆开。
@@ -287,20 +303,27 @@ async function main() {
   };
 
   let results;
+  let completeness;
   if (appName) {
-    const { list } = await queryRegistry(ctx, { appName, role });
-    results = summarize(list);
+    const page = await queryRegistry(ctx, { appName, role });
+    results = summarize(page.list);
+    completeness = { total: page.total, fetched: page.list.length, truncated: page.truncated };
   } else {
     const concurrency = Number(args.concurrency) || DEFAULT_CONCURRENCY;
     const pages = await pMap(services, (name) => queryRegistry(ctx, { name, role }), concurrency);
     results = summarize(pages.flatMap((p) => p.list));
+    completeness = {
+      total: pages.reduce((n, p) => n + p.total, 0),
+      fetched: pages.reduce((n, p) => n + p.list.length, 0),
+      truncated: pages.some((p) => p.truncated),
+    };
   }
 
   if (String(args.format || 'table') === 'json') {
     // service -> 应用清单，供 inspect-app-call-topology 之类的脚本直接消费。
     const ownerMap = Object.fromEntries(results.map((r) => [r.service, r.applications]));
     console.log(JSON.stringify({
-      site, baseUrl, role, query: { services, appName }, ownerMap, results,
+      site, baseUrl, role, query: { services, appName }, completeness, ownerMap, results,
     }, null, 2));
     return 0;
   }
@@ -310,6 +333,7 @@ async function main() {
   printTable(role, results, Boolean(args.instances));
   const apps = [...new Set(results.flatMap((r) => r.applications))].sort();
   console.log(`\n涉及应用（${apps.length}）: ${apps.join(', ') || '无'}\n`);
+  if (completeness.truncated) console.log(`! 注册中心返回 total=${completeness.total} 但只取到 ${completeness.fetched} 条，清单不完整，不要据此下"没有其他提供方/消费方"的结论\n`);
   return 0;
 }
 

@@ -1,11 +1,13 @@
 ---
 name: healthy-dashboard-config
-description: "配置 Healthy/雷神/Nightingale 监控大盘。Use when 用户要求新建或修改监控大盘、配置大盘变量、Prometheus 面板或穿透加载监控指标；读取和更新 /api/n9e/board/{id}/configs，并复用本地浏览器登录态完成回读校验。"
+description: "修改已有 Healthy/雷神/Nightingale 监控大盘的配置。Use when 用户要求修改已有监控大盘、配置大盘变量、Prometheus 面板或穿透加载监控指标；读取和更新 /api/n9e/board/{id}/configs，并复用本地浏览器登录态完成回读校验。"
 metadata:
-  version: 1.1.1
+  version: 1.1.2
 ---
 
 # healthy-dashboard-config
+
+没有新建大盘的接口：所有入口都要求已有 board ID。用户要新建时说明需先在 Healthy 页面创建拿到 ID，再用本 skill 配置，不借用别的大盘。
 
 ## 工具优先级
 

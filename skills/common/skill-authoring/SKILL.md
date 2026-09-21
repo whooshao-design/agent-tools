@@ -2,7 +2,7 @@
 name: skill-authoring
 description: Use when 需要在 agent-tools 仓库中创建新 skill、修改 skill 分类，或检查现有 skill 是否符合仓库约定（frontmatter、路径、分类、双端安装）。
 metadata:
-  version: 1.1.1
+  version: 1.2.0
 ---
 
 # skill-authoring
@@ -83,6 +83,15 @@ cd /home/joney/projects/ai/agent-tools && python3 install.py
 
 确认输出中新 skill 在 claude 和 codex 两端均为 `linked`；新会话中确认 skill 出现在可用列表。
 
+然后跑仓库测试与评测：
+
+```bash
+cd /home/joney/projects/ai/agent-tools && python3 -m unittest discover -s tests
+python3 bin/skill_routing_eval.py   # 改了 description 时
+```
+
+结构 lint 要求 description 含 "Use when" 且不超过 1024 字符，SKILL.md 内容相对 HEAD 变了就必须升 `metadata.version`；`dev-workflow` 下新增 skill 必须同时加 `evals/cases/<skill>.json`（至少 3 条正向、2 条带 owner 的负向提示），路由评测失败改 description 不改提示。
+
 ### 6. 交付
 
 更新 `README.md` 对应分类表格，汇报变更与验证结果。只有用户要求提交或推送时才执行相应 Git 操作；创建或修改 skill 本身不授权推送。
@@ -90,5 +99,5 @@ cd /home/joney/projects/ai/agent-tools && python3 install.py
 ## 修改与下线
 
 - 改既有 skill：直接在仓库改，符号链接即时生效（新会话）。
-- 版本号规则：需要追踪内容变化时升 `metadata.version`（修文案 patch、加能力 minor、重写 major）；不要为了版本号破坏系统校验兼容性。
+- 版本号规则：SKILL.md 内容变了就升 `metadata.version`（修文案 patch、加能力 minor、重写 major），`tests/test_skill_lint.py` 会拦住没升版本的改动；不要为了版本号破坏系统校验兼容性。
 - 下线 skill：先核对调用方、双端安装与替代能力，再按用户要求停用或移除对应入口，保留可恢复备份；只有明确要求删除源码时才删除仓库目录。同步 README，说明替代者和恢复方法。

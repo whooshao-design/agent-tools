@@ -65,11 +65,11 @@
 
 一张 74 行 × 6 列的表约需 889 块，仍超出安全范围，**已有大表继续走原地扩行，不要删表重建**。
 
-## 经 lark-mcp 调用 descendant 会失败
+## 经未打补丁的 lark-mcp 调用 descendant 会失败
 
-`docx.v1.documentBlockDescendant.create` 通过 lark-mcp 调用必定返回 `1770041 open schema mismatch`：上游的 zod schema 里 `descendants[]` 元素漏了 `block_id` 和 `children`，MCP SDK 的 `safeParseAsync` 默认 strip 会把这两个字段在发出前剥掉，服务端收到「`children_id` 引用了不存在的块」。
+`docx.v1.documentBlockDescendant.create` 通过未打补丁的上游 lark-mcp 调用必定返回 `1770041 open schema mismatch`：上游的 zod schema 里 `descendants[]` 元素漏了 `block_id` 和 `children`，MCP SDK 的 `safeParseAsync` 默认 strip 会把这两个字段在发出前剥掉，服务端收到「`children_id` 引用了不存在的块」。
 
-已由 `mcp/third-party-mcp/lark/patches/apply.mjs` 修复（`.extend()` 补两个 optional 字段）。**直连 REST 不受影响**。
+本仓库的 wrapper 启动时由 `mcp/third-party-mcp/lark/patches/apply.mjs` 打补丁修复（`.extend()` 补两个 optional 字段），补丁失败会拒绝启动；经本仓库 wrapper 调用可以直接用 descendant，不需要绕行 REST。**直连 REST 不受影响**。
 
 ## convert 的两个坑
 

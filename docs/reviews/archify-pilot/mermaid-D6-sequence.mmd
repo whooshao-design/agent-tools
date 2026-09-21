@@ -1,0 +1,26 @@
+sequenceDiagram
+    participant Caller as 调用方
+    participant Dispatcher as dispatcher
+    participant Executor as executor
+    participant PackageAB as package AB
+    participant Manifest as PackageCacheInfo
+    participant NodeCache as node cache
+
+    Caller->>Dispatcher: packageId + originalNodeId(V/B)
+    Dispatcher->>Executor: AbAndRouteInfoReq(packageId, originalNodeId)
+    Executor->>PackageAB: 查询 package AB 候选
+    PackageAB-->>Executor: 各分组对应 edition
+    loop 每个候选分组
+        Executor->>Manifest: 读取该 edition manifest
+        Executor->>Manifest: 校验 originalNodeId 是否属于该 edition
+        alt 节点不存在
+            Manifest-->>Executor: 空候选路由
+        else 私有节点
+            Executor->>NodeCache: 精确读取 nodeId + editionId
+        else 公共虚拟节点
+            Executor->>Manifest: V → C
+            Executor->>NodeCache: 沿用 C 自身 AB 选版
+        end
+    end
+    Executor-->>Dispatcher: 候选路由 + AB 信息 + 路由版本
+    Dispatcher-->>Caller: 按 AB 结果选路；空路由抛现有异常

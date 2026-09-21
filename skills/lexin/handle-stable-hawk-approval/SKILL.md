@@ -2,7 +2,7 @@
 name: handle-stable-hawk-approval
 description: 安全查询和处理 stable/测试环境米霍克与流程引擎审批。Use when 用户要求查看 stable 待审批、审批某个乐包的测试环境发布、自动通过测试审批、处理米霍克 t_hawk_approval、处理流程引擎 t_approval、按乐包 ID/发布计划 ID/序号选择审批记录并调用回调、处理墨西哥或印尼测试环境审批、优化 /home/joney/tools/hawk 下旧审批脚本流程；只适用于 stable/测试环境，线上/生产审批不使用。
 metadata:
-  version: 1.2.0
+  version: 1.2.1
 ---
 
 # handle-stable-hawk-approval
@@ -122,7 +122,7 @@ Bianque 即使 Dubbo 调用失败也返回 HTTP 200，脚本按响应体里的 `
 }
 ```
 
-取地址时先查 `<scope>.<target_key>`，没有再回退到顶层裸 `<target_key>`；`--target mexico.hawk_manage=<ip>:<port>` 覆盖文件配置。不分 scope 只写裸 key 时，国内和海外会互相覆盖，回调可能打到错误地区的实例。
+发送回调只用 `<scope>.<target_key>`，没有就停止报错，不回退到顶层裸 `<target_key>`；`--target mexico.hawk_manage=<ip>:<port>` 覆盖文件配置。裸 key 不参与回调地址选择：不分 scope 时国内和海外会互相覆盖，回调会打到错误地区的实例。
 
 对应的 stable 管理端应用：
 

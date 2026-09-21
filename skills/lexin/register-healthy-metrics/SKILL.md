@@ -2,7 +2,7 @@
 name: register-healthy-metrics
 description: 注册、查询和复查 Healthy/雷神/Nightingale 指标。Use when 用户要求检查雷神指标是否存在、批量注册 stable 或线上雷神指标、按 metric 列表或应用维度展开指标清单、调用 /api/n9e/metric-manage 做先查后注册、或确认指标注册中的 desc/app/business_line 填写规则。
 metadata:
-  version: 1.0.0
+  version: 1.0.1
 ---
 
 # register-healthy-metrics
@@ -31,7 +31,7 @@ metadata:
 
 - `business_line` 固定填 `风控研发中心`。
 - `metric` 来自用户明确提供，或由 `--apps` 和 `--suffixes` 展开。
-- `app` 默认从指标名解析：`metric = fql_fk_${source_app}_${suffix}`，则 `app = ${source_app}`。用户显式提供单指标 `app` 时才覆盖。
+- `app` 默认从指标名解析：`metric = fql_fk_${source_app}_${suffix}`，则 `app = ${source_app}`。用户显式提供单指标 `app` 时才覆盖；同时显式给了 `app` 和 `desc` 的指标不要求匹配已知后缀，只要求 `fql_fk_` 前缀。
 - `desc` 优先级：用户显式提供；当前会话或代码中已确认的描述；已有可靠注册记录；最后按 `app + suffix` 映射生成。
 - 发现已有指标的 `app` 或 `desc` 与当前规则不一致时，只输出 `EXISTS_MISMATCH`，不要自动修改。修正已有指标元信息必须单独确认。
 

@@ -104,7 +104,16 @@ def build_command(backend: str, invocation: dict, role: str, material: str | Non
         backend=shlex.quote(backend), material=shlex.quote(material or "<材料目录>"))
 
 
-def select_backend(stage, history, backends, manual, replacement):
+def detect_host() -> str:
+    """Which client the orchestrator runs in; 'any' when unknown (then no channel filtering)."""
+    if os.environ.get("CLAUDECODE") or os.environ.get("CLAUDE_CODE_ENTRYPOINT"):
+        return "claude"
+    if any(k.startswith("CODEX_") for k in os.environ):
+        return "codex"
+    return "any"
+
+
+def select_backend(stage, history, backends, manual, replacement, host="any"):
     producers = [h for h in history if h["role"] == "generate"]
     reviews = [h for h in history if h["role"] == "review"]
     excluded = set(manual)
@@ -118,6 +127,21 @@ def select_backend(stage, history, backends, manual, replacement):
     if not pool:
         raise ValueError(f"无可用后端：候选 {stage['candidates']}，已排除 {sorted(excluded)}")
     notes = []
+    # 同一模型的 claude-*/codex-* 是两条通道：只把"同一模型、双通道都在池里"的组折叠成同宿主那条；
+    # 不同模型（如 claude-vps 与 codex-vps）保留，轮换规则不受宿主影响；修订沿用原生成者，不按宿主换通道。
+    if host in ("claude", "codex") and not (stage["role"] == "generate" and producers):
+        by_model: dict[str, list[str]] = {}
+        for b in pool:
+            model = resolve_model(b, backends[b])
+            # 解析失败的占位串（"(缺 model)" 等）不是模型身份：两个未知不能被当成同一模型折叠，各自单独成组。
+            by_model.setdefault(model if not model.startswith("(") else f"(unknown:{b})", []).append(b)
+        keep = set()
+        for group in by_model.values():
+            same = [b for b in group if b.startswith(host + "-")]
+            keep.update(same if same else group)
+        if keep != set(pool):
+            pool = [b for b in pool if b in keep]
+            notes.append(f"按宿主 {host} 折叠同一模型的双通道")
     if stage["role"] == "generate" and producers:
         # 换人后以最近的生成者为修订责任人；全部历史生成者仍不可参与评审。
         current = producers[-1]["backend"]
@@ -171,7 +195,7 @@ def pick(args) -> int:
         excluded, notes = set(), []
     else:
         chosen, reuse_of, excluded, notes = select_backend(
-            stage, history, backends, manual, args.replace_producer)
+            stage, history, backends, manual, args.replace_producer, getattr(args, "host", None) or "any")
         if role == "review" and not any(h["role"] == "generate" for h in history):
             notes.append("该产物还没有生成者记录；若由模型生成，先按生成环节 --record 补录")
 
@@ -231,6 +255,8 @@ def main() -> int:
     ap.add_argument("--task", required=True, help="任务 ID，用于隔离记录")
     ap.add_argument("--material", help="评审材料目录（用于调用模板中的 cd）")
     ap.add_argument("--exclude", help="额外排除的后端，逗号分隔")
+    ap.add_argument("--host", choices=["claude", "codex", "any"], default=detect_host(),
+                    help="编排器所在客户端，默认按 CLAUDECODE/CODEX_* 环境变量检测；同一模型的 claude-*/codex-* 双通道都在候选里时只留同宿主那条（模型未知不折叠），any 不折叠")
     ap.add_argument("--replace-producer", metavar="原因", help="确认无法继续修订后，显式选择接替者")
     ap.add_argument("--actual-model", help="登记时填本次运行返回的模型 ID")
     ap.add_argument("--json", action="store_true", help="输出 JSON")

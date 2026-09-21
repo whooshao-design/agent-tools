@@ -2,7 +2,7 @@
 name: inspect-healthy-metrics
 description: 只读查看 Healthy/雷神/Nightingale 指标上报状态。Use when 用户要求确认指标是否有数据、最近是否正常上报、批量检查 stable 或线上指标、按 metric 列表或 app+suffix 展开查询 Prometheus 样本、区分未注册/无数据/已过期/正常上报。
 metadata:
-  version: 1.1.0
+  version: 1.1.1
 ---
 
 # inspect-healthy-metrics
@@ -162,10 +162,10 @@ status metric registered current_series range_series range_samples lookback_seri
 - `OK`：当前有 series，或最后样本时间在 `--freshness` 内。
 - `STALE`：`--lookback` 内有样本，但最后样本已经超过 `--freshness`。
 - `MISSING`：`--lookback` 内没有样本。
-- `UNREGISTERED`：开启 `--check-registry` 且注册表不存在。
+- `registered=false`：开启 `--check-registry` 且注册表没有该指标；`status` 仍按样本判定，未注册不等于没上报（fsof 等指标本来就不在注册表里）。
 - `QUERY_ERROR`：Prometheus 或注册表查询失败。
 
-最终回复给用户时，按应用或指标分组汇总 `OK/STALE/MISSING/UNREGISTERED` 数量，列出异常指标和最后样本时间；不要粘贴 token、ticket、Cookie 或完整登录跳转参数。
+最终回复给用户时，按应用或指标分组汇总 `OK/STALE/MISSING` 数量并单列 `registered=false` 的指标，列出异常指标和最后样本时间；不要粘贴 token、ticket、Cookie 或完整登录跳转参数。
 
 ## 执行流程
 

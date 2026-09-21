@@ -2,7 +2,7 @@
 name: query-hippo-config
 description: 通过 Hippo 配置中心只读查看应用配置和实际生效 release，支持标准 Hippo、stable/测试/项目环境以及墨西哥、印尼海外站点的独立域名，应用名或 namespace 不明确时可按关键字定位。Use when 用户要求查看 Hippo 配置、只给出应用关键字或业务语义要求定位配置项落在哪个应用和 namespace、线上/预发/灰度/OA/stable 配置、墨西哥或印尼海外配置、代码分支依赖的配置 key、应用默认配置、namespace 配置项，或需要根据代码里的 ConfigService/getAppConfig/@HippoConfigProperty 判断真实配置走向；默认环境为 prod/fql_prod，最终必须输出查询接口 URL 和配置结果。
 metadata:
-  version: 1.5.0
+  version: 1.5.3
 ---
 
 # query-hippo-config
@@ -61,14 +61,14 @@ key 的确定顺序：
 
 1. 代码字面量：`getProperty("<key>", default)`、`getBooleanProperty("<key>", false)`、`@HippoConfigProperty(key = "<key>")` 的第一个参数就是 key，直接用。
 2. 常量或拼接：key 来自常量、枚举或 `PREFIX + bizType` 这类拼接时，先在代码里解析出实际字符串再查；只能确定前缀时用 `get --key-prefix=<前缀>` 查整个前缀族。
-3. 用户只说了业务语义、给不出 key 名：已知 namespace 时用 `list` 拿全量 key 名再按语义筛；namespace 也不确定时用 `find --key-contains=<片段>`，它会扫该应用全部 namespace 并按 key 名子串模糊匹配（忽略大小写）。
+3. 用户只说了业务语义、给不出 key 名：已知 namespace 时用 `list` 拿全量 key 名再按语义筛；namespace 也不确定时用 `find --key-contains=<片段>`，它会扫该应用的 namespace（第一页最多 100 个，满页标 `namespacesTruncated`）并按 key 名子串模糊匹配（忽略大小写）。
 4. 以上都定位不到：不要猜 key 名，用 `find --app-keyword=` 放宽到多个候选应用，或列出候选让用户确认。
 
 ## 查询流程
 
 1. 明确目标：appId、env、cluster、namespace、key 和 API host。缺省 env 用 `fql_prod`，缺省 host 用 `http://hippo.oa.fenqile.com`，缺省 cluster 用 `default`，缺省 namespace 用 `application`；stable/测试/项目环境 host 改用 `http://stable-hippo.oa.fenqile.com`，env 默认用 `fql_pre`；墨西哥用 `https://hippo.oa.wowcredito.com` + `mxyw_*`，印尼用 `https://hippo.oa.kredito.id` + `ynyw_prod`。若 direct active release 返回 404/500，先查 `navtree`，按返回的真实 env 重试。
 2. 如果 appId、env、cluster、namespace 已知，直接用 `hippo_query.js get --key=<key>` 取值，不要先查应用列表或 `navtree`；只有 404、空 active release、权限异常或 cluster 不确定时再补查。
-3. 如果只给 appId 和 key，先对 `application` 跑 `get`；`missingKeys` 命中说明该 namespace 没有这个 key，直接跑 `find --app-id=<appId> --key=<key>` 一次扫完该应用所有 namespace，不要逐个 namespace 手动试。
+3. 如果只给 appId 和 key，先对 `application` 跑 `get`；`missingKeys` 命中说明该 namespace 没有这个 key，直接跑 `find --app-id=<appId> --key=<key>` 扫该应用的 namespace（只读第一页，最多 100 个，满页时输出 `namespacesTruncated=true`），不要逐个 namespace 手动试。
 3.1 如果应用名也不明确，先跑 `apps --keyword=<关键字>` 拿到在目标 env 真正有 cluster 的候选，再按 3 继续；候选不唯一且无法从上下文判断时，先向用户确认。
 3.2 如果应用名和 namespace 都不明确，直接跑 `find --app-keyword=<关键字> --key=<key>`，它会先按 env 过滤应用再逐个扫 namespace，输出命中的 `appId/namespace/value` 和 active release 信息。`--max-apps` 默认只扫前 8 个候选，结果里的 `appsTruncated=true` 说明还有候选没扫，必须在回复中说明，不能当成"全站没有"。
 4. 如果是公共 namespace，先做常见别名归一化；能确定承载 app 时直接用 `get --app-id=<承载 app> --namespace=<公共 namespace>`，否则再走公共 namespace 关联接口。
@@ -86,7 +86,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/query-hippo-config/scripts
 - `list`：只列 key 名和总数，不输出 value。用于定位 key 落在哪个 namespace、判断 namespace 规模。
 - `dump`：输出整个 namespace 的 key/value。只有确认需要整包时才用。
 - `apps`：**应用名不明确时用**。`--keyword=<关键字>` 搜应用，只保留在当前 env 有 cluster 的候选，输出 appId、owner、envs、clusters。加 `--all-envs` 可看该应用在所有 env 的分布。
-- `find`：**namespace 不明确时用**。扫指定应用的全部 namespace 定位 key，输出命中的 namespace、值和 active release 信息。选择器三选一或组合：`--key=`（精确）、`--key-prefix=`（前缀）、`--key-contains=`（key 名子串，忽略大小写）。应用也不确定时用 `--app-keyword=` 替代 `--app-id`。
+- `find`：**namespace 不明确时用**。扫指定应用的 namespace（第一页最多 100 个）定位 key，输出命中的 namespace、值和 active release 信息。选择器三选一或组合：`--key=`（精确）、`--key-prefix=`（前缀）、`--key-contains=`（key 名子串，忽略大小写）。应用也不确定时用 `--app-keyword=` 替代 `--app-id`。
 - `self-test`：纯逻辑自检，不联网。
 
 `apps` 和 `find` 每次会发起多轮请求（应用列表、navtree、逐 namespace 的 active release），比 `get` 贵。**appId 和 namespace 都已知时一律用 `get`，不要用 `find` 兜底。** `find` 输出的 value 超过 200 字符会截断并标 `valueTruncated=true`，需要完整值时再对命中的 namespace 跑 `get`。
@@ -115,7 +115,7 @@ node .../hippo_query.js find --app-id=server-hawk-decision-task-mexyw --hippo-si
 
 每次输出都带 `releaseKey`、`releasedBy`、`releasedTime`、`totalKeys` 和 `configurationsChars`，可直接用于回复中的 active release 说明。
 
-失败码：`LOGIN_REQUIRED`（按 `details.ensureCommand` 刷新登录态后重试）、`PROFILE_IN_USE`（关闭占用该 profile 的 Chromium）、`FORBIDDEN`、`ACTIVE_RESPONSE_INVALID`、`KEYWORD_REQUIRED`/`APP_ID_REQUIRED`/`APP_NOT_FOUND`（`apps`/`find` 入参缺失，或该 env 下没有匹配关键字的应用）。
+失败码：`LOGIN_REQUIRED`（按 `details.ensureCommand` 刷新登录态后重试）、`PROFILE_IN_USE`（关闭占用该 profile 的 Chromium）、`FORBIDDEN`、`NOT_FOUND`（404：核对 app/env/cluster/namespace，先查 navtree，不是登录问题）、`HIPPO_UPSTREAM_ERROR`（5xx：稍后重试）、`ACTIVE_RESPONSE_INVALID`、`KEYWORD_REQUIRED`/`APP_ID_REQUIRED`/`APP_NOT_FOUND`（`apps`/`find` 入参缺失，或该 env 下没有匹配关键字的应用）。
 
 ## 快捷规则
 
@@ -123,8 +123,8 @@ node .../hippo_query.js find --app-id=server-hawk-decision-task-mexyw --hippo-si
 - 已知 namespace 的单 key 查询：加 `--namespace=<namespace>`；不要为了确认 namespace 存在先查 namespace 列表。
 - `mihwak_common`、`mihawk_common` 归一为 `hippo.mihwak_common`；当前米霍克公共 namespace 的承载 app 为 `mihwak_virtual`，可直接 `get --app-id=mihwak_virtual --namespace=hippo.mihwak_common --key=<key>`。
 - `water_common` 归一为 `hippo.water_common`；承载 app 未确定时先用公共 namespace 关联接口查 owner，再查 active release。
-- 同一个 app 下多个独立 namespace 的查询可以分多次 `get` 并行发起，最后统一整理结果；但如果本来就不知道 key 在哪个 namespace，用一次 `find` 比并行猜多个 `get` 更快也更完整。
-- `find` 的结果要连 `scannedApps`、`scannedNamespaces` 一起看：没命中时先确认扫过的范围是否包含目标，再下"未配置"的结论。
+- 同一个 app 下多个独立 namespace 的查询分多次 `get` 串行发起（脚本共用同一个浏览器 profile，并行会报 `PROFILE_IN_USE`），最后统一整理结果；但如果本来就不知道 key 在哪个 namespace，用一次 `find` 比并行猜多个 `get` 更快也更完整。
+- `find` 的结果要连 `scannedApps`、`scannedNamespaces`、`namespacesTruncated`、`appsTruncated`、`appSearchTruncated`（关键字搜应用满页）、`unreadableApps`（候选应用 navtree 读不到）、`unreadableNamespaces` 一起看：任一截断或不可读非空时不得下“未配置”的结论；没命中时先确认扫过的范围是否包含目标。
 
 ## API Reference
 

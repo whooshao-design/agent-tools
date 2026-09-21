@@ -28,7 +28,7 @@ agent-tools/
 ├── env/                 # 公共凭证 credentials.env（gitignore）与模板 credentials.env.example
 ├── evals/               # skill 评测：cases/<skill>.json 触发/路由用例与行为压力用例（README 说明三层）
 ├── tests/               # 仓库级测试：install.py、toolchain_audit、dev-workflow 契约一致性、skill 结构 lint 与路由评测
-├── docs/                # 维护用长文（design-basis 三份评估与旧模板），不随 skill 链接到客户端
+├── docs/                # 维护用长文：design-basis 三份评估与旧模板；reviews/ 外部仓库评估、试点与 codex 全量 skill 评审记录。不随 skill 链接到客户端
 ├── install.py           # 符号链接安装脚本（claude + codex 双目标）
 └── AGENTS.md            # 本文件（主文档）
 ```

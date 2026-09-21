@@ -2,7 +2,7 @@
 name: dev-finish-branch
 description: Use when 改动范围已基本稳定，且已有当前模式所需的验证结果及评审状态，准备在提交或交付前做最终收口。
 metadata:
-  version: 1.7.0
+  version: 1.7.2
 ---
 
 # dev-finish-branch
@@ -38,7 +38,8 @@ metadata:
 
 ### 1. 收口当前 diff
 先看本次准备交付的改动是否清晰：
-- 按 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/artifact-identity.md` 检查 `gate_context G`、相关记录、已验证/已评审的 `change_revision` 是否与待交付工作区精确匹配；`D/W` 必须重读不可变记录并复算外部 fingerprint
+- 按 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/artifact-identity.md` 检查 `gate_context G`、相关记录、已验证/已评审的 `change_revision` 是否与待交付工作区精确匹配（含暂存区指纹）；`D/W` 必须重读不可变记录并复算外部 fingerprint
+- 只交接工作区时，快照身份（已含暂存区指纹）与已验证的 `change_revision` 匹配即可，不要求先暂存；用户要求提交、或交付对象是暂存内容时，待提交内容（`git diff --cached`）必须就是已验证的那份：暂存区与工作区不一致（部分暂存、暂存的是修复前版本）就重新暂存到已验证版本，或把交付范围明确绑定到暂存内容并按它重新验证
 - 改了什么
 - 为什么改
 - 是否混入无关变更
@@ -89,7 +90,7 @@ metadata:
 ### 6. 给出最终收口判断
 结论只能是以下之一：
 
-- `可交付`：`G`、验证、当前模式要求的评审、风险授权和待交付 `change_revision` 全部匹配
+- `可交付`：`G`、验证、当前模式要求的评审、风险授权和待交付 `change_revision`（含暂存区指纹）全部匹配
 - `需清理后重验`：仅存在本任务拥有且可安全修正的 diff/遗留项；修改后必须重新验证和评审
 - `审批或证据失效`：任一身份、审批、验证或评审记录与当前版本不匹配
 - `等待人工`：混入来源不明或用户改动、需要风险决策，或无法安全判断清理权限

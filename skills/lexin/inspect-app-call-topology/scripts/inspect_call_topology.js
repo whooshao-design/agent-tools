@@ -322,7 +322,8 @@ function runRegistry(services, site, timeoutMs) {
           return;
         }
         try {
-          resolve({ ok: true, ownerMap: JSON.parse(stdout).ownerMap || {} });
+          const parsed = JSON.parse(stdout);
+          resolve({ ok: true, ownerMap: parsed.ownerMap || {}, completeness: parsed.completeness || null });
         } catch (parseError) {
           resolve({ ok: false, reason: '注册中心返回无法解析' });
         }
@@ -346,7 +347,10 @@ async function fillOwnersFromRegistry(ctx, ownerOf, services) {
     ownerOf.set(service, new Set(apps));
     filled.push(service);
   }
-  return { used: true, filled, missing: missing.filter((s) => !filled.includes(s)) };
+  const truncated = Boolean(result.completeness && result.completeness.truncated);
+  if (truncated) ctx.registryTruncated = true; // --service 反查阶段也走这里，报告统一从 ctx 读
+  if (truncated) console.log('提示: 注册中心返回不完整（truncated=true），兜底得到的归属候选可能缺项，报告里标 registry_truncated。');
+  return { used: true, filled, missing: missing.filter((s) => !filled.includes(s)), truncated };
 }
 
 // 谁在调这些 service：consumer 侧按 service 反查，app 标签就是客户端应用名。
@@ -900,7 +904,7 @@ ${renderTable('本应用 → 下游应用接口', downstreamCols, downstreamRows
 function buildJsonModel(model, downstreamRows) {
   const {
     app, site, baseUrl, env, range, baselineLabel, slowMs, generatedAt,
-    provider, consumer, clients, ownerOf, registryFilled, stats, drilldown, baseline, queryLog,
+    provider, consumer, clients, ownerOf, registryFilled, registryTruncated, stats, drilldown, baseline, queryLog,
   } = model;
   return {
     meta: {
@@ -918,6 +922,7 @@ function buildJsonModel(model, downstreamRows) {
     downstream_dependencies: downstreamRows
       || consumer.map((row) => ({ ...row, ownerApp: [...(ownerOf.get(row.service) || ['(未知应用)'])].sort().join(OWNER_SEP) })),
     downstream_owner_map: Object.fromEntries([...ownerOf].map(([k, v]) => [k, [...v]])),
+    registry_truncated: Boolean(registryTruncated),
     downstream_owner_source: Object.fromEntries([...ownerOf].map(([k]) => [
       k, registryFilled && registryFilled.has(k) ? 'dubbo-registry' : 'metrics',
     ])),
@@ -1088,7 +1093,9 @@ async function inspectTopology(args, client, apps) {
       throw new Error(`没查到提供 ${focusService} 的应用：窗口内没有 provider 指标，注册中心也没有记录。`
         + '\n请核对服务名（支持短名），或确认该服务是否已下线。');
     }
-    if (list.length > 1) console.log(`注意: ${focusService} 有多个提供方 ${list.join(', ')}，取第一个继续`);
+    if (list.length > 1) {
+      throw new Error(`${focusService} 有多个提供方：${list.join(', ')}。多提供方通常是分机构部署，不能假定归属；请用 --app=<应用> 指定要分析的那个。`);
+    }
     apps.push(list[0]);
     console.log(`--service 反查到应用: ${apps[0]}`);
   }
@@ -1130,6 +1137,7 @@ async function inspectTopology(args, client, apps) {
       clients: clients.filter(row => provided.has(row.service)),
       ownerOf: new Map([...ownerOf].filter(([service]) => consumed.has(service))),
       registryFilled: new Set(registryFill.filled.filter(service => consumed.has(service))),
+      registryTruncated: Boolean(registryFill.truncated),
       providerFilters: [labelEq('app', target.app), envFilter, serviceFilter],
       consumerFilters: [labelEq('app', target.app), envFilter],
     });
@@ -1140,7 +1148,7 @@ async function inspectTopology(args, client, apps) {
 
 // 查询结果按 app 拆分后沿用单应用报告和下钻流程，不混合不同应用的统计或输出文件。
 async function writeAppReport(args, ctx, target) {
-  const { app, provider, consumer, clients, ownerOf, registryFilled, providerFilters, consumerFilters } = target;
+  const { app, provider, consumer, clients, ownerOf, registryFilled, registryTruncated, providerFilters, consumerFilters } = target;
   const { site, baseUrl, env, range, slowMs, baselineOffset, maxDrilldown } = ctx;
   const consumerServices = [...new Set(consumer.map(row => row.service).filter(Boolean))];
   const providerSum = summarize(provider);
@@ -1209,6 +1217,7 @@ async function writeAppReport(args, ctx, target) {
     clients,
     ownerOf,
     registryFilled,
+    registryTruncated: Boolean(registryTruncated || ctx.registryTruncated),
     stats,
     drilldown,
     baseline,

@@ -2,7 +2,7 @@
 name: dev-design-solution
 description: Use when 需求边界和验收标准已基本明确，需要写技术方案、出方案或做方案设计：基于代码上下文产出可评审、可实施、可验证的技术方案，比较存在实质取舍的实现路径并收敛设计决策。
 metadata:
-  version: 4.0.1
+  version: 4.1.1
 ---
 
 # dev-design-solution
@@ -11,7 +11,7 @@ metadata:
 
 在需求已基本明确后，结合代码证据形成可评审、可实施、可验证的技术方案。它负责分析现状、收敛技术决策、解释目标机制及其正确性，并明确影响、发布、风险和验证；不替代需求澄清、正式方案评审、详细测试清单或开发执行清单。
 
-默认只读取需求、代码和配置。只有用户明确要求落盘时才创建或修改方案文档，不在设计阶段改业务代码。
+默认只读取需求、代码和配置，不在设计阶段改业务代码。用户要技术方案（"写方案""出方案""做方案设计"）时默认按文档模式落盘到产物目录；用户明确只要讨论、口头建议或不保存时才用对话模式。
 
 方案的文件构成、内容归属、追踪和可读性统一遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/solution-structure-contract.md`；表达规则遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/writing-principles.md`。
 
@@ -105,7 +105,7 @@ metadata:
 
 ### 8. 输出前自检与读者测试
 
-按 `readability-and-writing.md` 第 7 节执行自检。然后按 `reader-test-protocol.md` 先写答案键 `reader-test/answer-key-v<N>.md`，交由编排器派发与设计方不同模型的 agent 读者只读 `solution.md` 作答，比对结果写入 `reader-test/agent-v<N>.md`。任一问不通过先修方案再进入正式评审。
+按 `readability-and-writing.md` 第 7 节执行自检。然后按 `reader-test-protocol.md` 先写答案键 `reader-test/answer-key-v<N>.md`，交由编排器派发与设计方不同模型的 agent 读者只读 `solution.md` 作答，比对结果写入 `reader-test/agent-v<N>.md`。按协议 §5 判定不通过（全文读者七问、截断读者前五问、成立的探针问题）时先修方案再进入正式评审。
 
 方案必须能交给 `dev-review-solution` 独立评审：reviewer 不读 `traceability.md` 也能理解机制、影响和上线验证，深读时能从两个文件定位精确契约、边界、证据及所有 CHG。
 
@@ -119,11 +119,11 @@ metadata:
 
 ### 对话模式
 
-默认按"结论 → 推荐方案与机制导读 → 必要精度 → 验证与风险"输出。路径明确时保持轻量，不展开完整模板。
+用户明确只要讨论或不保存时，按"结论 → 推荐方案与机制导读 → 必要精度 → 验证与风险"输出。路径明确时保持轻量，不展开完整模板。
 
 ### 文档模式
 
-用户要求正式方案或落盘时使用 `solution-template.md` + `traceability-template.md` 和一个主 profile。长证据、完整对象清单和执行内容进 `traceability.md` 或独立证据文件；`solution.md` 超过约 300 行时复核是否重复或混入追踪内容，超过约 450 行时优先拆分证据，不机械删减必要设计。
+用户要方案文档（默认）时使用 `solution-template.md` + `traceability-template.md` 和一个主 profile。长证据、完整对象清单和执行内容进 `traceability.md` 或独立证据文件；`solution.md` 超过约 300 行时复核是否重复或混入追踪内容，超过约 450 行时优先拆分证据，不机械删减必要设计。
 
 ## 交接建议
 

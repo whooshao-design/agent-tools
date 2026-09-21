@@ -2,7 +2,7 @@
 name: build-codeagent
 description: Use when 需求梳理、内容整理、方案、测试或代码需要跨模型生成与轻量互审，或 dev-build-change/dev-auto-loop 需要派发 producer 与独立正式 reviewer。
 metadata:
-  version: 1.7.0
+  version: 1.7.3
 ---
 
 # build-codeagent
@@ -114,7 +114,7 @@ python3 .../pick_agent.py --task <任务ID> --show-record
 `model-routing.json` 三块内容：
 
 - `backends`：10 个后端的通道、模型来源、评审实测分数（eval-v2，见 `references/backend-evaluation.md`，材料与脚本在 `evals/` 与 `scripts/backend_eval.py`）、生成能力分档和只读调用要求。`claude-vps` 和 `codex-vps`
-  的模型写成 `dynamic:<路径>#<键>`，跟随本机配置。同一模型的 `claude-*` 与 `codex-*` 是两条通道：编排器在哪个客户端就用哪一套。
+  的模型写成 `dynamic:<路径>#<键>`，跟随本机配置。同一模型的 `claude-*` 与 `codex-*` 是两条通道：同一模型两条通道都在候选里时，编排器在哪个客户端就用哪一套，`pick_agent.py` 按 `CLAUDECODE`/`CODEX_*` 环境变量自动折叠（`--host` 可覆盖，`any` 不折叠）；不同模型的候选（如 `claude-vps` 与 `codex-vps`）不受宿主影响，照常轮换；需求梳理、内容整理、测试生成、代码生成、验证执行五个环节只登记了 `claude-*`（codex 通道未测），Codex 宿主也按候选表派发；修订沿用原生成者，不按宿主换通道。
 - `stages`：11 个环节的候选集与 `artifact` 归属。`evidence` 标 `extrapolated` 或 `untested` 的环节，
   候选是外推来的，试运行后再调。
 - `rules`：8 条规则。排除、轮换、修订归属由脚本执行；交接、验收、换人判断由主会话负责。

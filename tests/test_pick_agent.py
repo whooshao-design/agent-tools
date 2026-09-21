@@ -125,6 +125,34 @@ class PickAgentTest(unittest.TestCase):
         self.assertEqual(choices, ["claude-qwen", "codex-vps", "codex-qwen"] * 2)
         self.assertEqual(reused, [None, None, None, 1, 2, 3])
 
+    def test_host_collapses_same_model_channels_but_keeps_rotation_between_models(self):
+        # claude-qwen / codex-qwen carry the same model: only the host's channel stays in the pool
+        self.routing["backends"]["codex-qwen"]["model"] = self.routing["backends"]["claude-qwen"]["model"]
+        self.record("claude-vps", "solution-design")
+        self.assertEqual(self.call(host="codex")["backend"], "codex-vps")
+        self.assertEqual(self.call(host="claude")["backend"], "claude-qwen")
+        # requirement-clarify only lists claude-*: a codex host still gets a candidate instead of nothing
+        self.assertTrue(self.call("requirement-clarify", host="codex")["backend"].startswith("claude-"))
+        # claude-vps and codex-vps are different models: a codex host must still rotate between them
+        self.record("claude-deepseek", "requirement-clarify")
+        first = self.call("requirement-review", host="codex")["backend"]
+        self.record(first, "requirement-review")
+        second = self.call("requirement-review", host="codex")["backend"]
+        self.assertNotEqual(first, second)
+        self.assertEqual({first, second}, {"claude-vps", "codex-vps"})
+        self.assertIn(picker.detect_host(), ("claude", "codex", "any"))
+
+    def test_unknown_models_are_never_collapsed_as_if_identical(self):
+        # both dynamic configs unreadable: the same placeholder string must not make the two backends "one model"
+        for backend in ("claude-vps", "codex-vps"):
+            self.routing["backends"][backend].pop("model", None)
+            self.routing["backends"][backend]["model_source"] = "dynamic:/nonexistent/config.json#model"
+        self.record("claude-deepseek", "requirement-clarify")
+        first = self.call("requirement-review", host="codex")["backend"]
+        self.record(first, "requirement-review")
+        second = self.call("requirement-review", host="codex")["backend"]
+        self.assertEqual({first, second}, {"claude-vps", "codex-vps"})
+
     def test_explicit_exclude_is_temporary_and_does_not_record_producer(self):
         self.assertEqual(self.call(exclude=" claude-vps ")["backend"], "claude-qwen")
         self.assertEqual(self.call()["backend"], "claude-vps")

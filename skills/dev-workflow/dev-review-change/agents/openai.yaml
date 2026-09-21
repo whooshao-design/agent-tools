@@ -1,6 +1,6 @@
 interface:
   display_name: "独立评审代码变更"
   short_description: "由非代码产出者只读评审正确性、架构、安全与稳定性"
-  default_prompt: "使用 $dev-review-change 绑定 gate_context 和 change_revision，核对 DEV 状态、实际写集归属与 producer，再按独立评审契约基于 diff、验证证据和代码上下文评审改动，并给出唯一结论。"
+  default_prompt: "使用 $dev-review-change 评审代码变更：先判断是建议审查（普通 PR/diff，默认）还是正式准入；只有正式准入才绑定 gate_context 和 change_revision、核对 DEV 状态与 producer；两种模式都基于 diff、验证证据和代码上下文给出唯一结论。"
 policy:
   allow_implicit_invocation: true

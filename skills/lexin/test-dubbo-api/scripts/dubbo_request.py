@@ -9,6 +9,24 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+
+class SameOriginRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Requests carry the login Cookie: never follow a redirect to another origin with it."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        absolute = urllib.parse.urljoin(req.full_url, newurl)
+        origin = urllib.parse.urlsplit(req.full_url)
+        target = urllib.parse.urlsplit(absolute)
+        if (origin.scheme, origin.netloc) != (target.scheme, target.netloc):
+            raise RuntimeError(
+                f"{req.full_url} redirected to another origin ({target.scheme}://{target.netloc}); refusing to forward credentials"
+            )
+        return super().redirect_request(req, fp, code, msg, headers, absolute)
+
+
+OPENER = urllib.request.build_opener(SameOriginRedirectHandler())
+
+
 SKILL_DIR = Path(__file__).resolve().parents[1]
 SKILLS_DIR = SKILL_DIR.parent
 SKILLS_ROOT = SKILL_DIR.parents[1]
@@ -133,6 +151,19 @@ def infer_env_from_params(params):
     return ""
 
 
+# 部署环境只决定 targets.json 里查哪条 IP:Port；线路（stable/pre 两个服务模拟器站点）由 ENV_ALIASES 归一。
+# prod/gray 走 pre 线路，但目标实例必须是 prod/gray 自己的地址，不能借用 pre 条目。
+DEPLOY_ENV_ALIASES = {
+    "gray": "gray", "gray环境": "gray", "灰度": "gray", "灰度环境": "gray",
+    "prod": "prod", "prod环境": "prod", "online": "prod", "线上": "prod", "线上环境": "prod", "生产": "prod", "生产环境": "prod",
+}
+
+
+def deploy_env(value, target_env):
+    key = str(value or "").strip()
+    return DEPLOY_ENV_ALIASES.get(key) or DEPLOY_ENV_ALIASES.get(key.lower()) or target_env
+
+
 def normalize_env(value, params=None):
     key = str(value or "stable").strip()
     canonical = ENV_ALIASES.get(key) or ENV_ALIASES.get(key.lower())
@@ -146,7 +177,8 @@ def normalize_env(value, params=None):
     raise SystemExit(f"unsupported env: {value}. Supported aliases: {', '.join(sorted(ENV_ALIASES))}")
 
 
-def resolve_endpoint(args, target_env):
+def resolve_endpoint(args, target_env, deployment_env=None):
+    deployment_env = deployment_env or target_env
     if args.ip and args.port:
         return args.ip, args.port
     if args.app:
@@ -154,12 +186,17 @@ def resolve_endpoint(args, target_env):
             raise SystemExit(f"targets file not found: {args.targets_file}")
         with open(args.targets_file, "r", encoding="utf-8") as handle:
             targets = json.load(handle)
-        endpoint = (targets.get(args.app) or {}).get(target_env)
+        endpoint = (targets.get(args.app) or {}).get(deployment_env)
         if endpoint:
             ip = endpoint.get("ip")
             port = endpoint.get("port")
             if ip and port:
                 return str(ip), str(port)
+        if deployment_env != target_env:
+            raise SystemExit(
+                f"targets.json has no {args.app}.{deployment_env} entry; a {deployment_env} call must not borrow the "
+                f"{target_env} address. Pass --ip/--port for the {deployment_env} instance."
+            )
     raise SystemExit("missing target endpoint: pass --ip/--port or --app with a matching targets.json entry")
 
 
@@ -224,7 +261,7 @@ def call_http(args, base_url, bianque_env, cookie, ip, port, params):
         },
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=args.timeout) as response:
+    with OPENER.open(request, timeout=args.timeout) as response:
         text = response.read().decode()
     try:
         return json.loads(text)
@@ -281,11 +318,13 @@ def main():
     base_url = args.base_url or config["base_url"]
     bianque_env = args.bianque_env or config["env"]
     domain = args.domain or config["domain"]
-    ip, port = resolve_endpoint(args, target_env)
+    deployment_env = deploy_env(args.env, target_env)
+    ip, port = resolve_endpoint(args, target_env, deployment_env)
     if args.dry_run:
         print(json.dumps({
             "requested_env": args.env,
             "target_env": target_env,
+            "deploy_env": deployment_env,
             "base_url": base_url,
             "bianque_env": bianque_env,
             "service": args.service,

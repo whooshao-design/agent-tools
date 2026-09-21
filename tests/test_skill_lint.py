@@ -24,7 +24,7 @@ ABS_PATH = re.compile(r"/home/joney/projects/ai/agent-tools/[\w./\-]+")
 # Identifiers that look like skill names but are gate names, categories, tools or
 # schema names. Extend deliberately; do not silence a real dead reference here.
 NOT_SKILLS = {
-    "dev-workflow", "dev-quality", "env-access", "solution-review", "test-design-review",
+    "dev-workflow", "dev-quality", "solution-review", "test-design-review",
     "change-review", "requirements-review-round", "redis-cli", "query-range-batch",
     "java-backend-mcp", "verify-execute", "read-only", "write-set", "agent-tools",
     "direct-record-v1", "waiver-record-v1", "approval-record-v1", "repo-snapshot-v1",

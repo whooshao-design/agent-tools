@@ -2,7 +2,7 @@
 name: get-browser-session
 description: 获取、检查、续期和复用 WSL Playwright/Chromium 浏览器登录态与网页 session（底层会话层，供其他 skill 复用）。Use when 需要访问要求登录的内网页面、检查或定时续期浏览器 profile 登录态、打开浏览器让用户完成 SSO/OTP 登录、复用已保存 profile 做页面自动化，或按默认脱敏方式查看 session Cookie/localStorage token。
 metadata:
-  version: 1.7.2
+  version: 1.7.3
 ---
 
 # Get Browser Session
@@ -67,7 +67,7 @@ WebShell uses stricter readiness semantics than a generic OA page:
 - `乐空间传送门`、`ATrust`、登录页和 403 markers override transient Gotty titles and terminal elements.
 - `snippet` may be empty because xterm uses canvas; use `sessionState/terminalReady/stableReadyPolls` instead of body text alone.
 
-Do not use this skill to execute server commands or read logs; container log reads belong to `java-server-diagnostics`, using `/home/joney/projects/ai/agent-tools/skills/lexin/java-server-diagnostics/scripts/webshell_log_check.js` when a Gotty WebSocket or terminal interaction is needed.
+Do not use this skill to execute server commands or read logs; container log reads belong to `query-app-logs`, which uses `/home/joney/projects/ai/agent-tools/skills/lexin/java-server-diagnostics/scripts/webshell_log_check.js` when a Gotty WebSocket or terminal interaction is needed.
 
 ## Network Policy
 

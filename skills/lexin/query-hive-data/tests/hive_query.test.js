@@ -18,6 +18,16 @@ test('accepts read-only statements and strips the trailing semicolon', () => {
   assert.equal(assertReadOnlySql('SELECT 1;'), 'SELECT 1');
   assert.equal(assertReadOnlySql('  with t as (select 1) select * from t  '), 'with t as (select 1) select * from t');
   assert.equal(assertReadOnlySql('SHOW SCHEMAS'), 'SHOW SCHEMAS');
+  assert.equal(assertReadOnlySql("SELECT '--' AS x, 'insert' AS y"), "SELECT '--' AS x, 'insert' AS y");
+  assert.throws(() => assertReadOnlySql("WITH c AS (SELECT '--' AS x) INSERT INTO demo.t SELECT x FROM c"), /write keyword/);
+  assert.equal(assertReadOnlySql('SELECT 1 --delete is only a comment'), 'SELECT 1 --delete is only a comment'); // Presto: -- 到行尾都是注释
+  assert.equal(assertReadOnlySql('SELECT 1--1 INSERT INTO demo.t VALUES (1)'), 'SELECT 1--1 INSERT INTO demo.t VALUES (1)'); // 同上，--1... 是注释
+  assert.equal(assertReadOnlySql('EXPLAIN SELECT 1'), 'EXPLAIN SELECT 1');
+  // Presto: 反斜杠不是转义符，'\\' 是一个完整字符串，后面的注释里的 delete 不算写语句
+  assert.equal(assertReadOnlySql("SELECT '\\' AS separator -- 'delete' is only a comment"), "SELECT '\\' AS separator -- 'delete' is only a comment");
+  // Spark: 反斜杠转义引号，'a\\'; DELETE ...' 是一个字符串，但保守起见按写语句拒绝也可接受；这里只验证 Presto 不再误拦
+  assert.throws(() => assertReadOnlySql("SELECT '\\'; DELETE FROM t", 'presto'), /single SQL statement|write keyword/);
+  assert.throws(() => assertReadOnlySql('EXPLAIN ANALYZE INSERT INTO demo.t SELECT 1'), /EXPLAIN ANALYZE/);
   assert.equal(assertReadOnlySql('show create table dp_ods.t'), 'show create table dp_ods.t');
   assert.equal(assertReadOnlySql('DESCRIBE dp_ods.t'), 'DESCRIBE dp_ods.t');
   assert.equal(assertReadOnlySql('explain select 1'), 'explain select 1');

@@ -186,7 +186,10 @@ function parseMetric(metric, suffixes) {
 function buildPlan(input, args) {
   const businessLine = args['business-line'] || DEFAULT_BUSINESS_LINE;
   return input.targets.map((target) => {
-    const parsed = parseMetric(target.metric, input.userSuffixes);
+    // 用户显式给了 app 和 desc 时不强制从指标名推导后缀；只保留前缀约束。
+    const explicit = Boolean(target.app && target.desc);
+    if (explicit && !target.metric.startsWith('fql_fk_')) throw new Error(`Metric must start with fql_fk_: ${target.metric}`);
+    const parsed = explicit ? { app: target.app, suffix: null } : parseMetric(target.metric, input.userSuffixes);
     const app = target.app || parsed.app;
     const desc = resolveDesc(target, app, parsed.suffix, input.descMap, input.appLabelMap);
     return {
@@ -269,7 +272,7 @@ async function extractTokenFromProfile(args, baseUrl) {
     await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
     const auth = await page.evaluate(() => {
       const keys = Object.keys(localStorage);
-      const tokenKey = keys.find((key) => /access.?token|token/i.test(key) && localStorage.getItem(key));
+      const tokenKey = localStorage.getItem('access_token') ? 'access_token' : null; // exact key; never fall back to refresh_token
       return {
         token: tokenKey ? localStorage.getItem(tokenKey) : '',
         tokenKey,
@@ -312,6 +315,10 @@ async function requestJson(method, url, token, args, body, redirectsLeft = 3) {
 
   if ([301, 302, 307, 308].includes(response.status) && response.headers.get('location') && redirectsLeft > 0) {
     const nextUrl = new URL(response.headers.get('location'), url).toString();
+    // 请求带 Bearer：跨源重定向会把凭据发给别的域名，直接拒绝。
+    if (new URL(nextUrl).origin !== new URL(url).origin) {
+      throw new Error(`${method} ${url} redirected to another origin (${new URL(nextUrl).origin}); refusing to forward credentials`);
+    }
     return requestJson(method, nextUrl, token, args, body, redirectsLeft - 1);
   }
 
@@ -436,7 +443,11 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(error.stack || error.message);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error.stack || error.message);
+    process.exit(1);
+  });
+}
+
+module.exports = { requestJson };

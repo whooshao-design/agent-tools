@@ -75,7 +75,9 @@ function ensureCommandFor(baseUrl, profile) {
 }
 
 function resolveTarget(args, options = {}) {
-  const requestedEnv = args.env === undefined || args.env === true ? DEFAULT_ENV : String(args.env);
+  // 只给 --hippo-site=stable 不给 env 时默认查 stable 的 fql_pre，而不是 prod（与正文一致）。
+  const siteArg = optionalString(args['hippo-site']).toLowerCase();
+  const requestedEnv = args.env === undefined || args.env === true ? (siteArg === 'stable' ? 'stable' : DEFAULT_ENV) : String(args.env);
   const site = resolveSite(requestedEnv, args['hippo-site']);
   const env = normalizeEnv(requestedEnv, site);
   const baseUrl = resolveBaseUrl(env, requestedEnv, args['hippo-site']);
@@ -135,10 +137,18 @@ async function openHippoPage(target) {
   }
 }
 
-// fetchJson 在 !ok 或非 JSON 时抛 HIPPO_* 码；对只读查询来说这两种情况几乎都是登录态问题。
+// fetchJson 在 !ok 或非 JSON 时抛 HIPPO_* 码。非 JSON（被重定向到登录页）和 401 是登录态问题；
+// 403 是权限；404 是目标不存在；5xx 是上游错误——后两类不能报成登录失效，否则 agent 会反复刷新登录态。
 function remapFetchError(error, target) {
-  if (error.code === 'HIPPO_GET_FAILED' && Number(error.details && error.details.status) === 403) {
+  const status = Number(error.details && error.details.status);
+  if (error.code === 'HIPPO_GET_FAILED' && status === 403) {
     fail('FORBIDDEN', '当前账号无该应用配置的查看权限', { ...error.details, appId: target.appId });
+  }
+  if (error.code === 'HIPPO_GET_FAILED' && status === 404) {
+    fail('NOT_FOUND', 'Hippo 返回 404：app/env/cluster/namespace 不存在或不可见，先查 navtree 核对目标', { ...error.details, appId: target.appId });
+  }
+  if (error.code === 'HIPPO_GET_FAILED' && status >= 500) {
+    fail('HIPPO_UPSTREAM_ERROR', `Hippo 返回 ${status}：上游错误，稍后重试或核对 env/cluster`, { ...error.details, appId: target.appId });
   }
   if (error.code === 'HIPPO_GET_FAILED' || error.code === 'HIPPO_RESPONSE_NOT_JSON') {
     fail('LOGIN_REQUIRED', 'Hippo 未返回配置 JSON，通常是登录态失效', {
@@ -262,6 +272,8 @@ async function mapWithConcurrency(items, limit, worker) {
 async function searchApps(page, target, keyword, { limit, allEnvs }) {
   const payload = await fetchJson(page, `/apps/list?appId=${encodeURIComponent(keyword)}&page=0&size=${limit}`);
   const rows = payload.elements || payload.content || [];
+  // apps/list 只读第一页（size=limit）：满页说明关键字还有更多应用没搜到。
+  const searchTruncated = Array.isArray(rows) && rows.length >= limit;
   const candidates = (Array.isArray(rows) ? rows : [])
     .map((row) => ({ appId: row.appId, name: row.name || '', ownerName: row.ownerName || '' }))
     .filter((row) => row.appId);
@@ -270,18 +282,20 @@ async function searchApps(page, target, keyword, { limit, allEnvs }) {
     try {
       navtree = await fetchJson(page, `/apps/${encodeURIComponent(candidate.appId)}/navtree`);
     } catch (_) {
-      return { ...candidate, envs: [], clusters: [] };
+      return { ...candidate, envs: [], clusters: [], unreadable: true }; // navtree 读不到不等于该应用不在此 env
     }
     return { ...candidate, ...envsOfNavtree(navtree) };
   });
   const matched = detailed.filter((row) => (allEnvs ? row.envs.length > 0 : row.envs.includes(target.env)));
-  return { scanned: candidates.length, matched };
+  return { scanned: candidates.length, matched, searchTruncated, unreadableApps: detailed.filter((row) => row.unreadable).map((row) => row.appId) };
 }
 
 async function scanNamespaces(page, target, appId, selector) {
   const root = `/apps/${encodeSegment(appId)}/envs/${encodeSegment(target.env)}/clusters/${encodeSegment(target.cluster)}`;
   const listPath = `${root}/namespacePubTypes/__app__/groupId/0/page/0/size/${NAMESPACE_PAGE_SIZE}?searchNamespace=`;
   const namespaces = namespaceNamesFrom(await fetchJson(page, listPath));
+  // 只读第一页（NAMESPACE_PAGE_SIZE）：满页说明可能还有 namespace 没扫到，消费方不得据此下“未配置”结论。
+  const namespacesTruncated = namespaces.length >= NAMESPACE_PAGE_SIZE;
   const scans = await mapWithConcurrency(namespaces, SCAN_CONCURRENCY, async (namespaceName) => {
     const activePath = `${root}/namespaces/${encodeSegment(namespaceName)}/releases/active?page=0&size=1`;
     let active;
@@ -307,6 +321,7 @@ async function scanNamespaces(page, target, appId, selector) {
   });
   return {
     namespaces,
+    namespacesTruncated,
     unreadable: scans.filter((scan) => scan.unreadable).map((scan) => scan.namespaceName),
     hits: scans.flatMap((scan) => scan.hits),
   };
@@ -329,7 +344,8 @@ async function runApps(args) {
       keyword,
       scannedApps: found.scanned,
       scanLimit: limit,
-      scanTruncated: found.scanned >= limit,
+      scanTruncated: found.searchTruncated,
+      unreadableApps: found.unreadableApps,
       matched: found.matched,
       note: allEnvs
         ? '已列出在任意 env 有 cluster 的应用'
@@ -361,17 +377,25 @@ async function runFind(args) {
   try {
     let appIds = [target.appId].filter(Boolean);
     let appCandidates = null;
+    let appSearchTruncated = false;
+    let unreadableApps = [];
     if (!appIds.length) {
       const found = await searchApps(browser.page, target, appKeyword, {
         limit: Number(args.limit || DEFAULT_APP_SCAN_LIMIT),
         allEnvs: false,
       });
       appCandidates = found.matched.map((row) => row.appId);
+      appSearchTruncated = found.searchTruncated;
+      unreadableApps = found.unreadableApps;
       appIds = appCandidates.slice(0, maxApps);
     }
-    assert(appIds.length, 'APP_NOT_FOUND', `${target.env} 下没有匹配 --app-keyword 的应用`, {
+    assert(appIds.length, 'APP_NOT_FOUND', `${target.env} 下没有匹配 --app-keyword 的应用`
+      + (appSearchTruncated ? '（应用搜索第一页已满，可能还有未搜到的应用，换更精确的关键字）' : '')
+      + (unreadableApps.length ? `（${unreadableApps.length} 个候选的 navtree 读不到，不能断定它们不在此 env）` : ''), {
       appKeyword,
       env: target.env,
+      appSearchTruncated,
+      unreadableApps,
     });
     const scans = await mapWithConcurrency(appIds, 2,
       (appId) => scanNamespaces(browser.page, target, appId, selector));
@@ -390,13 +414,18 @@ async function runFind(args) {
       scannedApps: appIds,
       appCandidates: appCandidates && appCandidates.length > appIds.length ? appCandidates : undefined,
       appsTruncated: Boolean(appCandidates && appCandidates.length > appIds.length),
+      appSearchTruncated,
+      unreadableApps,
       scannedNamespaces: scans.flatMap((scan) => scan.namespaces),
+      namespacesTruncated: scans.some((scan) => scan.namespacesTruncated),
       unreadableNamespaces: scans.flatMap((scan) => scan.unreadable),
       hitCount: hits.length,
       hits,
       note: hits.length
         ? '值来自各 namespace 的 active release；超长值已截断，需要完整值用 get'
-        : '在扫描到的 namespace 里没有命中；可换 --key-contains 放宽，或确认 env/cluster',
+        : (appSearchTruncated || unreadableApps.length || scans.some((scan) => scan.namespacesTruncated || scan.unreadable.length)
+          ? '在扫描到的 namespace 里没有命中，但扫描不完整（namespace 满页或有不可读项），不能下“未配置”结论'
+          : '在扫描到的 namespace 里没有命中；可换 --key-contains 放宽，或确认 env/cluster'),
     };
   } catch (error) {
     return remapFetchError(error, target);

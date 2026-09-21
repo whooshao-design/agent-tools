@@ -55,7 +55,10 @@ function runNode(script, args, timeoutMs) {
 function readBoard(board, profile) {
   const stdout = runNode(READ_SCRIPT, [`--board=${board}`, `--profile=${profile}`, '--read'], 120000);
   const parsed = JSON.parse(stdout);
-  return parsed.backup?.after || parsed.backup?.before || `/tmp/healthy-dashboard-${board}-after.json`;
+  // healthy_dashboard_config.js --read 输出独立的 backupDir；before.json 是回读到的完整大盘。旧的固定 /tmp/...-after.json 路径已不存在。
+  if (!parsed.backupDir) throw new Error('healthy_dashboard_config.js --read did not return backupDir');
+  const after = path.join(parsed.backupDir, 'after.json');
+  return fs.existsSync(after) ? after : path.join(parsed.backupDir, 'before.json');
 }
 
 function pageSnapshot(url, profile) {
@@ -171,7 +174,7 @@ async function extractAuth(page) {
   await page.waitForTimeout(1000);
   return page.evaluate(() => {
     const keys = Object.keys(localStorage);
-    const tokenKey = keys.find((key) => /access.?token|token/i.test(key) && localStorage.getItem(key));
+    const tokenKey = localStorage.getItem('access_token') ? 'access_token' : null; // exact key; never fall back to refresh_token
     const ticketKey = keys.find((key) => /ticket/i.test(key) && localStorage.getItem(key));
     return {
       token: tokenKey ? localStorage.getItem(tokenKey) : '',

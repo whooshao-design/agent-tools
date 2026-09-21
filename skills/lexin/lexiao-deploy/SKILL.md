@@ -2,7 +2,7 @@
 name: lexiao-deploy
 description: 在乐效需求/版本中集成分支、构建、部署并验收项目环境、预发布或用户明确指定的灰度应用。Use when 用户要求集成分支、构建、部署到项目环境或预发布并验收结果；默认每应用一个目标，支持显式灰度全目标；部署后核验制品与实例日志。不用于 OA/线上部署或独立日志查询。
 metadata:
-  version: 1.2.6
+  version: 1.2.7
 ---
 
 # Lexiao Deploy
@@ -71,7 +71,7 @@ For multiple apps, split the work into two phases: branch integration and build 
 2. Branch integration:
    - Click `分支集成详情` / `分支集成` before build. Do not skip this step.
    - Capture the target project row: project name, branch, last commit, branch status, integration pipeline status, merge status, and CR status.
-   - If `批量集成分支` is enabled, click it, confirm, and wait until the target project row is `已合并`, integration pipeline is `执行成功`, and merge status is `合入release成功` or `补丁合入release成功`.
+   - If `批量集成分支` is enabled, first record which project rows are still un-integrated: the batch button integrates all of them. If that set includes projects outside the user's requested scope and the user has not authorized integrating them, do not click; report the blocker and ask for a narrowed scope or explicit authorization. Otherwise click it, confirm, and wait until the target project row is `已合并`, integration pipeline is `执行成功`, and merge status is `合入release成功` or `补丁合入release成功`.
    - If `批量集成分支` is disabled and the target row already shows the success statuses above, report it as "already integrated" and continue.
    - If the target row is not integrated but the button is disabled or missing, stop before build and report the blocker.
 3. Build:
@@ -94,7 +94,7 @@ For multiple apps, split the work into two phases: branch integration and build 
 6. Verification:
    - Poll Lexiao page/API for the selected machine while checking target-server diagnostics through `java-server-diagnostics`.
    - Treat Lexiao page/API publish status as auxiliary progress only. The deployment health conclusion must come primarily from target-server or container-instance logs observed during the deployment window.
-   - Run version-local `stdout.log` checks and shared `error.log` checks through `java-server-diagnostics`. For container targets, that skill owns the `k8s_readonly` first, WebShell helper fallback path.
+   - Run version-local `stdout.log` checks and shared `error.log` checks through `query-app-logs` (VM/KVM logs via the `java_app_diag` MCP; container targets through its `k8s_readonly` first, WebShell helper fallback path).
 7. Error triage and next choices:
    - If deployment or logs show blocking errors, identify the shortest causal chain and propose a concrete fix.
    - If deployment succeeds but deployment-time ERROR/Exception entries remain, classify them as blocking, non-blocking residual, or unrelated based on startup markers, machine run state, and log timing.

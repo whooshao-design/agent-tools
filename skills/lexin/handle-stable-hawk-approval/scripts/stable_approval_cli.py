@@ -760,12 +760,14 @@ def command_approve(args: argparse.Namespace) -> int:
     results: List[Dict[str, str]] = []
     for record in records:
         route = route_for(record)
-        # Each region runs its own manage app, so a scoped target wins over the bare route key.
+        # Each region runs its own manage app. Callbacks only ever go to a scoped target: falling back to a
+        # bare key could approve a Mexico record on the domestic instance (or vice versa), so there is no fallback.
         scoped_key = f"{resolve_scope(record.scope)}.{route.target_key}"
-        target = targets.get(scoped_key) or targets.get(route.target_key)
+        target = targets.get(scoped_key)
         if not target:
             raise UserError(
-                f"Missing target {scoped_key!r}. Pass --target {scoped_key}=ip:port "
+                f"Missing scoped target {scoped_key!r} (a bare {route.target_key!r} entry is never used for callbacks). "
+                f"Pass --target {scoped_key}=ip:port "
                 f"or configure {Path(args.target_file).expanduser()}."
             )
         try:

@@ -1,0 +1,234 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "独立节点决策目标路由流程",
+    "locale": "zh-CN",
+    "viewBox": [
+      1000,
+      680
+    ],
+    "column_fit": "spread",
+    "quality_profile": "showcase"
+  },
+  "participants": [
+    {
+      "id": "caller",
+      "type": "external",
+      "label": "调用方",
+      "sublabel": "决策请求"
+    },
+    {
+      "id": "dispatcher",
+      "type": "backend",
+      "label": "dispatcher",
+      "sublabel": "路由缓存"
+    },
+    {
+      "id": "executor",
+      "type": "backend",
+      "label": "executor",
+      "sublabel": "候选路由生成"
+    },
+    {
+      "id": "packageab",
+      "type": "security",
+      "label": "package AB",
+      "sublabel": "edition 分流"
+    },
+    {
+      "id": "manifest",
+      "type": "database",
+      "label": "PackageCacheInfo",
+      "sublabel": "edition manifest"
+    },
+    {
+      "id": "nodecache",
+      "type": "database",
+      "label": "node cache",
+      "sublabel": "nodeId + editionId"
+    }
+  ],
+  "segments": [
+    {
+      "from": 150,
+      "to": 262,
+      "label": "选 edition"
+    },
+    {
+      "from": 276,
+      "to": 498,
+      "label": "循环：每个候选分组"
+    },
+    {
+      "from": 510,
+      "to": 584,
+      "label": "返回"
+    }
+  ],
+  "messages": [
+    {
+      "id": "req",
+      "from": "caller",
+      "to": "dispatcher",
+      "y": 160,
+      "label": "packageId + 原始 nodeId(V/B)",
+      "variant": "emphasis"
+    },
+    {
+      "id": "route-req",
+      "from": "dispatcher",
+      "to": "executor",
+      "y": 190,
+      "label": "AbAndRouteInfoReq(packageId, nodeId)",
+      "variant": "emphasis"
+    },
+    {
+      "id": "ab-query",
+      "from": "executor",
+      "to": "packageab",
+      "y": 220,
+      "label": "查询 package AB 候选",
+      "variant": "security"
+    },
+    {
+      "id": "ab-editions",
+      "from": "packageab",
+      "to": "executor",
+      "y": 250,
+      "label": "各分组对应 edition",
+      "variant": "return"
+    },
+    {
+      "id": "manifest-read",
+      "from": "executor",
+      "to": "manifest",
+      "y": 292,
+      "label": "读取该 edition manifest",
+      "variant": "default"
+    },
+    {
+      "id": "manifest-check",
+      "from": "executor",
+      "to": "manifest",
+      "y": 322,
+      "label": "校验 nodeId 属于该 edition",
+      "variant": "default"
+    },
+    {
+      "id": "alt-missing",
+      "from": "manifest",
+      "to": "executor",
+      "y": 354,
+      "label": "[节点不存在] 空候选路由",
+      "variant": "return"
+    },
+    {
+      "id": "alt-private",
+      "from": "executor",
+      "to": "nodecache",
+      "y": 386,
+      "label": "[私有节点] 精确读取 nodeId + editionId",
+      "variant": "emphasis"
+    },
+    {
+      "id": "alt-virtual-map",
+      "from": "executor",
+      "to": "manifest",
+      "y": 418,
+      "label": "[公共虚拟节点] V 映射到 C",
+      "variant": "dashed"
+    },
+    {
+      "id": "alt-virtual-ab",
+      "from": "executor",
+      "to": "nodecache",
+      "y": 450,
+      "label": "[公共虚拟节点] 沿用 C 自身 AB 选版",
+      "variant": "dashed"
+    },
+    {
+      "id": "node-rows",
+      "from": "nodecache",
+      "to": "executor",
+      "y": 482,
+      "label": "节点版本",
+      "variant": "return"
+    },
+    {
+      "id": "routes",
+      "from": "executor",
+      "to": "dispatcher",
+      "y": 524,
+      "label": "候选路由 + AB 信息 + 路由版本",
+      "variant": "return"
+    },
+    {
+      "id": "result",
+      "from": "dispatcher",
+      "to": "caller",
+      "y": 556,
+      "label": "按 AB 结果选路；空路由抛现有异常",
+      "variant": "return"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "dispatcher",
+      "from": 165,
+      "to": 562,
+      "type": "backend"
+    },
+    {
+      "participant": "executor",
+      "from": 194,
+      "to": 530,
+      "type": "backend"
+    },
+    {
+      "participant": "packageab",
+      "from": 216,
+      "to": 256,
+      "type": "security"
+    },
+    {
+      "participant": "manifest",
+      "from": 288,
+      "to": 424,
+      "type": "database"
+    },
+    {
+      "participant": "nodecache",
+      "from": 382,
+      "to": 488,
+      "type": "database"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "先选 edition 再解析节点",
+      "items": [
+        "package AB 决定每个分组用哪个 edition",
+        "整条链路只用该 edition 的 manifest 和节点版本"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "三种分支",
+      "items": [
+        "节点不在该 edition：该分组不生成候选路由",
+        "私有节点：按 nodeId + editionId 精确读取",
+        "公共虚拟节点：V 映射 C 后沿用 C 自身 AB"
+      ]
+    },
+    {
+      "dot": "orange",
+      "title": "保持不变",
+      "items": [
+        "AB 模型、候选路由结构、路由版本协议不变",
+        "空路由仍由 dispatcher 抛 StrategyNodeRoutsIsNullException"
+      ]
+    }
+  ]
+}

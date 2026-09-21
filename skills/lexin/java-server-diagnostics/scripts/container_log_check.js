@@ -283,7 +283,7 @@ function main() {
           result: kubeResult.queryResult,
           limitations: logMode === 'forensics'
             ? ['kubectl logs only covers container stdout; application log files and rotations were not read']
-            : [],
+            : ['kubectl logs only covers container stdout; error.log was not read as a file'],
         }, null, 2));
         return;
       }

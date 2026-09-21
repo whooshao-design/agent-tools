@@ -112,6 +112,8 @@ def _validate_fields(result: dict[str, Any]) -> None:
 
     conclusion = result["conclusion"]
     if result["status"] == "complete":
+        if not isinstance(conclusion, str):
+            raise ContractError("complete 结果的 conclusion 必须为字符串")
         if conclusion not in ALLOWED_CONCLUSIONS[result["role"]]:
             raise ContractError("conclusion 不属于当前 reviewer 的允许结论")
     elif conclusion is not None:

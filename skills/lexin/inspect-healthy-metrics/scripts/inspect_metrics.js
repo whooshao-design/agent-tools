@@ -276,7 +276,6 @@ function formatValue(value) {
 
 function statusFor(row, freshnessSeconds) {
   if (row.error) return 'QUERY_ERROR';
-  if (row.registered === false) return 'UNREGISTERED';
   if (row.current_series > 0) return 'OK';
   if (Number.isFinite(row.last_sample_age_seconds) && row.last_sample_age_seconds <= freshnessSeconds) return 'OK';
   if (row.lookback_series > 0) return 'STALE';
@@ -305,10 +304,7 @@ async function inspectMetric(client, args, metric, options) {
       const hits = await queryRegistry(client, metric);
       row.registered = hits.length > 0;
       row.registry_ids = hits.map((hit) => hit.id).filter(Boolean).join(',');
-      if (!row.registered) {
-        row.status = 'UNREGISTERED';
-        return row;
-      }
+      // 未注册不等于没上报（fsof 等指标本来就不在注册表里）：registered 只是独立字段，样本照查。
     }
 
     const range = options.range;

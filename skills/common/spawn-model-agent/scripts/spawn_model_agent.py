@@ -8,10 +8,10 @@ usage:
   spawn_model_agent.py --list                                  # backends on PATH with eval scores
 
 Host detection: CLAUDECODE / CODEX_* env, then the parent process tree (claude / codex), else --client.
-Permissions match an ordinary subagent of the host (read/write in --cwd, MCP inherited on claude-*);
+Default permissions are fixed, not inherited from the host session (claude-*: --dangerously-skip-permissions with MCP; codex-*: workspace-write, approval never);
 --readonly narrows to read-only tools; --slim skips the global CLAUDE.md/memory/skills for a faster start.
 """
-import argparse, glob, json, os, re, shlex, subprocess, sys, time
+import argparse, glob, json, os, re, shlex, subprocess, sys, tempfile, time
 
 STATE = os.path.expanduser(os.environ.get('SPAWN_MODEL_AGENT_HOME', '~/.local/state/spawn-model-agent'))
 ROUTING = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'build-codeagent', 'model-routing.json')
@@ -159,7 +159,7 @@ def status(job):
     meta_p = os.path.join(job, 'meta.json')
     if os.path.exists(meta_p):
         m = json.load(open(meta_p))
-        print(f"状态: 完成  退出码 {m.get('exit_code')}  模型 {m.get('model')}  耗时 {m.get('wall_s')}s  "
+        print(f"状态: {'超时' if m.get('exit_code') == 'timeout' else '完成'}  退出码 {m.get('exit_code')}  模型 {m.get('model')}  耗时 {m.get('wall_s')}s  "
               f"token in/out {m.get('input_tokens')}/{m.get('output_tokens')}  会话 {m.get('session_id')}")
         print(f"结果: {os.path.join(job, 'result.md')}")
         return 0
@@ -178,11 +178,27 @@ def child_env(backend, slim):
     return env
 
 
+def apply_resume(a, prev):
+    """Inherit cwd/slim/readonly from the previous job: a resumed job never gains rights it did not have."""
+    resume_id = prev.get('session_id')
+    if not resume_id:
+        raise SystemExit('上一个作业没有记录会话 ID，无法续接')
+    a.cwd = prev.get('cwd', a.cwd)
+    a.slim = a.slim or bool(prev.get('slim'))  # the session lives in the same config dir
+    a.readonly = a.readonly or bool(prev.get('readonly'))
+    return prev['backend'], resume_id
+
+
 def run_child(job, backend, task, cwd, readonly, slim, timeout, resume_id):
     cmd = build_command(backend, task, readonly, resume_id)
     t0 = time.time()
-    p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout,
-                       stdin=subprocess.DEVNULL, env=child_env(backend, slim))
+    try:
+        p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout,
+                           stdin=subprocess.DEVNULL, env=child_env(backend, slim))
+    except subprocess.TimeoutExpired as e:  # write a terminal meta.json so --status never spins forever
+        def _text(v):
+            return v if isinstance(v, str) else (v or b'').decode('utf-8', 'replace')
+        p = subprocess.CompletedProcess(cmd, 'timeout', _text(e.stdout), _text(e.stderr) + f'\n[spawn-model-agent] timeout after {timeout}s\n')
     open(os.path.join(job, 'stderr.log'), 'w').write(p.stderr)
     wall = round(time.time() - t0, 1)
     raw_name = 'raw.json' if backend.startswith('claude-') else 'raw.jsonl'
@@ -195,7 +211,7 @@ def run_child(job, backend, task, cwd, readonly, slim, timeout, resume_id):
                 finished=time.strftime('%Y-%m-%dT%H:%M:%S'))
     open(os.path.join(job, 'result.md'), 'w').write(result or '(agent 没有返回文本；看 raw.* 与 stderr.log)\n')
     json.dump(meta, open(os.path.join(job, 'meta.json'), 'w'), ensure_ascii=False, indent=1)
-    return p.returncode
+    return 124 if p.returncode == 'timeout' else p.returncode
 
 
 def main():
@@ -223,11 +239,7 @@ def main():
     resume_id, backend = None, None
     if a.resume:
         prev = json.load(open(os.path.join(a.resume, 'meta.json')))
-        backend, resume_id = prev['backend'], prev.get('session_id')
-        if not resume_id:
-            raise SystemExit('上一个作业没有记录会话 ID，无法续接')
-        a.cwd = prev.get('cwd', a.cwd)
-        a.slim = a.slim or bool(prev.get('slim'))  # the session lives in the same config dir
+        backend, resume_id = apply_resume(a, prev)
     client = a.client or detect_client()
     backend = backend or resolve_backend(a.backend, client)
     cwd = os.path.abspath(a.cwd)
@@ -236,8 +248,9 @@ def main():
         print(f'提醒：{hint}', file=sys.stderr)
     if a._child:
         return run_child(os.environ['SPAWN_JOB_DIR'], backend, task, cwd, a.readonly, a.slim, a.timeout, resume_id)
-    job = os.path.join(STATE, time.strftime('%Y%m%d-%H%M%S') + '-' + backend)
-    os.makedirs(job, exist_ok=True)
+    os.makedirs(STATE, exist_ok=True)
+    # mkdtemp is atomic and unique: two jobs started in the same second must never share a directory.
+    job = tempfile.mkdtemp(prefix=time.strftime('%Y%m%d-%H%M%S') + '-' + backend + '-', dir=STATE)
     open(os.path.join(job, 'task.md'), 'w', encoding='utf-8').write(task)
     if a.wait:
         code = run_child(job, backend, task, cwd, a.readonly, a.slim, a.timeout, resume_id)

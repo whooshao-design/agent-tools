@@ -1,0 +1,9 @@
+flowchart LR
+    R[决策请求<br/>packageId + 原始 nodeId] --> AB[package AB 分流]
+    AB --> E0[线上 edition E0]
+    AB --> E1[灰度 edition E1]
+    E0 --> P0[PackageCacheInfo E0]
+    E1 --> P1[PackageCacheInfo E1]
+    P0 --> S0[只使用 E0<br/>节点/顺序/映射/拓扑]
+    P1 --> S1[只使用 E1<br/>节点/顺序/映射/拓扑]
+    S0 -.禁止.-> S1

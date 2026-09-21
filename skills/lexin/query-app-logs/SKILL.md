@@ -2,7 +2,7 @@
 name: query-app-logs
 description: 统一只读查询 Java 应用日志：VM/KVM 服务器日志走 java_app_diag MCP，容器 Pod 日志走 container_log_check/webshell_log_check 脚本，超出服务器保存期或需要跨机器按 traceId 汇总时走日志平台 log.oa.fenqile.com（热数据 90 天）。Use when 用户要求查某应用的日志、按 traceId/关键字/时间段找日志、看几天到几个月前的历史日志、服务器日志已轮转找不到、或明确说用日志平台；应用名必须明确。
 metadata:
-  version: 1.0.0
+  version: 1.0.1
 ---
 
 # query-app-logs
@@ -47,11 +47,12 @@ metadata:
 2. 优先只读 kubectl context；只有 context/kubeconfig/连接不可用等基础设施错误才回退 WebShell，权限拒绝、Pod 不存在等业务错误不要静默回退。
 3. `app + env` 命中多个 Running Pod 时必须补 `--pod` 或 `--ip`，不随机选。
 
-快检（默认 `--log-mode=quick`，只看 `error.log`；启动问题加 `--include-startup`）：
+快检（默认 `--log-mode=quick`；kubectl 路径读的是容器 stdout，结果 `source=kubectl-stdout` 且 `limitations` 注明没读 `error.log` 文件，只有 WebShell 回退路径读 `error.log`；启动问题加 `--include-startup`）：
 
 ```bash
 node /home/joney/projects/ai/agent-tools/skills/lexin/java-server-diagnostics/scripts/container_log_check.js \
-  --app=<app_name> --env=pre --ip=<pod_ip> --lines=120
+  --app=<app_name> --env=pre --ip=<pod_ip> --lines=120 \
+  --profile=/home/joney/.local/state/agent-tools/browser-profiles/main
 ```
 
 取证（当前日志 + 未压缩/`.gz` 轮转，按时间戳聚合多行事件；`trace-id/rule-id/keyword` 同时给出时 AND 匹配；`--context` 0～20）：
@@ -60,14 +61,16 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/java-server-diagnostics/sc
 node /home/joney/projects/ai/agent-tools/skills/lexin/java-server-diagnostics/scripts/container_log_check.js \
   --app=<app_name> --env=prod --ip=<pod_ip> --log-mode=forensics \
   --trace-id=<trace_id> --from="2026-07-13 11:39:00" --to="2026-07-13 11:42:00" \
-  --files=error.log,info.log --context=2 --include-rotated --max-lines=500 --max-bytes=1048576
+  --files=error.log,info.log --context=2 --include-rotated --max-lines=500 --max-bytes=1048576 \
+  --profile=/home/joney/.local/state/agent-tools/browser-profiles/main
 ```
 
-已有 `login_pod_addr` 时可直接用 WebShell helper（`--mode=auto` 先 Gotty WebSocket，终端 DOM 可用才回退）：
+已有 `login_pod_addr` 时可直接用 WebShell helper（`--mode=auto` 先 Gotty WebSocket，终端 DOM 可用才回退）。WebShell 登录态在 `browser-profiles/main`，脚本默认 `webshell` profile，所以 `--profile` 必须显式传，否则会报看似登录过期的 `LOGIN_REQUIRED`：
 
 ```bash
 node /home/joney/projects/ai/agent-tools/skills/lexin/java-server-diagnostics/scripts/webshell_log_check.js \
-  --url=<login_pod_addr> --app=<app_name> --lines=120 --since-minutes=60 --version=<version_tag>
+  --url=<login_pod_addr> --app=<app_name> --lines=120 --since-minutes=60 --version=<version_tag> \
+  --profile=/home/joney/.local/state/agent-tools/browser-profiles/main
 ```
 
 先读输出的 `targetSource/loginUrlSource/access/accessAttempts/errorCode/warningCode`，再看 `summary` 或 `forensics`；`warningCode=RESULT_TRUNCATED` 时缩小时间窗或提高受控上限重查；自动登录失败时把返回的乐效 `manualUrl` 交给用户在浏览器打开。日志文件只允许 `error.log/info.log/warn.log/debug.log/stdout.log`。

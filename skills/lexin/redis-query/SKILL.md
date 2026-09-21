@@ -2,7 +2,7 @@
 name: redis-query
 description: "通过 bianque 服务模拟器调用 DevService.queryRedis 进行 Redis 只读查询。Use when 用户要求查询 Redis key 是否存在、类型、TTL、数量、STRING/SET/HASH/LIST/ZSET 值、Hash 指定 field，或批量排查 Redis key 来源和值。"
 metadata:
-  version: 1.2.2
+  version: 1.2.3
 ---
 
 # redis-query
@@ -87,7 +87,7 @@ metadata:
 
 ```bash
 python3 /home/joney/projects/ai/agent-tools/skills/lexin/test-dubbo-api/scripts/dubbo_request.py \
-  --env auto \
+  --env <stable|pre> \
   --service '<DEV_SERVICE>' \
   --method queryRedis \
   --app '<APP_NAME>' \
@@ -96,7 +96,7 @@ python3 /home/joney/projects/ai/agent-tools/skills/lexin/test-dubbo-api/scripts/
   --params '["<INSTANCE_NAME>","<KEY>",<FIELDS_LIST>,<FETCH_DATA>]'
 ```
 
-目标地址也可以直接传 `--ip '<IP>' --port '<PORT>'`。
+目标地址也可以直接传 `--ip '<IP>' --port '<PORT>'`。`--env` 传第 1 步已归一的 `stable` 或 `pre`；只有用户没说环境、要靠 key 推断时才传 `auto`（auto 只看 key 里的 token，会丢掉用户明确指定的环境）。
 
 手工 curl 仅作为脚本不可用时的备用：
 

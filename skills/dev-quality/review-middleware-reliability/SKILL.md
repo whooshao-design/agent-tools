@@ -2,7 +2,7 @@
 name: review-middleware-reliability
 description: Use when `dev-review-change` 或 `dev-review-solution` 已启动，且变更或方案涉及 Redis、MQ、任务调度或存在超时、重试、幂等、降级等可靠性风险，需要补查中间件与外部依赖行为时。
 metadata:
-  version: 1.2.0
+  version: 1.2.2
 ---
 
 # review-middleware-reliability
@@ -25,7 +25,7 @@ metadata:
 
 不适合以下场景：
 - 改动完全不涉及中间件或外部依赖可靠性
-- 还没形成基础 diff 和验证证据
+- 正式准入的代码专项还没形成 diff 和验证证据；建议审查只要有 diff 和现有上下文就可做，验证缺口在结论里披露；方案阶段以方案文本和现有代码基线为输入，不要求 diff
 - 只是一般代码风格问题，不属于可靠性专题
 
 ## 检查骨架

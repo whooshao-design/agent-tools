@@ -73,6 +73,28 @@ class SpawnModelAgentTest(unittest.TestCase):
         self.assertIn('sandbox_mode="workspace-write"', x)
         self.assertEqual(x[-2:], ["tid", "more"])
 
+    def test_resume_inherits_readonly_and_slim(self):
+        from types import SimpleNamespace
+        a = SimpleNamespace(cwd="/x", slim=False, readonly=False)
+        backend, sid = sma.apply_resume(a, {"backend": "codex-kimi", "session_id": "t1", "readonly": True, "slim": True, "cwd": "/y"})
+        self.assertEqual((backend, sid), ("codex-kimi", "t1"))
+        self.assertTrue(a.readonly)
+        self.assertTrue(a.slim)
+        self.assertEqual(a.cwd, "/y")
+        with self.assertRaises(SystemExit):
+            sma.apply_resume(a, {"backend": "codex-kimi"})
+
+    def test_timeout_writes_terminal_meta(self):
+        import json, os, subprocess, tempfile
+        with tempfile.TemporaryDirectory() as job:
+            exc = subprocess.TimeoutExpired(cmd=["x"], timeout=1, output="partial", stderr="err")
+            with mock.patch.object(sma.subprocess, "run", side_effect=exc):
+                rc = sma.run_child(job, "claude-kimi", "t", job, False, False, 1, None)
+            self.assertEqual(rc, 124)
+            meta = json.load(open(os.path.join(job, "meta.json")))
+            self.assertEqual(meta["exit_code"], "timeout")
+            self.assertTrue(os.path.exists(os.path.join(job, "result.md")))
+
     def test_parsers_capture_session_ids(self):
         meta, text = sma.parse_claude('{"session_id":"s1","result":"ok","num_turns":2,"modelUsage":{"m":{"inputTokens":1,"outputTokens":2}}}')
         self.assertEqual((meta["session_id"], meta["model"], text), ("s1", "m", "ok"))

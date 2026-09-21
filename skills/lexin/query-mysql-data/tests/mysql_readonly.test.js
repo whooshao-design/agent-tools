@@ -14,6 +14,15 @@ const {
   validateLxcloudDbType,
 } = require('../scripts/mysql_readonly');
 
+test('read-only SQL guard rejects writes hidden behind WITH, INTO OUTFILE and FOR UPDATE', () => {
+  for (const sql of ['SELECT 1', 'WITH c AS (SELECT 1) SELECT * FROM c', "SELECT * FROM t WHERE note = 'delete me' AND `update_time` > 0", 'EXPLAIN SELECT 1', 'SHOW CREATE TABLE demo.t_order', "SELECT REPLACE('abc','a','x') AS cleaned, INSERT('abc',1,1,'z'), TRUNCATE(1.23, 1)", "SELECT 'it''s -- not a comment', \"/* not a comment */\" FROM t", 'SELECT 1 -- trailing comment', 'SELECT 1 --\ttab comment']) {
+    assert.doesNotThrow(() => assertReadOnlySql(sql), sql);
+  }
+  for (const sql of ['WITH c AS (SELECT 1) DELETE FROM demo WHERE id = 1', "SELECT 1 INTO OUTFILE '/tmp/x'", 'SELECT * FROM t FOR UPDATE', 'SELECT 1; DROP TABLE t', 'UPDATE t SET a = 1', "SELECT 1 /*!50000 INTO OUTFILE '/tmp/x' */", 'REPLACE INTO t VALUES (1)', "SELECT '-- ' INTO OUTFILE '/tmp/x'", "SELECT '/*' , 1 INTO DUMPFILE '/tmp/y'", "SELECT 1--1 INTO OUTFILE '/tmp/r4'"]) {
+    assert.throws(() => assertReadOnlySql(sql), /非只读/, sql);
+  }
+});
+
 test('routes stable and prod to their own lxcloud domains over the same HTTP SQL path', () => {
   assert.equal(resolveLxcloudEnv(undefined), 'prod');
   assert.equal(resolveLxcloudEnv(''), 'prod');

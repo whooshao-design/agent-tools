@@ -2,7 +2,7 @@
 name: query-dubbo-registry
 description: 通过服务名查提供它的应用名，以及 Dubbo/FSOF 注册中心的其他只读查询。Use when 用户只知道 service 全限定名或短名要找是哪个应用提供的、要查谁在消费某个服务、要列出某个应用注册了哪些服务、要拿服务提供者的实例地址和 version/group，或者在代码仓库里搜不到接口需要先定位应用。
 metadata:
-  version: 1.0.0
+  version: 1.1.0
 ---
 
 # query-dubbo-registry
@@ -54,7 +54,7 @@ node .../query_dubbo_registry.js --service=ExpressRuleRunnerService --role=consu
 node .../query_dubbo_registry.js --app=server_strategy_decision_java
 ```
 
-批量解析归属，供其他脚本消费（输出含 `ownerMap`）：
+批量解析归属，供其他脚本消费（输出含 `ownerMap` 与 `completeness{total,fetched,truncated}`；脚本按 `total` 翻页，`truncated=true` 时不得声称服务清单或归属候选完整）：
 
 ```bash
 node .../query_dubbo_registry.js --services=com.a.FooService,com.b.BarService --format=json

@@ -111,6 +111,11 @@ class SubagentResultContractTest(unittest.TestCase):
             self.valid_result(status="blocked", conclusion=None, unresolved=[])
         )
 
+    def test_rejects_non_string_conclusion_as_contract_error(self):
+        # list/dict used to raise TypeError inside the membership test and fail open
+        for bad in ([], {}, ["通过"], {"value": "通过"}, 1):
+            self.assert_invalid(self.valid_result(conclusion=bad))
+
     def test_rejects_conclusion_for_another_role(self):
         self.assert_invalid(
             self.valid_result(

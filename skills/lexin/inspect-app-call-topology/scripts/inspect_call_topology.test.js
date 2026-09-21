@@ -175,7 +175,9 @@ test('多应用参数冲突、空列表及可能覆盖的输出路径在启动�
 });
 
 test('服务反查仍能定位应用，批量基线保持各应用的独立过滤条件', async () => {
-  const single = await runBatch(['--service=com.example.Bar', '--no-html', '--json=/tmp/service.json']);
+  // com.example.Bar 有 app_b 和 other-provider 两个提供方：不再默认取第一个，必须用 --app 指定。
+  await assert.rejects(runBatch(['--service=com.example.Bar', '--no-html', '--json=/tmp/service.json']), /多个提供方/);
+  const single = await runBatch(['--app=app_b', '--service=com.example.Bar', '--no-html', '--json=/tmp/service.json']);
   assert.equal(JSON.parse(single.files.get('/tmp/service.json')).meta.app, 'app_b');
   const result = await runBatch(['--apps=app-a,app_b', '--baseline=7d', '--no-html', '--json=/tmp/{app}.json']);
   assert.equal(result.sessions, 1);

@@ -20,6 +20,23 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 
 
+class SameOriginRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Requests carry the login Cookie: never follow a redirect to another origin with it."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        absolute = urllib.parse.urljoin(req.full_url, newurl)
+        origin = urllib.parse.urlsplit(req.full_url)
+        target = urllib.parse.urlsplit(absolute)
+        if (origin.scheme, origin.netloc) != (target.scheme, target.netloc):
+            raise RuntimeError(
+                f"{req.full_url} redirected to another origin ({target.scheme}://{target.netloc}); refusing to forward credentials"
+            )
+        return super().redirect_request(req, fp, code, msg, headers, absolute)
+
+
+OPENER = urllib.request.build_opener(SameOriginRedirectHandler())
+
+
 DEFAULT_ENDPOINT = (
     "https://mihawk.oa.fenqile.com/"
     "rc_oa_gateway/hawk_decision/manage/query_rule_by_field_name.json"
@@ -108,7 +125,7 @@ def request_json(config: QueryConfig, field: str, page: int) -> dict[str, Any]:
         method="GET",
     )
 
-    with urllib.request.urlopen(request, timeout=config.timeout) as response:
+    with OPENER.open(request, timeout=config.timeout) as response:
         body = response.read().decode("utf-8")
     try:
         return json.loads(body)
@@ -203,6 +220,14 @@ def query_field(
             break
 
         payload = fetch(config, field, page)
+        # 错误响应不能被当成"无引用"：先看状态码与结构，再读记录。
+        if not isinstance(payload, dict):
+            raise RuntimeError("Mihawk response is not a JSON object.")
+        retcode = payload.get("retcode", payload.get("code"))
+        if retcode not in (None, 0, "0"):
+            raise RuntimeError(f"Mihawk returned retcode={retcode} retmsg={payload.get('retmsg') or payload.get('msg') or ''}")
+        if "result_rows" not in payload and "total_page" not in payload:
+            raise RuntimeError(f"Mihawk response has no result_rows/total_page (keys: {', '.join(sorted(map(str, payload))[:8])}); login may have expired.")
         if page == 1:
             total = payload.get("total_page")
             try:

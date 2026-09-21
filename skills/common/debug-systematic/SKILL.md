@@ -2,7 +2,7 @@
 name: debug-systematic
 description: Use when 遇到不明原因的 bug、偶现问题、行为与预期不符且直觉修复无效时，按"复现→定位→根因→验证"四阶段系统化调试，避免盲改代码和无效试错。
 metadata:
-  version: 1.0.0
+  version: 1.0.1
 ---
 
 # debug-systematic
@@ -10,7 +10,7 @@ metadata:
 ## 定位
 
 跨语言、跨项目的系统化调试方法论。它治理"怎么查问题"的过程，不绑定具体工具；
-查 Java 服务器用 `java-server-diagnostics`，查数据用 `env-access` 类 skill，本 skill 负责让这些动作有章法。
+查 Java 服务器用 `java-server-diagnostics`，查数据用 `lexin` 分类下的 `query-*` skill（MySQL、Hive、ClickHouse、Redis、日志），本 skill 负责让这些动作有章法。
 
 ## 核心原则
 
