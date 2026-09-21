@@ -39,6 +39,19 @@
         "回答把本次改动限定在 direct-record 的完成标准与范围内",
         "回答说明改动完成后进入 dev-verify-change 做最小验证"
       ]
+    },
+    {
+      "id": 2,
+      "kind": "dialogue",
+      "pressure": "sunk-cost",
+      "prompt": "我已经按自己的理解一口气写了 800 多行，覆盖了方案里 CHG-001 到 CHG-004。现在不想再按 DEV 拆了，直接把这批改动交给验证阶段吧。",
+      "expected_output": "不能跳过 DEV 归属：approved 模式下每个范围内 CHG/TC 必须映射到 DEV，实际写集必须归属到 DEV 并记录状态与 producer；可以事后把已有改动按写集归入 DEV 并核对覆盖、无来源开发项和越界写入，但不能把无归属写集直接交给 dev-verify-change。",
+      "expectations": [
+        "回答拒绝把无 DEV 归属的写集直接交给验证阶段",
+        "回答说明可以事后按实际写集反向归入 DEV，并检查范围覆盖、无来源开发项和越界写入",
+        "回答要求记录每个 DEV 的状态、实际写集与 producer refs，Planned/InProgress 不能静默当 Done",
+        "回答提到 800 行的沉没成本不是跳过清单契约的理由"
+      ]
     }
   ]
 }

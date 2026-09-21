@@ -1,8 +1,8 @@
 ---
 name: test-dubbo-api
-description: 通过 bianque 服务模拟器 HTTP 接口调用和编排 Dubbo 服务测试。支持从项目配置提取 Dubbo 元信息、按 targets.json 复用 IP:Port、自动获取 Cookie、区分 stable/pre 环境，并用 JSON 场景复用多接口验收流程。
+description: 通过 bianque 服务模拟器 HTTP 接口调用和编排 Dubbo 服务测试。Use when 用户要求调用或测试某个 Dubbo/FSOF 接口、编排多接口验收场景、在 stable/pre 环境验证服务；支持从项目配置提取 Dubbo 元信息、按 targets.json 复用 IP:Port、自动获取 Cookie，并用 JSON 场景复用多接口验收流程。
 metadata:
-  version: 1.2.2
+  version: 1.2.3
 ---
 
 # Dubbo 接口测试

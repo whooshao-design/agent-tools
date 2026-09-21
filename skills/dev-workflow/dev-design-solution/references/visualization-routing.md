@@ -89,4 +89,4 @@ node /home/joney/projects/ai/agent-tools/skills/dev-workflow/dev-design-solution
 
 触发条件综合参考 [riekelt/technical-writer 的 diagramming-processes skill](https://github.com/riekelt/technical-writer)（"重述编号列表的图是装饰""一图一问题"）、[SpillwaveSolutions/design-doc-mermaid](https://github.com/SpillwaveSolutions/design-doc-mermaid) 的图型路由、[arc42](https://github.com/arc42/arc42-template) 对运行时视图"选代表性场景而非穷举"的要求、[Kubernetes KEP](https://github.com/kubernetes/enhancements/blob/master/keps/NNNN-kep-template/README.md?plain=1)，以及阿里技术方案写作指引中"大纲图要看到全貌、时序图优于步骤罗列"的做法。飞书行为来自其帮助中心《使用文本绘图小组件》FAQ（2026-02）。
 
-维护或重新评估本规则时再读 `design-basis/diagram-practices-assessment.md`；生成普通业务方案时不要加载该长文。
+维护或重新评估本规则时再读仓库 `docs/design-basis/diagram-practices-assessment.md`；生成普通业务方案时不要加载该长文。

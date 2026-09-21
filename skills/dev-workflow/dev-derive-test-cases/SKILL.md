@@ -2,7 +2,7 @@
 name: dev-derive-test-cases
 description: Use when 技术方案已评审通过，需要基于原始需求、验收标准、方案审批结论和代码基线编写可追踪、可独立复核的测试清单，作为编码与验证的共同依据。
 metadata:
-  version: 1.7.0
+  version: 1.8.0
 ---
 
 # dev-derive-test-cases
@@ -21,6 +21,12 @@ metadata:
 - 仅需对话输出时不创建文件；落盘时使用 `references/test-cases-template.md`
 - 首次送审前可在当前版本编辑；一旦进入 `Reviewing`、生成审批记录或已交付评审，任何内容修订都必须先归档到 `test-cases/versions/test-cases-v<旧版本号>.md`，再递增清单版本并回到 `Draft`
 - 方案升级、补充遗漏、修改断言或追踪关系都属于内容修订；不得在已送审版本上原地修改
+
+## When to Use
+
+适合：方案已 `通过` 或有效 `有条件通过`，需要在编码前把需求、方案和检查项串成可复核的测试清单；方案修订后需要重编受影响范围。
+
+不适合：方案还没评审通过（先 `dev-review-solution`）；要复核而不是编写清单（转 `dev-review-test-cases`）；要执行测试或写测试代码（分别是 `dev-verify-change` 与 `dev-build-change`）。
 
 ## 输入契约
 

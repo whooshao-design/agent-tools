@@ -1,8 +1,8 @@
 ---
 name: java-server-diagnostics
-description: "通过 java_app_diag MCP 对 Java 应用所在服务器做只读排查。默认先只看 error.log 判断有没有问题；只有 error.log 暴露线索后，才递进排查 info/debug/启动日志、进程、端口、JVM、线程或 GC。"
+description: "通过 java_app_diag MCP 对 Java 应用所在服务器做只读排查。Use when 用户要求排查某台服务器上 Java 应用的报错、进程、端口、JVM、线程或 GC；默认先只看 error.log 判断有没有问题，只有 error.log 暴露线索后才递进排查 info/debug/启动日志与运行时状态。"
 metadata:
-  version: 1.4.0
+  version: 1.4.1
 ---
 
 # java-server-diagnostics

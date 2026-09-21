@@ -2,7 +2,7 @@
 name: dev-review-solution
 description: Use when 已有可评审的技术方案，需要在编码前基于需求、代码和约束做独立技术评审，识别阻断问题与风险，并给出通过、有条件通过、修改后复审、退回重设计或材料不足的明确结论。
 metadata:
-  version: 3.2.0
+  version: 3.2.1
 ---
 
 # dev-review-solution
@@ -25,9 +25,7 @@ metadata:
 - 用户明确指定路径时，优先使用用户路径
 - 只需在对话中给出结论时，不创建文件
 - `report.md` 使用 `references/review-template.md`；编排器同时保存 `delegation-result.json` 与 `approval-record.json`
-- 每个 `round-<N>` 不可覆盖；顶层 `review.md` 只能作为当前轮展示或指针，不是审批事实源
-- `approval-record-v1` 必须按 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/artifact-identity.md` 绑定完整 `(R,S,B)`、报告指纹、委派结果指纹和 runtime 检查；任一绑定项变化都会使旧结论失效
-- reviewer 始终只读；落盘、指纹计算和 runtime 身份附着都由编排器在 stop 后完成
+- 轮次不可覆盖、`review.md` 只是指针、`approval-record-v1` 的生成与 reviewer 只读规则见委派契约 §5；本阶段审批按 `artifact-identity.md` 绑定完整 `(R,S,B)`、报告与委派结果指纹和 runtime 检查，任一绑定项变化都会使旧结论失效
 
 ## When to Use
 
@@ -124,7 +122,7 @@ metadata:
 
 ### 7. 给出评审结论
 
-先确认评审执行状态为 `valid`。若独立 reviewer 无法启动、超时或返回无效结果，可在相同冻结输入上换一个新 reviewer 重试一次；再次失败时返回 `formal_reviewer_unavailable`，不生成领域结论。有效 reviewer 给出“不通过”类结论属于正常评审结果，不得更换 reviewer 刷取通过。
+先确认评审执行状态为 `valid`；执行失败的一次重试与 `formal_reviewer_unavailable` 规则见委派契约 §3，有效 reviewer 的否决属于正常结果。
 
 结论只能是以下之一：
 
@@ -138,7 +136,7 @@ metadata:
 
 严重度决定能否通过，根因决定路由：当前方向内可修复的问题使用“修改后复审”；核心 `DEC-*`、系统边界或技术基础不成立时使用“退回重设计”；关键输入或证据不足时使用“材料不足”。不得仅根据 Blocker 数量机械选择结论。
 
-风险授权是新的评审输入。获得授权后不得机械改写旧报告、结果或审批记录；编排器必须按委派契约创建新 `task_id` / `round`，保持同一 `(R,S,B)` 并连同授权记录重新派发独立 reviewer，由新一轮决定是否形成 `有条件通过`。
+风险授权是新的评审输入：编排器按委派契约 §3 新建 `task_id` / `round`，保持同一 `(R,S,B)` 并连同授权记录重新派发独立 reviewer，由新一轮决定是否形成 `有条件通过`。
 
 ### 8. 收敛后续动作与复审范围
 

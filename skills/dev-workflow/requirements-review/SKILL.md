@@ -1,8 +1,8 @@
 ---
 name: requirements-review
-description: "评审已有产品或技术需求文档（PRD/需求单/接口需求），独立检查边界、异常、验收标准、风险和依赖是否完整。触发：评审需求文档、PRD 评审、规格评审等请求。"
+description: "评审已有产品或技术需求文档（PRD/需求单/接口需求），独立检查边界、异常、验收标准、风险和依赖是否完整。Use when 用户要求评审需求文档、PRD 评审、规格评审，或主流程需要在方案设计前形成稳定的需求身份 R。"
 metadata:
-  version: 1.6.0
+  version: 1.7.0
 ---
 
 # requirements-review
@@ -15,7 +15,13 @@ metadata:
 
 ## 默认产物目录
 
-正式评审每轮写入不可变目录 `/home/joney/docs/requirements-development/<requirement-name>/requirements-review/rounds/round-<N>/`，其中 `report.md` 使用 `references/report-template.md`，并由编排器同时保存 `delegation-result.json` 与 `approval-record.json`。顶层 `review.md` 只能作为当前轮展示或指针，不是审批事实源。只需对话结论时不创建文件，但仍须形成可引用、可计算指纹的等价消息记录。
+正式评审每轮写入 `/home/joney/docs/requirements-development/<requirement-name>/requirements-review/rounds/round-<N>/`，`report.md` 使用 `references/report-template.md`；轮次文件、不可覆盖、`review.md` 只是指针与 `approval-record-v1` 生成规则见委派契约 §5。只需对话结论时不创建文件，但仍须形成可引用、可计算指纹的等价消息记录。
+
+## When to Use
+
+适合：已有 PRD、需求单或接口需求文档，需要独立判断能否进入方案设计或验收；需求修订后复审。
+
+不适合：需求还没写出来、只有口头描述（转 `dev-clarify-task` 收敛）；要评审的是技术方案（转 `dev-review-solution`）或代码（转 `dev-review-change`）。
 
 ## 输入契约
 
@@ -56,18 +62,18 @@ metadata:
 
 ### 4. 给出唯一结论
 
-先确认评审执行状态为 `valid`。独立 reviewer 无法启动、超时或返回无效结果时，可在相同冻结输入上换一个新 reviewer 重试一次；再次失败则返回 `formal_reviewer_unavailable`，不生成领域结论。有效 reviewer 的“不通过”属于正常结果，不得更换 reviewer 刷取通过。
+先确认评审执行状态为 `valid`；执行失败的一次重试与 `formal_reviewer_unavailable` 规则见委派契约 §3，有效 reviewer 的“不通过”属于正常结果。
 
 - `通过`：Open Blocker/High/Medium 均为 0
 - `有条件通过`：没有 Open Blocker/High，剩余 Medium 均有匹配的用户风险授权
 - `不通过`：仍有必须修订的 Blocker/High，或未经授权的 Medium
 - `材料不足`：证据不足以判断
 
-风险授权是新的评审输入。获得授权后不得机械改写旧报告、结果或审批记录；编排器必须按委派契约创建新 `task_id` / `round`，把同一 `R` 与授权记录重新派发给独立 reviewer，由新一轮决定是否形成 `有条件通过`。
+风险授权是新的评审输入：编排器按委派契约 §3 新建 `task_id` / `round`，把同一 `R` 与授权记录重新派发独立 reviewer，由新一轮决定是否形成 `有条件通过`。
 
 ## 输出要求
 
-默认按“输入绑定 → 结论 → findings → 非规范性验收标准建议 → 风险与依赖 → 后续动作”输出。建议仅用于指出如何消除歧义，不会修改 `R`，也不能被当作新增需求或验收标准。若需求方采纳建议，应由需求方或可追踪 producer 写成新 `R`，再派发新的独立 reviewer。reviewer 始终只读；编排器校验后保存不可变轮次文件，计算报告和委派结果指纹，并生成 `approval-record-v1`。handoff 只引用该记录的 ref 与 fingerprint。
+默认按“输入绑定 → 结论 → findings → 非规范性验收标准建议 → 风险与依赖 → 后续动作”输出。建议仅用于指出如何消除歧义，不会修改 `R`，也不能被当作新增需求或验收标准。若需求方采纳建议，应由需求方或可追踪 producer 写成新 `R`，再派发新的独立 reviewer。编排器按委派契约 §5 落盘并生成 `approval-record-v1`；handoff 只引用其 ref 与 fingerprint。
 
 ## 交接
 

@@ -2,7 +2,7 @@
 name: dev-review-change
 description: Use when 代码改动已形成可评审结果，需要基于变更证据做代码评审，确认是否存在正确性、架构、安全或稳定性问题，并给出可执行后续动作。
 metadata:
-  version: 1.10.0
+  version: 1.10.1
 ---
 
 # dev-review-change
@@ -28,8 +28,7 @@ metadata:
 - `<requirement-name>` 使用简短、稳定、可读的需求名目录标识
 - 用户明确指定路径时，优先使用用户路径
 - 只需在对话中给出评审结论时，可不创建文件
-- 每轮目录不可覆盖，包含 `report.md`、`delegation-result.json` 和 `approval-record.json`；顶层 `review.md` 只能作为当前轮展示或指针
-- reviewer 始终只读；编排器在 stop 后附着 runtime 身份、计算报告/委派结果指纹并生成 `approval-record-v1`
+- 轮次文件、不可覆盖、`review.md` 只是指针、`approval-record-v1` 的生成与 reviewer 只读规则见委派契约 §5
 
 ## When to Use
 
@@ -99,7 +98,7 @@ metadata:
 
 ### 5. 输出评审结论
 
-先确认评审执行状态为 `valid`。独立 reviewer 无法启动、超时或返回无效结果时，可在相同冻结输入上换一个新 reviewer 重试一次；再次失败则返回 `formal_reviewer_unavailable`，不生成领域结论。有效 reviewer 给出“修复后再评”等结论属于正常结果，不得更换 reviewer 刷取通过。
+先确认评审执行状态为 `valid`；执行失败的一次重试与 `formal_reviewer_unavailable` 规则见委派契约 §3，有效 reviewer 的“修复后再评”属于正常结果。
 
 最终明确：
 - 唯一结论：`可继续推进` / `修复后再评` / `带风险接受` / `证据不足`
@@ -114,7 +113,7 @@ metadata:
 
 默认按“结论 → 高/中 findings → 低严重度建议 → 验证与证据 → 后续动作”输出。每个 finding 使用 `ID / 指纹 / 根因类型 / 状态 / 问题 / 证据 / 影响 / 建议 / 关闭条件`；正式落盘时使用 `references/review-template.md`。
 
-用户风险授权不是编排器修改状态或结论的许可。获得授权后，编排器必须保持同一组冻结 `(G, change_revision)`，连同新增授权记录重新派发独立 reviewer，由其核对绑定和条件后决定是否标记 `Accepted` 并给出 `带风险接受`；编排器不得机械改写原结论。
+风险授权是新的评审输入：编排器按委派契约 §3 保持同一组冻结 `(G, change_revision)`，连同授权记录重新派发独立 reviewer，由其决定是否标记 `Accepted` 并给出 `带风险接受`。
 
 ### 6. 按根因路由最早失效阶段
 

@@ -2,7 +2,7 @@
 name: review-middleware-reliability
 description: Use when `dev-review-change` 或 `dev-review-solution` 已启动，且变更或方案涉及 Redis、MQ、任务调度或存在超时、重试、幂等、降级等可靠性风险，需要补查中间件与外部依赖行为时。
 metadata:
-  version: 1.1.0
+  version: 1.2.0
 ---
 
 # review-middleware-reliability
@@ -35,7 +35,7 @@ metadata:
 - MQ：生产投递、消费确认、重复消息、死信与重试语义
 - 超时与重试：是否有边界，是否会放大故障
 - 幂等与降级：失败重放是否安全，依赖异常时如何退化
-- 可观测性：关键入口、失败路径、重试和丢弃是否可见
+- 可观测性：关键入口、失败路径、重试和丢弃是否可见；新增重试、队列或外部调用却没有新增日志或指标是红旗；失败日志带异常对象与关联 ID，指标标签不用用户 ID、URL 这类高基数值
 
 ## 使用原则
 

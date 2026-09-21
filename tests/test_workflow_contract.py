@@ -219,7 +219,7 @@ class WorkflowContractTest(unittest.TestCase):
             "readability-practices-assessment.md",
         ):
             self.assertTrue(
-                (skill_dir / "references/design-basis" / basis).is_file()
+                (REPO / "docs/design-basis" / basis).is_file()
             )
 
         self.assertIn("只选择一个主 profile", routing)

@@ -94,4 +94,4 @@ profile 和横切矩阵负责提示"还要考虑什么"，正文仍按技术机�
 
 本规则综合借鉴 [Rust RFC 的 Guide/Reference 分层](https://github.com/rust-lang/rfcs/blob/master/0000-template.md)、[Swift Evolution 的摘要限长与分工](https://github.com/swiftlang/swift-evolution/blob/main/proposal-templates/0000-swift-template.md)、[Kubernetes KEP 的元数据剥离与渐进展开](https://github.com/kubernetes/enhancements/blob/master/keps/NNNN-kep-template/README.md?plain=1)、[Google 设计文档实践](https://www.industrialempathy.com/posts/design-docs-at-google/)、[Microsoft Code-With Engineering Playbook 的设计评审](https://microsoft.github.io/code-with-engineering-playbook/design/design-reviews/)、[GitHub Docs style guide](https://github.com/github/docs/blob/main/content/contributing/style-guide-and-content-model/style-guide.md)，以及 2026-09 对 4 份实际方案的可读性统计。
 
-维护或重新评估本规则时再读 `design-basis/readability-practices-assessment.md`；生成普通业务方案时不要加载该长文。
+维护或重新评估本规则时再读仓库 `docs/design-basis/readability-practices-assessment.md`；生成普通业务方案时不要加载该长文。

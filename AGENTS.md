@@ -27,7 +27,8 @@ agent-tools/
 ├── bin/                 # with-env、toolchain_audit.py（双端只读盘点）、skill_routing_eval.py / skill_behavior_eval.py（skill 评测）
 ├── env/                 # 公共凭证 credentials.env（gitignore）与模板 credentials.env.example
 ├── evals/               # skill 评测：cases/<skill>.json 触发/路由用例与行为压力用例（README 说明三层）
-├── tests/               # 仓库级测试：install.py、toolchain_audit、dev-workflow 契约一致性、skill 路由评测
+├── tests/               # 仓库级测试：install.py、toolchain_audit、dev-workflow 契约一致性、skill 结构 lint 与路由评测
+├── docs/                # 维护用长文（design-basis 三份评估与旧模板），不随 skill 链接到客户端
 ├── install.py           # 符号链接安装脚本（claude + codex 双目标）
 └── AGENTS.md            # 本文件（主文档）
 ```
@@ -59,7 +60,7 @@ python3 install.py --with-subagents --uninstall
 测试只用标准库 `unittest` 和 Node 内置 `node:test`；不依赖 pytest（当前 Python 环境也未安装），仓库没有统一的 lint 配置。
 
 ```bash
-python3 -m unittest discover -s tests                    # 仓库级：install.py、bin/toolchain_audit.py、dev-workflow 契约一致性、skill 路由评测
+python3 -m unittest discover -s tests                    # 仓库级：install.py、bin/toolchain_audit.py、dev-workflow 契约一致性、skill 结构 lint（description 含 Use when、引用与绝对路径存在、改内容必 bump version）、skill 路由评测
 python3 bin/skill_routing_eval.py [--probe "一句话"]        # skill 触发/路由评测报告；行为评测见 evals/README.md（花 token，不进单测）
 python3 -m unittest discover -s hooks/tests              # SubagentStop 结果守卫
 python3 -m unittest discover -s mcp/devtools-mcp/tests   # devtools_mcp（测试自行把包目录加入 sys.path）
@@ -111,7 +112,7 @@ python3 -m unittest discover -s skills/lexin/get-browser-session/tests -p 'test_
 
 ## SKILL.md 约定
 
-frontmatter 必须包含 `name` 和 `description`，缺一可能导致 skill 不被发现。需要记录版本时，放在系统校验器兼容的 `metadata.version` 中：
+frontmatter 必须包含 `name` 和 `description`，缺一可能导致 skill 不被发现；`description` 写“做什么。Use when 触发条件”，不超过 1024 字符（`tests/test_skill_lint.py` 校验）。需要记录版本时，放在系统校验器兼容的 `metadata.version` 中：
 
 ```yaml
 ---

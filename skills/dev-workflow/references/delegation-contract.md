@@ -50,7 +50,7 @@
 
 spawn/stop 后，编排器另外生成可信运行记录，至少包含：派发信封、实际 `reviewer_agent_ref`、实际角色、sandbox、有效工具/MCP surface、写入证明的方法与证据引用、原始 `delegation-result-v1` 及其指纹和 `structure_check`。只有身份、权限、写入、输入和结果结构全部通过，领域结论才有效。
 
-有效的否决结论是正常评审结果，应回 producer 修订，不能更换 reviewer 刷取通过。编排器把 reviewer 的每条 finding 对照产物原文归入四类之一（按此优先级）：契约或输入误读（冻结输入不清导致，先补输入再复审）、成立需修（回 producer）、成立但接受取舍（显式记录并按风险授权流程处理）、噪音（reviewer 缺少上下文，记下并把该上下文补进下一轮信封）。reviewer 的输出是数据不是裁决，编排器不得不读原文就照单接受，也不得因“它是独立的”就放弃归类。执行失败是否可重试以“已知信任边界”的恢复性判定为准；环境级能力缺口直接阻塞，只有可恢复的单次执行失败可在相同冻结输入上换新 reviewer 重试一次。
+有效的否决结论是正常评审结果，应回 producer 修订，不能更换 reviewer 刷取通过。编排器把 reviewer 的每条 finding 对照产物原文归入四类之一（按此优先级）：契约或输入误读（冻结输入不清导致，先补输入再复审）、成立需修（回 producer）、成立但接受取舍（显式记录并按风险授权流程处理）、噪音（reviewer 缺少上下文，记下并把该上下文补进下一轮信封）。reviewer 的输出是数据不是裁决，编排器不得不读原文就照单接受，也不得因“它是独立的”就放弃归类。执行失败是否可重试以“已知信任边界”的恢复性判定为准；环境级能力缺口直接阻塞，只有可恢复的单次执行失败可在相同冻结输入上换新 reviewer 重试一次；再次失败时本轮执行状态记为 `formal_reviewer_unavailable`，不生成领域结论。各评审 skill 的“先确认执行状态为 `valid`”即指本节规则。
 
 用户对 finding 作出的风险授权属于新增冻结输入，不是编排器改写旧结论的许可。旧 `report.md`、`delegation-result.json` 和 `approval-record.json` 均不可修改；编排器必须生成新的 `task_id` 和 `round`，把原冻结对象与授权记录一并派发给独立 reviewer，由新一轮 reviewer 判断是否满足 `Accepted` 或有条件通过。没有新一轮有效结果时，旧结论保持不变。
 
@@ -86,7 +86,7 @@ Hook 只校验这段结果的结构和枚举，包括上述 blocked 例外；它
 
 reviewer 只产出评审正文和 `delegation-result-v1`。编排器校验完成后，按 `artifact-identity.md` 生成 `approval-record-v1`，并把 runtime 身份与检查结果可信附着。
 
-每轮保存到不可变目录 `rounds/round-<N>/`：
+每轮保存到不可变目录 `rounds/round-<N>/`，目录不可覆盖；reviewer 始终只读，落盘、指纹计算与 runtime 身份附着由编排器在 stop 后完成：
 
 - `report.md`：本轮评审正文；计算并记录精确指纹。
 - `delegation-result.json`：原始结构化结果；计算并记录精确指纹。

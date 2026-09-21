@@ -1,8 +1,8 @@
 ---
 name: convert-epub-to-markdown
-description: 将本地 EPUB 电子书转换为适合阅读、检索和文档问答的 Markdown，保留原件、章节和图片并校验正文。用于“EPUB 转 MD”“把电子书提供给 ChatGPT 读取”等请求；不用于 PDF 转换、OCR 或 DRM 解密。
+description: 将本地 EPUB 电子书转换为适合阅读、检索和文档问答的 Markdown，保留原件、章节和图片并校验正文。Use when 用户要求“EPUB 转 MD”“把电子书提供给 ChatGPT 读取”；不用于 PDF 转换、OCR 或 DRM 解密。
 metadata:
-  version: 1.0.0
+  version: 1.0.1
 ---
 
 # EPUB 转 Markdown

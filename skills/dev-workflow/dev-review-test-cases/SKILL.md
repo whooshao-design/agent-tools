@@ -2,7 +2,7 @@
 name: dev-review-test-cases
 description: Use when 已有版本化测试清单，需要独立复核测试清单（检查漏项、错项、不可执行项）：由非清单产出者复核需求、验收标准、已审批方案与检查项的三向追踪和风险覆盖，并形成绑定具体产物版本与代码基线的编码准入结论。
 metadata:
-  version: 1.9.1
+  version: 1.10.0
 ---
 
 # dev-review-test-cases
@@ -17,9 +17,14 @@ metadata:
 
 正式评审每轮写入 `/home/joney/docs/requirements-development/<requirement-name>/test-cases-review/rounds/round-<N>/`。
 
-- 每轮目录不可覆盖，包含 `report.md`、`delegation-result.json` 和 `approval-record.json`；顶层 `review.md` 只能作为当前轮展示或指针
-- `approval-record-v1` 必须按 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/artifact-identity.md` 绑定完整 `(R,S,C,B)`、方案审批、报告/委派结果指纹和 runtime 检查；该审批有效后才由编排器构造 `T/G`，任一绑定项变化都会使原结论失效
+- 轮次文件、不可覆盖、`review.md` 只是指针与 reviewer 只读规则见委派契约 §5；本阶段 `approval-record-v1` 按 `artifact-identity.md` 绑定完整 `(R,S,C,B)` 与方案审批，该审批有效后才由编排器构造 `T/G`，任一绑定项变化都会使原结论失效
 - 只需对话结论时不创建文件，但仍按相同字段声明评审对象
+
+## When to Use
+
+适合：已有版本化测试清单 `C`，需要由非清单产出者在编码前独立复核；清单修订后需要定点复审；`dev-auto-loop` 进入测试清单准备段。
+
+不适合：清单尚未编写（转 `dev-derive-test-cases`）；要执行测试而不是复核清单（转 `dev-verify-change`）；方案尚未通过评审（先回 `dev-review-solution`）。
 
 ## 输入契约
 
@@ -70,7 +75,7 @@ metadata:
 
 ### 5. 给出唯一结论
 
-先确认评审执行状态为 `valid`。独立 reviewer 无法启动、超时或返回无效结果时，可在相同冻结输入上换一个新 reviewer 重试一次；再次失败则返回 `formal_reviewer_unavailable`，不生成领域结论。有效 reviewer 给出不通过结论属于正常结果，不得更换 reviewer 刷取通过。
+先确认评审执行状态为 `valid`；执行失败的一次重试与 `formal_reviewer_unavailable` 规则见委派契约 §3，有效 reviewer 的否决属于正常结果。
 
 - `通过`：绑定信息完整，且 Open Blocker/High/Medium 均为 0；Open Low 必须显式保留后续动作
 - `修改后复审`：存在需要修正的清单问题，且没有未关闭方案缺口

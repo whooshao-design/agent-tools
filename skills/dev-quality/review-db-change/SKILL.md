@@ -2,7 +2,7 @@
 name: review-db-change
 description: Use when `dev-review-change` 或 `dev-review-solution` 已启动，且评审涉及 SQL、DDL、索引、事务边界、数据兼容性或发布顺序，需要补做数据库风险专项判断时。
 metadata:
-  version: 1.1.0
+  version: 1.2.0
 ---
 
 # review-db-change
@@ -33,6 +33,7 @@ metadata:
 重点检查：
 - SQL 正确性：条件、分页、排序、更新范围是否正确
 - DDL 兼容性：新增、删除、改类型、默认值、可空性是否安全
+- 结构变更节奏：改名、删列、改类型不原地做，按 expand → backfill → contract 分阶段，每一步新旧代码都能跑；drop/rename 在无代码引用后单独发布；每个 migration 有跑过的回滚路径，backfill 分批限流
 - 索引影响：是否命中高频条件，是否引入锁表或慢查询风险
 - 事务边界：是否过大、是否跨不该放进事务的外部操作
 - 发布顺序：DDL、代码、回滚和数据迁移步骤是否自洽

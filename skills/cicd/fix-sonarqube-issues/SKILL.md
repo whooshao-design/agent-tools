@@ -1,8 +1,8 @@
 ---
 name: fix-sonarqube-issues
-description: 评估并修复 SonarQube 新代码周期的 BLOCKER/CRITICAL 问题。按规则与代码证据区分真实问题、误报和无法确认的风险，修复后执行最小验证。只要求评估时不改代码。
+description: 评估并修复 SonarQube 新代码周期的 BLOCKER/CRITICAL 问题。Use when 用户要求看 SonarQube 质量门禁、评估或修复 Sonar 问题；按规则与代码证据区分真实问题、误报和无法确认的风险，修复后执行最小验证。只要求评估时不改代码。
 metadata:
-  version: 1.2.0
+  version: 1.2.1
 ---
 
 # fix-sonarqube-issues
