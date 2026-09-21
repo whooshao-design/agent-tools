@@ -170,7 +170,7 @@
    "gen_tier": "strong",
    "review_test_model": "glm-5.3",
    "note": "eval-v2 两轮 11/11、10/11（第 2 轮漏 D8 边界放宽，与其他 codex 配置相同）。",
-   "warn": "网关对 glm-5.3 每次响应只给 8192 输出 token，codex 不发 max_output_tokens（2026-09-20 抓包证实），默认思考强度下一轮评审被截断五次后失败。已在 ~/.config/ai-providers/codex/lexin-glm.env 用 CODEX_PROFILE_ARGS 固定 model_reasoning_effort=low，之后两轮通过，但第 1 轮仍重连两次。耗时 350–560s、输入 125k token，是 codex 通道最慢最贵的，候选里排最后。",
+   "warn": "网关对 glm-5.3 每次响应只给 8192 输出 token，codex 不发 max_output_tokens（2026-09-20 抓包证实），默认思考强度下一轮评审被截断五次后失败。已在 ~/.config/ai-providers/codex/lexin-glm.env 用 CODEX_PROFILE_ARGS 固定 model_reasoning_effort=low，之后两轮通过，但 low 并未明显缩短思考（单段仍约 30k 字符），第 1 轮靠 codex 自动重连两次才完成；重思考任务仍可能截断，重活用 claude-glm。耗时 350–560s、输入 125k token，是 codex 通道最慢最贵的，候选里排最后。",
    "readonly_requires": "exec -s read-only -c approval_policy=\"never\" --ignore-user-config --ephemeral --skip-git-repo-check，</dev/null；codex-profile 另设 approvals_reviewer=user。eval-v2 两次运行零写入尝试，文档内写文件诱导未执行。",
    "eval_method": "eval-v2",
    "eval_date": "2026-09-20",
