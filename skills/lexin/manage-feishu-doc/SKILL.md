@@ -1,8 +1,8 @@
 ---
 name: manage-feishu-doc
-description: 经飞书官方 lark-cli 读取、发布、修改并校验 lexin 飞书云文档。Use when 用户提供 lexin.feishu.cn 的 docx、wiki 或 drive/folder 链接，要求读取飞书文档（含 mermaid 小组件与画板源码）、把本地 Markdown（技术方案、操作手册、资料文档）新建发布或覆盖到飞书、在飞书文档里放 mermaid 图、同步表格数据、改写段落或补页内跳转链接、更新托管 JSON 章节、检查飞书登录与权限，或在缺权限时申请准确 scope。
+description: 经飞书官方 lark-cli 读取、发布、修改并校验 lexin 飞书云文档。Use when 用户提供 lexin.feishu.cn 的 docx、wiki 或 drive/folder 链接，要求读取飞书文档（含 mermaid 小组件与画板源码）、把本地 Markdown（技术方案、操作手册、资料文档）新建发布或覆盖到飞书、在飞书文档里放 mermaid 图、同步表格数据、改写段落或补页内跳转链接、更新托管 JSON 章节、检查飞书登录与权限、在缺权限时申请准确 scope，或列出需要删除的飞书文档交给用户手动删除。
 metadata:
-  version: 2.0.0
+  version: 2.1.0
 ---
 
 # Manage Feishu Doc
@@ -13,7 +13,8 @@ metadata:
 
 - 不经 Linux 浏览器访问飞书，组织设备策略会拦截。
 - 不治理飞书消息、日历、多维表格；不把 `ledocs.lexincloud.com` 链接当成飞书 token。
-- 飞书上的写入对他人可见：发布、覆盖、改表、改文字都要用户明确要求。探针、回归测试和任何试写只落测试目录：`env/credentials.env` 的 `FEISHU_TEST_FOLDER`（`bin/with-env` 载入），不要在正式文档上试错。
+- 飞书上的写入对他人可见：发布、覆盖、改表、改文字都要用户明确要求。
+- 不删除飞书文档，也不申请删除权限（`space:document:delete`、`drive:drive`）。需要删除时用 `cleanup-list` 列出文档名、链接和所在目录，交给用户在飞书里手动删。探针、回归测试和任何试写只落测试目录：`env/credentials.env` 的 `FEISHU_TEST_FOLDER`（`bin/with-env` 载入），不要在正式文档上试错。
 
 脚本：`S=/home/joney/projects/ai/agent-tools/skills/lexin/manage-feishu-doc/scripts/feishu_doc.mjs`
 
@@ -36,6 +37,7 @@ node $S auth-check --operation=<read|write-blocks|write-json|publish|create-doc>
 | 把数据源同步进已有表格 | `table-read`、`table-sync` | 本文「表格」 |
 | 改段落文字、样式或补标题跳转链接 | `list-blocks --full`、`update-text`、`link-plan` | 本文「元素级编辑」 |
 | 把 JSON 写进托管章节 | `write-json`、`inspect-sections` | 本文「托管章节」 |
+| 清理测试文档或废弃的发布 | `cleanup-list` | 本文「删除文档」 |
 | 本脚本没包装的接口 | `call --method=<M> --path=/open-apis/...` | `references/api-facts.md` |
 
 接口行为、上限和踩过的坑都在 `references/api-facts.md`，动手写之前遇到不确定的行为先查它。
@@ -82,6 +84,19 @@ node $S write-json --target='<链接>' --file=/absolute/path/data.json --section
 ```
 
 `upsert`（默认）先创建并按 SHA-256 校验新章节，再删除旧章节，失败时宁可留下重复章节也不先删旧数据；`append` 不覆盖已有同名章节。输入也可用 `--stdin`。
+
+## 删除文档
+
+本 skill 每次新建文档（`publish` 首次发布、`create-doc`）都会记进 `~/.local/share/agent-tools/feishu-created-docs.jsonl`。需要清理时：
+
+```bash
+node $S cleanup-list                                # 本 skill 建过的全部文档
+node $S cleanup-list --folder='<文件夹链接>'          # 只看某个目录，例如测试目录
+node $S cleanup-list --docs='<链接1>,<链接2>'         # 指定文档
+node $S cleanup-list --file=<md 绝对路径>            # 某个本地文件发布出去的文档
+```
+
+把输出里的 `checklist`（按目录分组的「文档名 — 链接」清单）原样发给用户，由用户在飞书里手动删除。用户删完再跑一次加 `--prune`：确认已删除的从记录里去掉；对应本地文件的 `<文件名>.feishu.json` 提醒用户一并删除，否则下次发布会报找不到文档。
 
 ## 完成标准
 

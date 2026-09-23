@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
 import { elementsText, listAllBlocks, listChildren } from "./blocks.mjs";
+import { recordCreated } from "./cleanup.mjs";
 import { MERMAID_PLACEHOLDER_PATTERN, preparePublishMarkdown } from "./markdown.mjs";
 
 export const MERMAID_WIDGET_TYPE = "blk_631fefbbae02400430b8f9f4";
@@ -260,6 +261,14 @@ export async function publishMarkdown(transport, options) {
     const created = await writeContent(transport, prepared, baseDir, ["+create", "--title", prepared.title, "--parent-token", target.token]);
     const documentToken = created.document?.document_id;
     if (!documentToken) fail("docs +create 没有返回 document_id", "LARK_API_FAILED", { response: created });
+    recordCreated({
+      doc_token: documentToken,
+      url: created.document.url,
+      title: prepared.title,
+      parent_token: target.token,
+      source: "publish",
+      file: mdPath,
+    });
     return finish(transport, {
       documentToken,
       prepared,

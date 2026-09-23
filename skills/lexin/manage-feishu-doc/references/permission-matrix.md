@@ -12,7 +12,7 @@
 | `create-doc` | `docx:document`、`offline_access` |
 | 任一操作的目标是 wiki 链接 | 另加 `wiki:wiki:readonly` |
 
-`auth:user.id:read` 可留在授权集合里，不是文档读写的业务权限。不要申请 `drive:drive:readonly` 这类云空间全量权限：范围过大，且应用没开通时会让整个授权失败（20027）。
+`auth:user.id:read` 可留在授权集合里，不是文档读写的业务权限。本 skill 刻意不申请删除权限（`space:document:delete`、`drive:drive`）和列目录权限（`space:document:retrieve`）：要删文档时用 `cleanup-list` 列出清单，由用户在飞书里手动删除。不要申请 `drive:drive:readonly` 这类云空间全量权限：范围过大，且应用没开通时会让整个授权失败（20027）。
 
 ## 登录流程
 

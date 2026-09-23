@@ -13,6 +13,10 @@ import {
   replaceDiagramPlaceholders,
   statePathFor,
 } from "../scripts/lib/publish.mjs";
+import { readRegistry } from "../scripts/lib/cleanup.mjs";
+
+// 发布会把新建的文档记进 $XDG_DATA_HOME 下的清单，测试一律写到临时目录
+process.env.XDG_DATA_HOME = mkdtempSync(join(tmpdir(), "feishu-xdg-"));
 
 const SAMPLE = "---\ntitle: 手册\n---\n# 手册\n\n## 步骤\n\n> [!NOTE]\n> 先登录\n\n```mermaid\nflowchart LR\n  A-->B\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |\n";
 const PUBLISHED_XML = '<title>手册</title><h2>步骤</h2><callout emoji="📝"><p>先登录</p></callout><readonly-block id="w1" type="isv"></readonly-block><table></table>';
@@ -97,6 +101,8 @@ test("first publish creates the doc from preprocessed Markdown, swaps the placeh
   assert.equal(state.revision, 5);
   assert.equal(state.parent_token, "FOLDER");
   assert.deepEqual(result.verification.mismatches, []);
+  const recorded = readRegistry().find((entry) => entry.file === file);
+  assert.deepEqual([recorded.doc_token, recorded.parent_token, recorded.source], ["D1", "FOLDER", "publish"]);
 });
 
 test("republishing requires an explicit mode and refuses documents handed over to Feishu", async () => {

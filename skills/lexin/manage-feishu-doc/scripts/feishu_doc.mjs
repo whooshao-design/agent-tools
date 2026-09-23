@@ -2,11 +2,12 @@
 // 飞书云文档读写：经官方 lark-cli（用户身份）调用开放平台，写后回读校验。
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { blockText, elementsText, listAllBlocks, listChildren, TEXT_CONTAINER_KEYS } from "./lib/blocks.mjs";
-import { MERMAID_WIDGET_TYPE, publishMarkdown } from "./lib/publish.mjs";
+import { buildCleanupList, cleanupChecklist, readRegistry, recordCreated, writeRegistry } from "./lib/cleanup.mjs";
+import { MERMAID_WIDGET_TYPE, publishMarkdown, readState, statePathFor } from "./lib/publish.mjs";
 import { createTransport, LARK_CLI, LarkCliError, runLarkCli } from "./lib/transport.mjs";
 
 export { blockText, listAllBlocks };
@@ -1006,6 +1007,7 @@ function usage() {
       "inspect-sections --target=<url> [--section=<id>]",
       "write-json --target=<url> --file=<path>|--stdin --section=<id> [--heading=<text>] [--mode=upsert|append]",
       "create-doc --target=<folder-url> --title=<title>",
+      "cleanup-list [--docs=<url,url>] [--file=<md>] [--folder=<folder-url>] [--prune] [--out=<path>]",
       "call --method=GET|POST|PATCH|PUT|DELETE --path=/open-apis/... [--params=<json>] [--file=<body.json>|--stdin] [--operation=read|write-blocks]  或  call --api=<已登记接口名> --file=<{path,params,data}>",
       "parse-target --target=<url-or-token>",
     ],
@@ -1016,6 +1018,7 @@ function usage() {
       "list-blocks --full 返回原始块（含 text_element_style）；--out 把原始块写入文件，只在 stdout 打印摘要。",
       "update-text 的计划是 [{block_id, elements}]，整块替换 elements；未变化的块跳过，每批 40 条，写后逐块回读校验。",
       "call 是逃生口，直接用 lark-cli 调任意开放平台接口（用户身份）。",
+      "cleanup-list 默认列出本 skill 建过的全部文档；本 skill 不申请删除权限，删除由用户在飞书里手动完成。",
     ],
   };
 }
@@ -1176,7 +1179,53 @@ async function main() {
     if (!(await ensureAuthorized("create-doc", null))) return;
     const created = await transport.call("docx.v1.document.create", { data: { folder_token: target.token, title: options.title } });
     const documentToken = created?.document?.document_id;
-    return printJson({ status: "ok", folderToken: target.token, documentToken, url: `https://lexin.feishu.cn/docx/${documentToken}` });
+    const url = `https://lexin.feishu.cn/docx/${documentToken}`;
+    recordCreated({ doc_token: documentToken, url, title: options.title, parent_token: target.token, source: "create-doc" });
+    return printJson({ status: "ok", folderToken: target.token, documentToken, url });
+  }
+
+  // 不申请删除权限：列出「文档名 + 链接 + 所在目录」交给用户手动删，删完用 --prune 核对并清理记录
+  if (command === "cleanup-list") {
+    if (!(await ensureAuthorized("read", null))) return;
+    const registry = readRegistry();
+    const byToken = new Map(registry.map((entry) => [entry.doc_token, entry]));
+    let candidates = [];
+    if (options.docs) {
+      for (const link of String(options.docs).split(",").map((item) => item.trim()).filter(Boolean)) {
+        const docTarget = requireDocumentTarget(parseTarget(link), command);
+        const { documentToken } = await resolveDocument(transport, docTarget);
+        candidates.push(byToken.get(documentToken) ?? { doc_token: documentToken });
+      }
+    } else if (options.file) {
+      const state = readState(statePathFor(options.file));
+      if (!state) fail(`${options.file} 没有发布记录（${statePathFor(options.file)}）`, "NO_PUBLISH_STATE");
+      candidates.push(byToken.get(state.doc_token) ?? { doc_token: state.doc_token, url: state.url, title: state.title, parent_token: state.parent_token, source: "publish" });
+    } else {
+      candidates = registry;
+      if (options.folder) {
+        const folder = parseTarget(options.folder);
+        if (folder.kind !== "folder") fail("--folder 必须是 /drive/folder/<token> 链接", "UNSUPPORTED_RESOURCE");
+        candidates = candidates.filter((entry) => entry.parent_token === folder.token);
+      }
+    }
+    const testFolder = process.env.FEISHU_TEST_FOLDER ? parseTarget(process.env.FEISHU_TEST_FOLDER).token : null;
+    const items = await buildCleanupList(transport, candidates, { testFolderToken: testFolder });
+    const deleted = new Set(items.filter((item) => item.status === "deleted").map((item) => item.docToken));
+    let pruned = 0;
+    if (options.prune && deleted.size > 0) {
+      const kept = registry.filter((entry) => !deleted.has(entry.doc_token));
+      pruned = registry.length - kept.length;
+      writeRegistry(kept);
+    }
+    // 已删文档如果是某个本地 md 发布的，它的状态文件也该删，否则下次发布会找不到文档
+    const staleStateFiles = [...deleted]
+      .map((token) => byToken.get(token)?.file)
+      .filter(Boolean)
+      .map((file) => statePathFor(file))
+      .filter((path) => existsSync(path));
+    const checklist = cleanupChecklist(items);
+    if (options.out) writeFileSync(options.out, `${checklist}\n`);
+    return printJson({ status: "ok", total: items.length, pending: items.length - deleted.size, deleted: deleted.size, pruned, staleStateFiles, items, checklist });
   }
 
   // 逃生口：本脚本没包装的接口直接透传给 lark-cli

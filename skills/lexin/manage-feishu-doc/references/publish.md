@@ -32,7 +32,7 @@ mermaid 在小组件里的写法：沿用本地稳定子集；quadrantChart、xy
 
 ## 状态文件与两种模式
 
-`<文件名>.feishu.json` 记录文档 token、链接、标题、`mode`、发布时的 revision 与正文哈希、最近一次备份。
+`<文件名>.feishu.json` 记录文档 token、链接、标题、`mode`、发布时的 revision 与正文哈希、最近一次备份。首次发布还会把文档记进 `~/.local/share/agent-tools/feishu-created-docs.jsonl`，以后要清理时由 `cleanup-list` 列给用户手动删除。
 
 - `mode: local-master`（默认）：以本地为准。再次发布目前只支持全量覆盖，增量更新在后续版本提供。
 - `mode: feishu-master`：定稿移交后以飞书为准，`publish` 拒绝覆盖，要改就直接在飞书上改（用户在客户端改，或用 `update-text`、`table-sync` 等局部命令）。用户说「这篇以后在飞书上维护」时，把状态文件里的 `mode` 改成 `feishu-master`。
