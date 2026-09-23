@@ -600,9 +600,45 @@ async function runStreaming(command, args) {
   });
 }
 
+// whoami 只读本地缓存。access_token 过期时 lark-mcp 会在工具调用前用 refresh_token 续期
+// （dist/mcp-tool/mcp-tool.js:104），续期失败则报 "user_access_token is invalid or expired"。
+// 所以过期会话是否可用只能靠一次真实调用确认；非 wiki 目标用占位 token，正常会得到 131005 not found。
+const TOKEN_REJECTED = /user_access_token is invalid or expired/i;
+
+export async function probeSession(target, connect = connectLark) {
+  const mcp = await connect();
+  try {
+    const token = target?.kind === "wiki" ? target.token : "probe";
+    await mcp.call("wiki.v2.space.getNode", { params: { token }, useUAT: true });
+    return true;
+  } catch (error) {
+    return !TOKEN_REJECTED.test(String(error?.message ?? error));
+  } finally {
+    await mcp.close();
+  }
+}
+
+export async function checkAuthorization(operation, target, { whoami = runWhoami, probe = probeSession } = {}) {
+  const session = whoami();
+  const result = assessAuthorization(session, operation, target);
+  if (!result.ready || !session.expired) return { session, result };
+  if (await probe(target)) {
+    const refreshed = whoami();
+    return { session: refreshed, result: assessAuthorization(refreshed, operation, target) };
+  }
+  return {
+    session,
+    result: {
+      ...result,
+      ready: false,
+      failureClass: "TOKEN_EXPIRED",
+      nextAction: "access_token 已过期且 refresh_token 续期失败，运行 authorize 在浏览器重新授权",
+    },
+  };
+}
+
 async function authorize(operation, target) {
-  const session = runWhoami();
-  const current = assessAuthorization(session, operation, target);
+  const { session, result: current } = await checkAuthorization(operation, target);
   if (current.ready) return current;
   const desiredScopes = new Set(["auth:user.id:read", ...session.scopes, ...requiredScopes(operation, target)]);
   if (session.active) {
@@ -1319,7 +1355,7 @@ async function main() {
   if (command === "parse-target") return printJson({ status: "ok", target });
   if (command === "auth-check") {
     const operation = options.operation || "read";
-    const result = assessAuthorization(runWhoami(), operation, target);
+    const { result } = await checkAuthorization(operation, target);
     printJson({ status: result.ready ? "ready" : "permission_required", ...result });
     if (!result.ready) process.exitCode = 2;
     return;

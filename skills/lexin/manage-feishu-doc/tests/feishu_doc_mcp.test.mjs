@@ -13,6 +13,7 @@ import {
   updateTextElements,
   buildManagedBlocks,
   cellBlockTarget,
+  checkAuthorization,
   classifyFailure,
   deterministicClientToken,
   diffTable,
@@ -20,6 +21,7 @@ import {
   listTables,
   parseTarget,
   parseWhoamiOutput,
+  probeSession,
   readTable,
   requiredScopes,
   syncTable,
@@ -132,6 +134,49 @@ test("authorization preflight distinguishes missing and expired sessions", () =>
       { kind: "docx" },
     ).failureClass,
     "TOKEN_EXPIRED",
+  );
+});
+
+test("expired session with refresh token is verified by a real call, not trusted from cache", async () => {
+  const scopes = ["docx:document:readonly", "offline_access", "wiki:wiki:readonly"];
+  const expired = { active: true, expired: true, hasRefreshToken: true, scopes };
+  const fresh = { ...expired, expired: false };
+  const wiki = { kind: "wiki", token: "wikitoken" };
+
+  let calls = 0;
+  const refreshed = await checkAuthorization("read", wiki, {
+    whoami: () => (calls++ === 0 ? expired : fresh),
+    probe: async () => true,
+  });
+  assert.equal(refreshed.result.ready, true);
+  assert.equal(refreshed.session.expired, false);
+
+  const dead = await checkAuthorization("read", wiki, { whoami: () => expired, probe: async () => false });
+  assert.equal(dead.result.ready, false);
+  assert.equal(dead.result.failureClass, "TOKEN_EXPIRED");
+
+  let probed = false;
+  await checkAuthorization("read", wiki, { whoami: () => fresh, probe: async () => (probed = true) });
+  assert.equal(probed, false, "unexpired sessions must not spawn lark-mcp");
+});
+
+test("probeSession treats only lark-mcp's token rejection as dead", async () => {
+  const fake = (message) => async () => ({
+    async call(api, args) {
+      assert.equal(api, "wiki.v2.space.getNode");
+      fake.lastToken = args.params.token;
+      if (message) throw new Error(message);
+      return {};
+    },
+    close: async () => {},
+  });
+  assert.equal(await probeSession({ kind: "wiki", token: "w1" }, fake(null)), true);
+  assert.equal(fake.lastToken, "w1");
+  assert.equal(await probeSession({ kind: "docx", token: "d1" }, fake('{"code":131005,"msg":"not found"}')), true);
+  assert.equal(fake.lastToken, "probe");
+  assert.equal(
+    await probeSession(null, fake('{"errorMessage":"Current user_access_token is invalid or expired"}')),
+    false,
   );
 });
 

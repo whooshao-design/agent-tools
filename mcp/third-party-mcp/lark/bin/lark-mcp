@@ -99,7 +99,14 @@ case "$subcommand" in
         ;;
     mcp)
         # 默认只加载文档相关工具，并以本人身份访问（无需逐篇把文档授权给应用）
-        exec "$BIN" mcp "${common_args[@]}" \
+        # 必须带 --scope：上游按 options.scope 是否为空选择刷新端点（dist/auth/handler/handler.js:38），
+        # 为空时走 OIDC /authen/v1/oidc/refresh_access_token，而 login --scope 拿到的是
+        # v2 OAuth refresh_token，OIDC 端点以 20038 拒绝，access_token 过期后永远刷新失败。
+        mcp_args=()
+        if [[ -n "${LARK_SCOPE:-}" && "$*" != *"--scope"* ]]; then
+            mcp_args+=(--scope "$LARK_SCOPE")
+        fi
+        exec "$BIN" mcp "${common_args[@]}" "${mcp_args[@]}" \
             -t "${LARK_TOOLS:-preset.doc.default}" \
             --token-mode "${LARK_TOKEN_MODE:-user_access_token}" \
             -l "${LARK_LANGUAGE:-zh}" \
