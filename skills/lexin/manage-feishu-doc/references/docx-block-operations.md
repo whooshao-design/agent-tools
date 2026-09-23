@@ -75,10 +75,21 @@
 
 `docx.v1.document.convert` 支持 `content_type` 为 `markdown` 或 `html`，产出可直接喂给 descendant 接口，但有两处必须自己补：
 
-1. **表格块只给 `table.cells`，不给 `table.property`**，而建表必须有 `row_size`/`column_size`，否则 `1770001`。单元格 id 形如 `row<uuid>col<uuid>`，据此统计去重后的行列数补上。
+1. ~~表格块只给 `table.cells`，不给 `table.property`~~（已过时：2026-09-23 实测 convert 已返回 `table.property`，含 `row_size`/`column_size`/`column_width`/`merge_info`）。无论 property 是否齐全，convert 产出的表格都**不能**经 wrapper 用 descendant 写入，见下文「descendant 建表会被拒绝」。
 2. **块自带 `parent_id: ""`**，descendant 接口靠 `children` 表达父子关系，`parent_id` 需剥掉。用 `documentBlockChildren.create` 时还要额外剥掉 `block_id`。
 
 HTML 模式下**内联 `<svg>` 会被整个丢弃**（产出 0 块）；`<img src="data:...">` 和外链 `<img>` 会转成图片块占位，URL 放在 `block_id_to_image_urls`，但图片内容仍需自己上传绑定。
+
+## descendant 建表会被拒绝（改走 children.create）
+
+2026-09-23 实测：经本仓库 wrapper 用 `documentBlockDescendant.create` 写入带表格的子树必定返回 `1770001 invalid param`，与 property 是否带 `column_width`/`merge_info` 无关。原因是 lark-mcp 0.5.1 的 zod schema 里 descendants 元素没有 `table_cell` 字段，单元格块（`block_type=32`）的 `table_cell` 在发出前被剥掉。同一请求去掉表格后，有序列表（含代码子块）、正文、quote 都能正常写入。
+
+建表改走两步：
+
+1. `documentBlockChildren.create` 只传 `{block_type: 31, table: {property: {row_size, column_size, column_width?}}}`，单元格与格内空文本块由飞书自动生成；
+2. 再用 `update-text` 按 convert 结果逐格写 elements（保留行内代码与链接样式），写后用 `table-read` 逐格核对。
+
+表格前后的其他块仍可用 descendant，按"表前 → 建表 → 表后"三段依次插入。
 
 ## 插图：唯一可行路径
 
