@@ -5,9 +5,10 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
-import { elementsText, listAllBlocks, listChildren } from "./blocks.mjs";
+import { elementsText, listAllBlocks, listChildren, TEXT_CONTAINER_KEYS } from "./blocks.mjs";
 import { recordCreated } from "./cleanup.mjs";
 import { MERMAID_PLACEHOLDER_PATTERN, preparePublishMarkdown } from "./markdown.mjs";
+import { alignUnits, diffUnits, parseTopLevel, remoteChanges, splitUnits } from "./structure.mjs";
 
 export const MERMAID_WIDGET_TYPE = "blk_631fefbbae02400430b8f9f4";
 const STATE_SCHEMA = 1;
@@ -75,6 +76,28 @@ export function compareCounts(expected, counts, codeFallbacks = 0) {
   return mismatches;
 }
 
+// 用一段 Markdown 替换一串相邻的顶层块（ids 为空时只在 anchor 后插入，markdown 为空时只删除）。
+// docs_ai 选不中只读块（文本绘图等小组件，XML 里是 readonly-block）：选区含它时 block_replace 报 1002，
+// 但它能单独 block_delete、也能作插入锚点，所以这种区间改成分段删除后再在 anchor 后插入
+export async function replaceBlocks(transport, documentToken, { ids, readonly = new Set(), anchor, markdown, cwd }) {
+  const update = (args, input) =>
+    transport.shortcut(["docs", "+update", "--doc", documentToken, ...args, ...(input === undefined ? [] : ["--doc-format", "markdown", "--content", "-"])], { input, cwd });
+  const select = (run) => (run.length === 1 ? ["--block-id", run[0]] : ["--start-block-id", run[0], "--end-block-id", run.at(-1)]);
+  if (ids.length === 0) return [await update(["--command", "block_insert_after", "--block-id", anchor ?? "0"], markdown)];
+  if (!ids.some((id) => readonly.has(id))) {
+    return [await update(markdown === undefined ? ["--command", "block_delete", ...select(ids)] : ["--command", "block_replace", ...select(ids)], markdown)];
+  }
+  const runs = [];
+  for (const id of ids) {
+    if (readonly.has(id) || runs.length === 0 || readonly.has(runs.at(-1)[0])) runs.push([id]);
+    else runs.at(-1).push(id);
+  }
+  const results = [];
+  for (const run of runs.reverse()) results.push(await update(["--command", "block_delete", ...select(run)]));
+  if (markdown !== undefined) results.push(await update(["--command", "block_insert_after", "--block-id", anchor ?? "0"], markdown));
+  return results;
+}
+
 async function deleteBlock(transport, documentToken, blockId) {
   await transport.shortcut(["docs", "+update", "--doc", documentToken, "--command", "block_delete", "--block-id", blockId]);
 }
@@ -140,7 +163,7 @@ export async function replaceDiagramPlaceholders(transport, documentToken, diagr
   return results;
 }
 
-async function fetchContent(transport, documentToken, format, detail = "simple") {
+export async function fetchContent(transport, documentToken, format, detail = "simple") {
   const data = await transport.shortcut(["docs", "+fetch", "--doc", documentToken, "--doc-format", format, "--detail", detail]);
   return { content: data.document?.content ?? "", revision: data.document?.revision_id ?? null };
 }
@@ -150,11 +173,17 @@ async function snapshot(transport, documentToken) {
   return { revision, contentSha256: sha256(content) };
 }
 
-export async function verifyPublished(transport, documentToken, expected, diagramResults) {
-  const { content } = await fetchContent(transport, documentToken, "xml");
+function unitsOf(prepared) {
+  return splitUnits(prepared.body, { diagrams: prepared.diagrams, imageHashes: prepared.imageHashes ?? {} });
+}
+
+// 读回带块 id 的 XML：核对各类元素数量，并把本地单元对齐到飞书块 id，供下次增量发布
+export async function verifyPublished(transport, documentToken, prepared, diagramResults) {
+  const { content } = await fetchContent(transport, documentToken, "xml", "with-ids");
   const counts = countPublished(content);
   const codeFallbacks = diagramResults.filter((item) => item.status === "code").length;
-  return { counts, expected, mismatches: compareCounts(expected, counts, codeFallbacks) };
+  const alignment = alignUnits(unitsOf(prepared), parseTopLevel(content));
+  return { counts, expected: prepared.expected, mismatches: compareCounts(prepared.expected, counts, codeFallbacks), alignment };
 }
 
 // 只关心会被覆盖影响的评论：未解决、挂在某个块上（全文评论不受影响）
@@ -171,7 +200,11 @@ export async function listOpenComments(transport, documentToken) {
   } while (pageToken);
   return comments
     .filter((comment) => !comment.is_solved && !comment.is_whole)
-    .map((comment) => ({ id: comment.comment_id, quote: String(comment.quote ?? "").slice(0, 80) }));
+    .map((comment) => ({
+      id: comment.comment_id,
+      anchor: comment.extra?.content_anchor_id ?? null,
+      quote: String(comment.quote ?? "").slice(0, 80),
+    }));
 }
 
 async function backupDocument(transport, documentToken, revision, backupRoot, now) {
@@ -203,9 +236,10 @@ async function writeContent(transport, prepared, baseDir, args) {
 
 async function finish(transport, context) {
   const { documentToken, prepared, statePath, state, now, source, extra } = context;
-  const diagrams = await replaceDiagramPlaceholders(transport, documentToken, prepared.diagrams);
-  const verification = await verifyPublished(transport, documentToken, prepared.expected, diagrams);
+  const diagrams = await replaceDiagramPlaceholders(transport, documentToken, context.diagrams ?? prepared.diagrams);
+  const verification = await verifyPublished(transport, documentToken, prepared, diagrams);
   const after = await snapshot(transport, documentToken);
+  const { alignment, ...report } = verification;
   const next = {
     ...state,
     schema: STATE_SCHEMA,
@@ -218,19 +252,152 @@ async function finish(transport, context) {
     published_at: now().toISOString(),
     revision: after.revision,
     content_sha256: after.contentSha256,
+    // 对不上就不存映射，下次只能全量覆盖
+    units: alignment.ok ? alignment.units : null,
+    units_note: alignment.ok ? null : alignment.reason,
   };
   writeState(statePath, next);
-  const problems = verification.mismatches.length > 0 || (extra.serverWarnings ?? []).length > 0 ||
-    diagrams.some((item) => item.status !== "widget");
+  const problems = report.mismatches.length > 0 || (extra.serverWarnings ?? []).length > 0 ||
+    diagrams.some((item) => item.status !== "widget") || !alignment.ok;
   return {
     status: problems ? "published_with_issues" : "published",
     url: next.url,
     docToken: documentToken,
     statePath,
     diagrams,
-    verification,
+    verification: { ...report, incrementalReady: alignment.ok, alignmentNote: next.units_note },
     ...extra,
   };
+}
+
+const range = (start, end) => Array.from({ length: end - start }, (_, k) => start + k);
+
+// 段落、同级标题只改了字：原地改写，块 id 不变，挂在上面的评论保住
+function canInplace(oldUnit, newUnit) {
+  return Boolean(oldUnit.inplace && newUnit.inplace) && oldUnit.kind === newUnit.kind &&
+    JSON.stringify(oldUnit.tags) === JSON.stringify(newUnit.tags) && oldUnit.blockIds.length === 1;
+}
+
+// 一个间隙：先从两头配对能原地改写的单元，剩下的旧单元整段替换/删除，新单元插入
+export function planGap(gap, oldUnits, newUnits) {
+  const olds = range(gap.oldStart, gap.oldEnd);
+  const news = range(gap.newStart, gap.newEnd);
+  const pairs = [];
+  let anchor = gap.anchor;
+  while (olds.length && news.length && canInplace(oldUnits[olds[0]], newUnits[news[0]])) {
+    anchor = oldUnits[olds[0]].blockIds.at(-1);
+    pairs.push([olds.shift(), news.shift()]);
+  }
+  while (olds.length && news.length && canInplace(oldUnits[olds.at(-1)], newUnits[news.at(-1)])) {
+    pairs.push([olds.pop(), news.pop()]);
+  }
+  return { pairs, removed: olds, inserted: news, anchor };
+}
+
+async function convertElements(transport, markdown) {
+  const value = await transport.call("docx.v1.document.convert", { data: { content_type: "markdown", content: markdown } });
+  const blocks = value?.blocks ?? [];
+  const first = blocks.find((block) => block.block_id === value?.first_level_block_ids?.[0]) ?? blocks[0];
+  const key = TEXT_CONTAINER_KEYS.find((name) => Array.isArray(first?.[name]?.elements));
+  if (!key) throw new Error(`convert 没有返回可用的文本块：${markdown.slice(0, 40)}`);
+  return first[key].elements;
+}
+
+async function incrementalPublish(transport, context) {
+  const { documentToken, prepared, state, baseDir, dryRun, force, acceptCommentLoss, plan: basePlan } = context;
+  const oldUnits = state.units;
+  const newUnits = unitsOf(prepared);
+  const gaps = diffUnits(oldUnits, newUnits);
+  const steps = gaps.map((gap) => planGap(gap, oldUnits, newUnits));
+  const titleChanged = state.title !== prepared.title;
+  const summary = {
+    unchanged: oldUnits.length - gaps.reduce((sum, gap) => sum + gap.oldEnd - gap.oldStart, 0),
+    inPlace: steps.reduce((sum, step) => sum + step.pairs.length, 0),
+    replacedOrDeleted: steps.reduce((sum, step) => sum + step.removed.length, 0),
+    inserted: steps.reduce((sum, step) => sum + step.inserted.length, 0),
+    titleChanged,
+  };
+  const touchedShare = oldUnits.length ? (oldUnits.length - summary.unchanged) / oldUnits.length : 1;
+  summary.suggestion = touchedShare > 0.5 ? "改动超过原文一半，也可以改用 --overwrite 整篇覆盖" : null;
+  if (gaps.length === 0 && !titleChanged) {
+    return { status: "unchanged", action: "incremental", docToken: documentToken, summary, ...basePlan };
+  }
+
+  // 飞书端现状：要动的单元被人改过、或飞书上多了不属于任何单元的块，都先停下
+  const { content: xml } = await fetchContent(transport, documentToken, "xml", "with-ids");
+  const elements = parseTopLevel(xml);
+  const remote = remoteChanges(oldUnits, elements);
+  const touched = new Set(gaps.flatMap((gap) => range(gap.oldStart, gap.oldEnd)));
+  const conflicts = remote.changed.filter((index) => touched.has(index));
+  const preserved = remote.changed.filter((index) => !touched.has(index));
+  const removedIds = new Set(steps.flatMap((step) => step.removed.flatMap((index) => oldUnits[index].allIds)));
+  const comments = (await listOpenComments(transport, documentToken)).filter((comment) => removedIds.has(comment.anchor));
+  const blockers = [];
+  if (conflicts.length > 0 && !force) {
+    blockers.push({ check: "remote_changed", message: `要更新的 ${conflicts.length} 段在飞书上被人改过：先用 read 看差异并合回本地，确认要丢弃再加 --force`, units: conflicts.map((index) => oldUnits[index].kind) });
+  }
+  if (remote.inserted.length > 0 && !force) {
+    blockers.push({ check: "remote_inserted", message: `飞书上多了 ${remote.inserted.length} 个本地没有的块：先合回本地后用 --overwrite，或确认后加 --force（之后需要覆盖一次才能继续增量）`, samples: remote.inserted.slice(0, 5).map((element) => element.text.slice(0, 60)) });
+  }
+  if (comments.length > 0 && !acceptCommentLoss) {
+    blockers.push({ check: "open_comments", message: `有 ${comments.length} 条未解决评论挂在要替换或删除的段落上，替换后会失去挂靠位置：先处理，或确认后加 --accept-comment-loss`, comments: comments.slice(0, 10) });
+  }
+  const checks = { conflicts: conflicts.length, preservedRemoteEdits: preserved.length, remoteInserted: remote.inserted.length, commentsOnReplaced: comments.length };
+  if (blockers.length > 0 || dryRun) {
+    return { status: blockers.length > 0 ? "blocked" : "dry_run", action: "incremental", docToken: documentToken, summary, checks, blockers, ...basePlan };
+  }
+
+  const markdownOf = (indexes) => indexes.map((index) => newUnits[index].markdown).join("\n\n") + "\n";
+  const readonly = new Set(elements.filter((element) => element.tag === "readonly-block").flatMap((element) => element.topIds));
+  const serverWarnings = [];
+  // 原地改写先算好 elements（convert 失败的配对改走整段替换）
+  // 同一间隙里有一对转不出来，就整个间隙改成整段替换，免得替换范围吞掉旁边原地改写的块
+  const inplace = [];
+  for (const step of steps) {
+    const requests = [];
+    try {
+      for (const [oldIndex, newIndex] of step.pairs) {
+        requests.push({ block_id: oldUnits[oldIndex].blockIds[0], update_text_elements: { elements: await convertElements(transport, newUnits[newIndex].markdown) } });
+      }
+      inplace.push(...requests);
+    } catch {
+      for (const [oldIndex, newIndex] of step.pairs) {
+        step.removed.push(oldIndex);
+        step.inserted.push(newIndex);
+      }
+      step.pairs = [];
+      step.removed.sort((a, b) => a - b);
+      step.inserted.sort((a, b) => a - b);
+    }
+  }
+  // 结构改动从后往前做，锚点都是没动过的块，互不影响
+  for (const step of [...steps].reverse()) {
+    if (step.removed.length === 0 && step.inserted.length === 0) continue;
+    const results = await replaceBlocks(transport, documentToken, {
+      ids: step.removed.flatMap((index) => oldUnits[index].blockIds),
+      readonly,
+      anchor: step.anchor,
+      markdown: step.inserted.length ? markdownOf(step.inserted) : undefined,
+      cwd: baseDir,
+    });
+    serverWarnings.push(...results.flatMap((data) => data.warnings ?? []));
+  }
+  for (let start = 0; start < inplace.length; start += 50) {
+    await transport.call("docx.v1.documentBlock.batchUpdate", {
+      path: { document_id: documentToken },
+      params: { document_revision_id: -1, client_token: randomUUID() },
+      data: { requests: inplace.slice(start, start + 50) },
+    });
+  }
+  if (titleChanged) await updateTitle(transport, documentToken, prepared.title);
+  const written = new Set(steps.flatMap((step) => step.inserted));
+  const diagrams = prepared.diagrams.filter((diagram) =>
+    [...written].some((index) => newUnits[index].markdown.trim() === diagram.placeholder));
+  return finish(transport, {
+    ...context,
+    diagrams,
+    extra: { action: "incremental", summary, checks, serverWarnings, ...basePlan },
+  });
 }
 
 export async function publishMarkdown(transport, options) {
@@ -289,11 +456,16 @@ export async function publishMarkdown(transport, options) {
   }
   const documentToken = doc?.token ?? state.doc_token;
   if (!overwrite) {
+    if (state?.units) {
+      return incrementalPublish(transport, { documentToken, prepared, state, statePath, mdPath, source, now, baseDir, dryRun, force, acceptCommentLoss, plan });
+    }
     return {
       status: "needs_mode",
       action: "update",
       docToken: documentToken,
-      message: "这篇文档已经发布过。增量更新在后续版本提供；确认整篇覆盖请加 --overwrite，建议先加 --dry-run 看检查结果",
+      message: state
+        ? `这篇文档的发布记录没有逐段映射（${state.units_note ?? "旧版本发布"}），先用 --overwrite 覆盖一次，之后就能增量更新`
+        : "没有发布记录，覆盖已有文档请加 --overwrite（建议先 --dry-run 看检查结果）",
       ...plan,
     };
   }

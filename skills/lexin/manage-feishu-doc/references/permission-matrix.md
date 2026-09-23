@@ -8,7 +8,8 @@
 |---|---|
 | `read`（docx） | `docx:document:readonly`、`offline_access` |
 | `write-blocks`（table-sync、update-text）、`write-json` | `docx:document`、`docx:document:readonly`、`offline_access` |
-| `publish` | `docx:document`、`docx:document:create`、`docx:document:write_only`、`docx:document:readonly`、`docs:document.media:upload`、`docs:document.comment:read`、`board:whiteboard:node:create`、`offline_access` |
+| `publish` | `docx:document`、`docx:document.block:convert`、`docx:document:create`、`docx:document:write_only`、`docx:document:readonly`、`docs:document.media:upload`、`docs:document.comment:read`、`board:whiteboard:node:create`、`offline_access` |
+| `edit` | `docx:document`、`docx:document:write_only`、`docx:document:readonly`、`docs:document.media:upload`、`docs:document.comment:read`、`board:whiteboard:node:create`、`offline_access` |
 | `create-doc` | `docx:document`、`offline_access` |
 | 任一操作的目标是 wiki 链接 | 另加 `wiki:wiki:readonly` |
 
@@ -19,7 +20,7 @@
 1. 首次使用绑定应用：`mcp/third-party-mcp/lark/bin/lark-cli setup`（从 `env/credentials.env` 读 `LARK_APP_ID`/`LARK_APP_SECRET`，密钥经标准输入传入）。
 2. `node <脚本> auth-check --operation=<操作> [--target=<链接>]`：一次性返回缺失的 scope；refresh token 不到 24 小时过期时给出 `warning`。
 3. 需要登录或补 scope：`node <脚本> authorize --operation=<操作>`。它会把当前 scope 与目标操作所需 scope 合并后发起设备码登录，先打印 `verification_uri_complete`，然后阻塞到用户确认（最长约 10 分钟）。在 agent 里要**放到后台运行**，把链接原样发给用户，让用户在自己的浏览器或手机飞书里确认；确认后进程结束，再跑一次 `auth-check`。也可以 `authorize --no-wait` 先拿链接和 `device_code`，用户确认后 `authorize --device-code=<code>` 收尾。不在聊天里索要密码、验证码、Cookie 或 token。
-4. access token 2 小时，lark-cli 调用前自动续期；refresh token 7 天，超过 7 天没用要重新 `authorize`。
+4. access token 2 小时，lark-cli 调用前自动续期（过期后 `auth status` 显示 `needs_refresh`，仍然可用）；refresh token 7 天，超过 7 天没用要重新 `authorize`。
 
 ## 失败分类与处理
 

@@ -60,13 +60,21 @@ test("local images are rewritten to @./ paths inside the document directory, oth
   const exists = (path) => !path.endsWith("missing.png");
   const prepared = preparePublishMarkdown(
     "![a](img/a.png)\n![b](img/sub%20dir/b.png)\n![c](https://x.y/c.png)\n![d](../d.png)\n![e](img/missing.png)\n![f](data:image/png;base64,AA)\n",
-    { fileName: "x.md", baseDir: "/docs/manual", exists },
+    { fileName: "x.md", baseDir: "/docs/manual", exists, readFile: (path) => `bytes of ${path}` },
   );
   assert.match(prepared.body, /!\[a\]\(@\.\/img\/a\.png\)/);
   assert.match(prepared.body, /!\[b\]\(<@\.\/img\/sub dir\/b\.png>\)/);
   assert.match(prepared.body, /!\[c\]\(https:\/\/x\.y\/c\.png\)/);
   assert.equal(prepared.errors.length, 3);
   assert.equal(prepared.expected.images, 3);
+  assert.equal(Object.keys(prepared.imageHashes).length, 2, "local images carry a content hash for incremental publish");
+});
+
+test("Setext headings count as headings, and fragments can keep their leading H1", () => {
+  assert.equal(preparePublishMarkdown("# 标题\n\n小节\n---\n\n正文\n", { fileName: "x.md" }).expected.headings, 1);
+  const fragment = preparePublishMarkdown("# 片段标题\n\n正文\n", { fileName: "x.md", extractTitle: false });
+  assert.match(fragment.body, /^# 片段标题/);
+  assert.equal(fragment.expected.headings, 1);
 });
 
 test("tables are counted once per separator row", () => {

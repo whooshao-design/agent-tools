@@ -19,6 +19,9 @@
 - 正文里形如标签的文本会被当成未知标签删掉：`List<String>` 只剩 `List`（degrade 4010）；`Map<K, V>`、`a < b` 不受影响。HTML 注释被删并报 4010。
 - 页内锚点链接 `[x](#y)` 只剩文字。
 - `str_replace`、`block_replace`、`block_insert_after`、`block_delete`、`overwrite` 都可用，每次 revision +1；`warnings` 在 `ok=true` 时也可能有降级，必须检查。
+- **选区不能含文本绘图小组件**：`block_replace` 的范围里有小组件（XML 里的 `readonly-block`）时返回 `result: failed`、`degrade_code=1002 … non-addressable unit`，整次不写入。但 `block_delete --block-id <小组件>` 单独删它可以，`block_insert_after` 以它为锚点也可以。`publish` 增量和 `edit` 遇到这种区间改成「分段删除 → 在前一个块后插入」（2026-09-23 实测）。
+- 失败时 lark-cli 信封 `ok=false` 但**没有 `error` 字段**，原因只在 `data.warnings` 里；脚本已把它带进错误信息。
+- `str_replace` 替换**全部**匹配处；Markdown 模式下 `--pattern` 按导出的 Markdown（特殊字符已转义）匹配，只适合单行行内文字。`--content`、`--reference-map` 以 `@` 开头时 lark-cli 当成文件路径读取，内容一律走 `--content -` 加标准输入。
 - docs_ai 建不了文本绘图小组件；`publish` 先写占位段落 `[[feishu-mermaid:N]]`，再用块接口在同一位置建小组件并删掉占位（已验证）。
 
 ## 文本绘图小组件（add_ons，block_type 40）
@@ -53,7 +56,18 @@
 - 返回的 `blocks` 数组**不是文档顺序**，要按 `first_level_block_ids` 和各块 `children` 建树；块自带 `parent_id: ""` 要剥掉，写回前还要删只读的 `merge_info`、`comment_ids`；用 `children.create` 时再剥掉 `block_id`。
 - `> [!NOTE]` 变普通引用，mermaid 变未标语言的代码块；`- [ ]` 变待办、`---` 变分割线；`$E=mc^2$` 变行内公式，`$100` 保持原样。
 - HTML 模式下内联 `<svg>` 被整个丢弃；`<img src="data:...">` 和外链图片只转成图片占位，URL 在 `block_id_to_image_urls`，内容仍要自己上传绑定。
-- `publish` 用 docs_ai，不走 convert；convert 只在需要块级 JSON 时用。
+- `publish` 建文档和整段替换用 docs_ai；增量发布里只改了字的段落和标题用 convert（`docx:document.block:convert`）把一段 Markdown 转成行内元素，再 `update_text_elements` 原地改写，块 id 不变。
+
+## 块结构（docs_ai XML 与本地 Markdown 的对应）
+
+增量发布和 `edit` 按顶层元素定位，2026-09-23 用覆盖 16 种写法的探针文档核对过：
+
+- 列表的每一项是独立的顶层块：XML 里 `<ul>`/`<ol>` 只是分组，块 id 在各个 `<li>` 上；嵌套子项是父项的子块。松散列表（项之间有空行）和紧凑列表一样是一个 `<ul>`。
+- 待办 `- [ ]` 每一项各是一个 `<checkbox>` 顶层元素，与相邻的普通列表项分开。
+- 段落中间夹图片（`文字 ![](a.png) 文字`）会拆成 `<p>`、`<img>`、`<p>` 三个顶层块；独立一行的图片是一个 `<img>`。
+- Setext 标题（下一行 `---`）是标题，不是分割线；`<br>` 硬换行留在同一个 `<p>` 里。
+- 有序列表的起始编号不保留：`3.` 开头的列表发布后从 1 开始编号。
+- 文本绘图小组件在 docs_ai XML 里是 `<readonly-block type="isv">`，块 id 可用；`read --format=xml` 会把它补成 `<mermaid-widget id=…>`。
 
 ## 图片
 

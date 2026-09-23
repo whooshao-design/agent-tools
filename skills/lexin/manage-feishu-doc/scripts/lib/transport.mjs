@@ -123,7 +123,9 @@ export function classifyEnvelope(envelope) {
 
 function larkError(envelope) {
   const error = envelope?.error ?? {};
-  const message = [error.message, error.hint].filter(Boolean).join("；") || "lark-cli 调用失败";
+  // docs +update 失败时信封里没有 error，原因在 data.warnings（如 degrade_code=1002）
+  const failed = envelope?.data?.result === "failed" ? `docs +update 返回 failed：${(envelope.data.warnings ?? []).join("；") || "无说明"}` : null;
+  const message = [error.message, error.hint].filter(Boolean).join("；") || failed || "lark-cli 调用失败";
   return new LarkCliError(message, envelope);
 }
 
@@ -179,8 +181,13 @@ export function createTransport({
     return api(route[0], fillPath(route[1], path), { params, data });
   }
 
-  // docs / whiteboard 等快捷命令：返回信封的 data
+  // docs / whiteboard 等快捷命令：返回信封的 data。读取（+fetch/+export）不节流，写入与 api 写请求共用间隔
   async function shortcut(args, { input, cwd } = {}) {
+    if (!args.some((arg) => arg === "+fetch" || arg === "+export")) {
+      const wait = lastWrite + MIN_WRITE_INTERVAL_MS - now();
+      if (wait > 0) await sleep(wait);
+      lastWrite = now();
+    }
     return unwrap(run([...args, "--as", "user"], { input, cwd }));
   }
 

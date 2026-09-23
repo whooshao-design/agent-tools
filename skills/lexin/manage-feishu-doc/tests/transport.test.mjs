@@ -88,6 +88,13 @@ test("failed calls throw with the classified details and keep the log id", async
   });
 });
 
+test("a failed docs +update carries the docs_ai reason instead of a generic message", async () => {
+  const warning = "degrade_code=1002,msg=Invalid block range: the selection contains a non-addressable unit";
+  const { run } = recorder([{ ok: false, identity: "user", data: { result: "failed", warnings: [warning] } }]);
+  const transport = createTransport({ run, sleep: async () => {} });
+  await assert.rejects(transport.shortcut(["docs", "+update", "--doc", "D1"]), (error) => error.message.includes("degrade_code=1002"));
+});
+
 test("parseEnvelope tolerates event lines before the final JSON", () => {
   assert.deepEqual(parseEnvelope('{"ok":true,"data":{}}'), { ok: true, data: {} });
   assert.deepEqual(parseEnvelope("", 'noise\n{"ok":false,"error":{"code":1}}\n'), { ok: false, error: { code: 1 } });

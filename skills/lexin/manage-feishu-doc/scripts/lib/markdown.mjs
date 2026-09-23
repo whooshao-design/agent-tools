@@ -1,9 +1,13 @@
 // 发布前把本地 Markdown 整理成 docs_ai 能正确落块的形式。规则都来自 lexin 租户实测，
 // 见 references/publish.md 与 references/api-facts.md。
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { basename, isAbsolute, relative, resolve } from "node:path";
 
+import { MERMAID_PLACEHOLDER_PATTERN, splitUnits } from "./structure.mjs";
+
+export { MERMAID_PLACEHOLDER_PATTERN };
 export const MERMAID_PLACEHOLDER = (index) => `[[feishu-mermaid:${index}]]`;
-export const MERMAID_PLACEHOLDER_PATTERN = /^\[\[feishu-mermaid:(\d+)\]\]$/;
 
 // GitHub 提示块 → 高亮块。emoji 只用飞书表情枚举里有的（没有 ⚠️）
 export const ALERT_STYLES = Object.freeze({
@@ -144,7 +148,7 @@ function takeTitle(body, frontTitle, fileName) {
 }
 
 // 把 body 里的图片改成 lark-cli 能上传的 @./相对路径；只接受文档目录内的本地文件
-function rewriteImages(line, baseDir, exists, collect) {
+function rewriteImages(line, baseDir, exists, readFile, collect) {
   return line.replace(IMAGE, (whole, alt, rawTarget, title = "") => {
     const target = rawTarget.startsWith("<") ? rawTarget.slice(1, -1) : rawTarget;
     if (/^https?:\/\//i.test(target) || target.startsWith("@")) {
@@ -174,14 +178,21 @@ function rewriteImages(line, baseDir, exists, collect) {
     }
     collect.images.push({ source: target, remote: false, path: absolute });
     const ref = `@./${rel.split("\\").join("/")}`;
-    return `![${alt}](${/\s/.test(ref) ? `<${ref}>` : ref}${title})`;
+    const rewritten = `![${alt}](${/\s/.test(ref) ? `<${ref}>` : ref}${title})`;
+    // 增量发布按图片内容判断是否改动：路径不变但换了图也要重传
+    collect.imageHashes[rewritten] = createHash("sha256").update(readFile(absolute)).digest("hex");
+    return rewritten;
   });
 }
 
-export function preparePublishMarkdown(markdown, { fileName = "untitled.md", baseDir = ".", exists = () => true } = {}) {
+export function preparePublishMarkdown(
+  markdown,
+  { fileName = "untitled.md", baseDir = ".", exists = () => true, readFile = readFileSync, extractTitle = true } = {},
+) {
   const front = splitFrontmatter(markdown.replace(/\r\n/g, "\n"));
-  const { title, body } = takeTitle(front.body, front.title, fileName);
-  const collect = { images: [], errors: [], warnings: [] };
+  // 往已有文档插入片段时不提取标题，片段开头的 # 就是正文里的一级标题
+  const { title, body } = extractTitle ? takeTitle(front.body, front.title, fileName) : { title: front.title, body: front.body };
+  const collect = { images: [], errors: [], warnings: [], imageHashes: {} };
   const diagrams = [];
   const expected = { headings: 0, tables: 0, images: 0, callouts: 0, diagrams: 0 };
   const out = [];
@@ -260,7 +271,7 @@ export function preparePublishMarkdown(markdown, { fileName = "untitled.md", bas
     }
     anchorLinks += (line.match(/\]\(#[^)]+\)/g) ?? []).length;
 
-    line = rewriteImages(line, baseDir, exists, collect);
+    line = rewriteImages(line, baseDir, exists, readFile, collect);
     out.push(/<callout[\s>]/.test(line) ? line : escapeTagLikeText(line));
   }
 
@@ -270,12 +281,16 @@ export function preparePublishMarkdown(markdown, { fileName = "untitled.md", bas
   if (removedComments) collect.warnings.push(`去掉了 ${removedComments} 处 HTML 注释（飞书不保留注释）`);
   if (anchorLinks) collect.warnings.push(`${anchorLinks} 个页内锚点链接发布后只剩文字，后续用 link-plan 补成标题跳转`);
 
+  const finalBody = out.join("\n").replace(/\n{3,}/g, "\n\n").trim() + "\n";
+  // 标题数按切分器统计，Setext 写法（下一行是 === / ---）也算
+  expected.headings = splitUnits(finalBody, { diagrams }).filter((unit) => unit.kind === "heading").length;
   return {
     title,
-    body: out.join("\n").replace(/\n{3,}/g, "\n\n").trim() + "\n",
+    body: finalBody,
     diagrams,
     expected,
     images: collect.images,
+    imageHashes: collect.imageHashes,
     warnings: collect.warnings,
     errors: collect.errors,
   };

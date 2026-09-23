@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import { blockText, elementsText, listAllBlocks, listChildren, TEXT_CONTAINER_KEYS } from "./lib/blocks.mjs";
 import { buildCleanupList, cleanupChecklist, readRegistry, recordCreated, writeRegistry } from "./lib/cleanup.mjs";
+import { editDocument } from "./lib/edit.mjs";
 import { MERMAID_WIDGET_TYPE, publishMarkdown, readState, statePathFor } from "./lib/publish.mjs";
 import { createTransport, LARK_CLI, LarkCliError, runLarkCli } from "./lib/transport.mjs";
 
@@ -34,7 +35,18 @@ export const OPERATION_SCOPES = Object.freeze({
     "docs:document.comment:read",
     "docs:document.media:upload",
     "docx:document",
+    "docx:document.block:convert",
     "docx:document:create",
+    "docx:document:readonly",
+    "docx:document:write_only",
+    "offline_access",
+  ],
+  // 局部修改：docs_ai 插入/替换/删除 + 块接口放小组件 + 查评论
+  edit: [
+    "board:whiteboard:node:create",
+    "docs:document.comment:read",
+    "docs:document.media:upload",
+    "docx:document",
     "docx:document:readonly",
     "docx:document:write_only",
     "offline_access",
@@ -112,7 +124,8 @@ export function requiredScopes(operation, target = null) {
 // lark-cli auth status --json；token 不在输出里，只取状态、scope 和过期时间
 export function parseAuthStatus(status, now = Date.now()) {
   const user = status?.identities?.user ?? {};
-  if (user.status !== "ready") {
+  // needs_refresh：访问令牌已过期但刷新令牌有效，lark-cli 会在下一次用户身份调用时自动续期
+  if (!["ready", "needs_refresh"].includes(user.status)) {
     return { active: false, expired: false, scopes: [], hasRefreshToken: false, expiresAt: null, message: user.message ?? null };
   }
   const seconds = (value) => (value ? Math.floor(Date.parse(value) / 1000) : null);
@@ -994,10 +1007,14 @@ function printJson(value) {
 function usage() {
   return {
     usage: [
-      "auth-check --operation=read|write-blocks|write-json|publish|create-doc [--target=<url>]",
+      "auth-check --operation=read|write-blocks|write-json|publish|edit|create-doc [--target=<url>]",
       "authorize --operation=<operation> [--target=<url>] [--no-wait | --device-code=<code>]",
       "read --target=<url> [--format=markdown|xml|text] [--scope=full|outline|section|range|keyword] [--keyword=<k>] [--start-block-id=<id>] [--end-block-id=<id>] [--with-ids] [--out=<path>]",
       "publish --file=<md> [--target=<folder-or-wiki-url>] [--doc=<docx-url>] [--overwrite] [--dry-run] [--force] [--accept-comment-loss]",
+      "edit --target=<url> --op=insert-after --file=<md> (--after=<块id> | --after-heading=<标题> | --at=start|end) [--dry-run]",
+      "edit --target=<url> --op=replace|delete --block=<块id> [--end-block=<块id>] [--file=<md>] [--dry-run] [--allow-protected] [--accept-comment-loss]",
+      "edit --target=<url> --op=replace-section|delete-section --heading=<标题或块id> [--include-heading] [--file=<md>] [--dry-run] [--allow-protected] [--accept-comment-loss]",
+      "edit --target=<url> --op=replace-text --pattern=<原文> --content=<新文字> [--all] [--dry-run]",
       "outline --target=<url> [--heading=<text>]",
       "list-blocks --target=<url> [--type=<block_type>] [--full] [--out=<path>]",
       "table-read --target=<url> [--table=<block_id>|--table-index=<n>]",
@@ -1013,7 +1030,7 @@ function usage() {
     ],
     notes: [
       "read 默认输出 docs_ai 的 Markdown，文本绘图小组件会补成 ```mermaid 代码块；--format=text 是 rawContent 纯文本。",
-      "publish 首次发布要 --target 指定文件夹或知识库节点；再次发布目前只支持 --overwrite 全量覆盖，先 --dry-run 看检查结果。",
+      "publish 首次发布要 --target 指定文件夹或知识库节点；再次发布默认增量（只改变动的段落），整篇覆盖加 --overwrite；都可先 --dry-run 看计划和检查。",
       "table-sync 的输入是 {\"rows\": [[...]]} 或裸二维数组，含表头行；行数只增不减。",
       "list-blocks --full 返回原始块（含 text_element_style）；--out 把原始块写入文件，只在 stdout 打印摘要。",
       "update-text 的计划是 [{block_id, elements}]，整块替换 elements；未变化的块跳过，每批 40 条，写后逐块回读校验。",
@@ -1248,11 +1265,32 @@ async function main() {
       ? "write-json"
       : WRITE_BLOCK_COMMANDS.has(command)
         ? "write-blocks"
-        : null;
+        : command === "edit"
+          ? "edit"
+          : null;
   if (!operation) fail(`未知命令: ${command}`);
   if (!(await ensureAuthorized(operation, target))) return;
   const resolved = await resolveDocument(transport, target);
 
+  if (command === "edit") {
+    // 以本地为准的文档在飞书上直接改，下次增量发布会因「飞书上被改过」而停下
+    const origin = readRegistry().find((entry) => entry.doc_token === resolved.documentToken && entry.file);
+    const originState = origin ? readState(statePathFor(origin.file)) : null;
+    const result = await editDocument(transport, resolved.documentToken, {
+      ...options,
+      dryRun: Boolean(options["dry-run"]),
+      allowProtected: Boolean(options["allow-protected"]),
+      acceptCommentLoss: Boolean(options["accept-comment-loss"]),
+      all: Boolean(options.all),
+    });
+    const warning = originState?.mode === "local-master"
+      ? `这篇文档由本地文件 ${origin.file} 发布、以本地为准；在飞书上直接改会让它下次增量发布停下，建议改本地文件后 publish`
+      : undefined;
+    printJson({ ...resolved, ...result, ...(warning ? { warning } : {}) });
+    if (result.status === "blocked") process.exitCode = 2;
+    if (result.status === "updated_with_issues") process.exitCode = 3;
+    return;
+  }
   if (command === "read") {
     const result = await readDocument(transport, resolved.documentToken, options);
     if (options.out) {
@@ -1364,7 +1402,7 @@ async function main() {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   main().catch((error) => {
     const command = process.argv[2];
-    const operation = READ_COMMANDS.has(command) ? "read" : command === "publish" ? "publish" : "write-json";
+    const operation = READ_COMMANDS.has(command) ? "read" : ["publish", "edit"].includes(command) ? command : "write-json";
     const classified = error.details ?? classifyFailure(error, { requiredScopes: OPERATION_SCOPES[operation] ?? [] });
     printJson({ status: "error", code: error.code ?? classified.failureClass, message: error.message, ...classified });
     process.exitCode = 1;

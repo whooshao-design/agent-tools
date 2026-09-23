@@ -10,6 +10,7 @@ import {
   MERMAID_WIDGET_TYPE,
   publishMarkdown,
   readState,
+  replaceBlocks,
   replaceDiagramPlaceholders,
   statePathFor,
 } from "../scripts/lib/publish.mjs";
@@ -105,11 +106,17 @@ test("first publish creates the doc from preprocessed Markdown, swaps the placeh
   assert.deepEqual([recorded.doc_token, recorded.parent_token, recorded.source], ["D1", "FOLDER", "publish"]);
 });
 
-test("republishing requires an explicit mode and refuses documents handed over to Feishu", async () => {
+test("republishing an unchanged file is a no-op; old states without a block map need one overwrite", async () => {
   const { file, backupRoot } = workspace();
   await publishMarkdown(fakeFeishu().transport, { file, target: folder, backupRoot });
   const again = await publishMarkdown(fakeFeishu().transport, { file, backupRoot });
-  assert.equal(again.status, "needs_mode");
+  assert.equal(again.status, "unchanged");
+
+  const legacy = readState(statePathFor(file));
+  writeFileSync(statePathFor(file), JSON.stringify({ ...legacy, units: null, units_note: undefined }));
+  const withoutMap = await publishMarkdown(fakeFeishu().transport, { file, backupRoot });
+  assert.equal(withoutMap.status, "needs_mode");
+  assert.match(withoutMap.message, /--overwrite/);
 
   const state = readState(statePathFor(file));
   writeFileSync(statePathFor(file), JSON.stringify({ ...state, mode: "feishu-master" }));
@@ -188,4 +195,119 @@ test("published XML is counted and compared with what the Markdown promised", ()
   assert.deepEqual(compareCounts({ headings: 2, tables: 1, images: 0, callouts: 1, diagrams: 2 }, counts, 1), [
     { item: "headings", expected: 2, actual: 1 },
   ]);
+});
+
+// ---- 增量发布 ----
+
+const V1 = "# 手册\n\n段落一\n\n## 步骤\n\n段落二\n\n- a\n- b\n";
+const V2 = "# 手册\n\n段落一（改）\n\n## 步骤\n\n段落二\n\n- a\n- c\n\n段落三\n";
+const BEFORE = '<title id="t">手册</title><p id="p1">段落一</p><h2 id="h1">步骤</h2><p id="p2">段落二</p><ul><li id="l1">a</li><li id="l2">b</li></ul>';
+const AFTER = '<title id="t">手册</title><p id="p1">段落一（改）</p><h2 id="h1">步骤</h2><p id="p2">段落二</p><ul><li id="l3">a</li><li id="l4">c</li></ul><p id="p3">段落三</p>';
+
+// 一篇文档：+fetch 返回当前 XML；任何 +update 之后文档变成 AFTER
+function fakeDocument(initialXml, { comments = [] } = {}) {
+  const log = [];
+  let xml = initialXml;
+  const transport = {
+    async shortcut(args, options = {}) {
+      log.push({ shortcut: args.slice(0, 2).join(" "), args, input: options.input });
+      if (args[1] === "+create") return { document: { document_id: "D1", url: "https://lexin.feishu.cn/docx/D1", revision_id: 1 }, warnings: [] };
+      if (args[1] === "+fetch") {
+        const format = args[args.indexOf("--doc-format") + 1];
+        return { document: { content: format === "xml" ? xml : `md:${xml}`, revision_id: xml === initialXml ? 5 : 6 } };
+      }
+      if (args[1] === "+update") {
+        xml = AFTER;
+        return { result: "success", warnings: [] };
+      }
+      throw new Error(`unexpected shortcut ${args.join(" ")}`);
+    },
+    async call(name, args) {
+      log.push({ call: name, args });
+      if (name === "docx.v1.document.convert") {
+        return { first_level_block_ids: ["x"], blocks: [{ block_id: "x", block_type: 2, text: { elements: [{ text_run: { content: args.data.content } }] } }] };
+      }
+      if (name === "docx.v1.documentBlock.batchUpdate") return {};
+      if (name === "drive.v1.fileComment.list") return { items: comments, has_more: false };
+      if (name === "docx.v1.documentBlock.list") return { items: [] };
+      throw new Error(`unexpected call ${name}`);
+    },
+  };
+  return { transport, log };
+}
+
+async function publishedV1() {
+  const context = workspace(V1);
+  const first = await publishMarkdown(fakeDocument(BEFORE).transport, { file: context.file, target: folder, backupRoot: context.backupRoot });
+  assert.equal(first.verification.incrementalReady, true);
+  writeFileSync(context.file, V2);
+  return context;
+}
+
+test("incremental publish rewrites the edited paragraph in place, replaces the changed list and appends the new paragraph", async () => {
+  const { file, backupRoot } = await publishedV1();
+  const { transport, log } = fakeDocument(BEFORE);
+  const result = await publishMarkdown(transport, { file, backupRoot });
+  assert.equal(result.status, "published", JSON.stringify(result.verification));
+  assert.deepEqual(result.summary, { unchanged: 2, inPlace: 1, replacedOrDeleted: 1, inserted: 2, titleChanged: false, suggestion: null });
+  const inplace = log.find((entry) => entry.call === "docx.v1.documentBlock.batchUpdate");
+  assert.equal(inplace.args.data.requests[0].block_id, "p1");
+  const updates = log.filter((entry) => entry.shortcut === "docs +update");
+  assert.equal(updates.length, 1);
+  assert.deepEqual(updates[0].args.slice(4, 9), ["--command", "block_replace", "--start-block-id", "l1", "--end-block-id"]);
+  assert.equal(updates[0].args[9], "l2");
+  assert.equal(updates[0].input, "- a\n- c\n\n段落三\n");
+  const state = readState(statePathFor(file));
+  assert.deepEqual(state.units.at(-2).blockIds, ["l3", "l4"]);
+  assert.deepEqual(state.units.at(-1).blockIds, ["p3"]);
+});
+
+test("incremental publish stops when a paragraph it must change was edited in Feishu, keeps untouched remote edits", async () => {
+  const { file, backupRoot } = await publishedV1();
+  const conflict = await publishMarkdown(fakeDocument(BEFORE.replace("段落一", "段落一（飞书上改过）")).transport, { file, backupRoot });
+  assert.equal(conflict.status, "blocked");
+  assert.deepEqual(conflict.blockers.map((item) => item.check), ["remote_changed"]);
+
+  const elsewhere = await publishMarkdown(fakeDocument(BEFORE.replace("段落二", "段落二（飞书上改过）")).transport, { file, backupRoot, dryRun: true });
+  assert.equal(elsewhere.status, "dry_run");
+  assert.equal(elsewhere.checks.preservedRemoteEdits, 1);
+
+  const inserted = await publishMarkdown(fakeDocument(BEFORE.replace("</ul>", '</ul><p id="zz">飞书上新加的段落</p>')).transport, { file, backupRoot, dryRun: true });
+  assert.deepEqual(inserted.blockers.map((item) => item.check), ["remote_inserted"]);
+});
+
+test("incremental publish only blocks on comments anchored to blocks it will replace", async () => {
+  const { file, backupRoot } = await publishedV1();
+  const onParagraph = [{ comment_id: "c1", quote: "段落一", is_solved: false, is_whole: false, extra: { content_anchor_id: "p1" } }];
+  const kept = await publishMarkdown(fakeDocument(BEFORE, { comments: onParagraph }).transport, { file, backupRoot, dryRun: true });
+  assert.equal(kept.status, "dry_run", "an in-place edit keeps the comment");
+
+  const onList = [{ comment_id: "c2", quote: "b", is_solved: false, is_whole: false, extra: { content_anchor_id: "l2" } }];
+  const blocked = await publishMarkdown(fakeDocument(BEFORE, { comments: onList }).transport, { file, backupRoot });
+  assert.deepEqual(blocked.blockers.map((item) => item.check), ["open_comments"]);
+  const accepted = await publishMarkdown(fakeDocument(BEFORE, { comments: onList }).transport, { file, backupRoot, acceptCommentLoss: true });
+  assert.equal(accepted.status, "published");
+});
+
+test("a range with a text-drawing widget is deleted piecewise and refilled after the anchor", async () => {
+  const log = [];
+  const transport = {
+    async shortcut(args, options = {}) {
+      log.push([...args.slice(4), ...(options.input === undefined ? [] : [options.input])].join(" "));
+      return { result: "success", warnings: [] };
+    },
+  };
+  await replaceBlocks(transport, "D1", { ids: ["a", "w", "b", "c"], readonly: new Set(["w"]), anchor: "z", markdown: "新\n" });
+  assert.deepEqual(log, [
+    "--command block_delete --start-block-id b --end-block-id c",
+    "--command block_delete --block-id w",
+    "--command block_delete --block-id a",
+    "--command block_insert_after --block-id z --doc-format markdown --content - 新\n",
+  ]);
+  log.length = 0;
+  await replaceBlocks(transport, "D1", { ids: ["a", "b"], anchor: "z", markdown: "新\n" });
+  assert.deepEqual(log, ["--command block_replace --start-block-id a --end-block-id b --doc-format markdown --content - 新\n"]);
+  log.length = 0;
+  await replaceBlocks(transport, "D1", { ids: ["w"], readonly: new Set(["w"]), anchor: null });
+  assert.deepEqual(log, ["--command block_delete --block-id w"]);
 });

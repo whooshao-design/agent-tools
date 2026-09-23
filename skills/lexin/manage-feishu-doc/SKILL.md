@@ -1,8 +1,8 @@
 ---
 name: manage-feishu-doc
-description: 经飞书官方 lark-cli 读取、发布、修改并校验 lexin 飞书云文档。Use when 用户提供 lexin.feishu.cn 的 docx、wiki 或 drive/folder 链接，要求读取飞书文档（含 mermaid 小组件与画板源码）、把本地 Markdown（技术方案、操作手册、资料文档）新建发布或覆盖到飞书、在飞书文档里放 mermaid 图、同步表格数据、改写段落或补页内跳转链接、更新托管 JSON 章节、检查飞书登录与权限、在缺权限时申请准确 scope，或列出需要删除的飞书文档交给用户手动删除。
+description: 经飞书官方 lark-cli 读取、发布、修改并校验 lexin 飞书云文档。Use when 用户提供 lexin.feishu.cn 的 docx、wiki 或 drive/folder 链接，要求读取飞书文档（含 mermaid 小组件与画板源码）、把本地 Markdown（技术方案、操作手册、资料文档）新建发布到飞书或把本地改动增量同步/整篇覆盖过去、在飞书文档里插入替换删除一段或一节、替换一处文字、在飞书文档里放 mermaid 图、同步表格数据、改写段落或补页内跳转链接、更新托管 JSON 章节、检查飞书登录与权限、在缺权限时申请准确 scope，或列出需要删除的飞书文档交给用户手动删除。
 metadata:
-  version: 2.1.1
+  version: 2.2.0
 ---
 
 # Manage Feishu Doc
@@ -21,7 +21,7 @@ metadata:
 ## 先确认登录与权限
 
 ```bash
-node $S auth-check --operation=<read|write-blocks|write-json|publish|create-doc> --target='<链接>'
+node $S auth-check --operation=<read|write-blocks|write-json|publish|edit|create-doc> --target='<链接>'
 ```
 
 `ready` 就继续。否则按输出的 `failureClass`、`missingScopes`、`nextAction` 一次性告诉用户，不要先用多个接口试错；需要登录时后台运行 `node $S authorize --operation=<操作>`，把输出里的 `verification_uri_complete` 原样发给用户确认。首次使用先 `/home/joney/projects/ai/agent-tools/mcp/third-party-mcp/lark/bin/lark-cli setup`。细节见 `references/permission-matrix.md`。
@@ -33,7 +33,8 @@ node $S auth-check --operation=<read|write-blocks|write-json|publish|create-doc>
 | 任务 | 命令 | 参考 |
 |---|---|---|
 | 读文档、看某一节、拿 mermaid 源码或块 id | `read`（默认 Markdown）、`outline` | `references/read.md` |
-| 本地 Markdown 发布到飞书，或全量覆盖已发布的文档 | `publish` | `references/publish.md` |
+| 本地 Markdown 发布到飞书，或把本地改动同步过去（默认增量，可整篇覆盖） | `publish` | `references/publish.md` |
+| 直接在飞书文档里插入、替换、删除一段或一节，或替换一处文字 | `edit` | `references/update.md` |
 | 把数据源同步进已有表格 | `table-read`、`table-sync` | 本文「表格」 |
 | 改段落文字、样式或补标题跳转链接 | `list-blocks --full`、`update-text`、`link-plan` | 本文「元素级编辑」 |
 | 把 JSON 写进托管章节 | `write-json`、`inspect-sections` | 本文「托管章节」 |
@@ -47,13 +48,30 @@ node $S auth-check --operation=<read|write-blocks|write-json|publish|create-doc>
 ```bash
 node $S publish --file=<md 绝对路径> --target='<文件夹或知识库节点链接>' --dry-run   # 看计划
 node $S publish --file=<md 绝对路径> --target='<文件夹或知识库节点链接>'             # 首次发布
-node $S publish --file=<md 绝对路径> --overwrite --dry-run                           # 再次发布先看检查
+node $S publish --file=<md 绝对路径> --dry-run                                     # 再次发布：默认增量，先看改动摘要
+node $S publish --file=<md 绝对路径> --overwrite --dry-run                         # 整篇覆盖（用户明确要求时）
 ```
 
 - 首次发布在 md 旁生成 `<文件名>.feishu.json`，之后同一文件不会重复建文档。
-- 再次发布目前只支持 `--overwrite` 全量覆盖，增量更新在后续版本提供。覆盖被 `remote_changed`（飞书上有人改过）或 `open_comments`（有未解决评论）阻断时，把原因和评论原样转给用户，由用户决定是否加 `--force` 或 `--accept-comment-loss`，不要自行加。
+- 再次发布默认增量：只改本地变了的段落，只改了字的段落和标题原地改写，块 id 和评论都保住。整篇覆盖要用户明确要求才加 `--overwrite`；`needs_mode` 表示旧版本的发布记录没有逐段映射，需要覆盖一次。
+- 被 `remote_changed`（要改的段落在飞书上被人改过）、`remote_inserted`（飞书上多了本地没有的块）或 `open_comments`（有未解决评论挂在要替换的块上）阻断时，把原因和评论原样转给用户，由用户决定是否加 `--force` 或 `--accept-comment-loss`，不要自行加。
 - `published_with_issues` 要逐项报告 `verification.mismatches`、`diagrams` 状态和 `serverWarnings`。
-- 状态文件 `mode` 为 `feishu-master` 的文档以飞书为准，不从本地覆盖；别人的文档不要用 `publish` 接管。
+- 状态文件 `mode` 为 `feishu-master` 的文档以飞书为准，不从本地发布；别人的文档不要用 `publish` 接管，改用 `edit`。
+
+## 局部修改
+
+以飞书为准的文档（定稿移交后、别人的文档）直接在飞书上改，先 `read --format=xml --with-ids` 或 `outline` 找块 id 和标题：
+
+```bash
+node $S edit --target='<链接>' --op=replace-section --heading='<标题>' --file=<片段 md> --dry-run
+node $S edit --target='<链接>' --op=insert-after --after-heading='<标题>' --file=<片段 md>
+node $S edit --target='<链接>' --op=replace-text --pattern='<原文>' --content='<新文字>'
+```
+
+- 操作还有 `replace`/`delete`（按块 id）、`delete-section`；片段按发布的 Markdown 规则写，mermaid 会建成小组件。
+- 标题重名直接报错并列出块 id，改用 id；`replace-text` 出现多次要 `--all`。
+- 范围里有图片、画板、小组件、嵌入表格等无法原样写回的块（`protected_blocks`），或有未解决评论（`open_comments`）时会阻断：原样告诉用户，确认后才加 `--allow-protected`、`--accept-comment-loss`。
+- 以本地为准的文档改本地 md 后 `publish`；对它用 `edit` 会给出 `warning`，因为下次增量发布会因飞书上的改动停下。
 
 ## 表格
 
@@ -102,6 +120,7 @@ node $S cleanup-list --file=<md 绝对路径>            # 某个本地文件发
 
 - 写操作前已 `auth-check`；缺权限时一次给出准确 scope 和下一步，没有把登录、应用发布、文档权限问题混为一类。
 - wiki 链接已解析为真实 docx token。
-- 发布：计数校验无不一致、没有残留占位、服务端警告已检查，状态文件已更新；覆盖有备份路径。
+- 发布：计数校验无不一致、没有残留占位、服务端警告已检查，状态文件已更新且 `verification.incrementalReady` 为 true；覆盖有备份路径；增量发布报告了 `summary`。
+- 局部修改：先 `--dry-run` 核对 `removedPreview`，写后状态为 `updated`，必要时 `read` 回读核对。
 - 表格逐格、文本逐块回读一致；托管章节回读 SHA-256 与输入一致。
 - 没有泄露 App Secret、access token 或 refresh token；飞书链接只报告给用户，不写进仓库。

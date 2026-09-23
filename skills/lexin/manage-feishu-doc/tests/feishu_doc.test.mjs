@@ -107,7 +107,12 @@ test("parseAuthStatus reads lark-cli status without tokens and tracks refresh ex
   assert.equal(session.expired, false);
   assert.deepEqual(session.scopes, ["docx:document", "offline_access"]);
   assert.equal(session.hasRefreshToken, true);
-  assert.equal(parseAuthStatus({ identities: { user: { status: "not_logged_in" } } }, now).active, false);
+  assert.equal(parseAuthStatus({ identities: { user: { status: "missing" } } }, now).active, false);
+
+  // lark-cli 1.0.96：访问令牌过期、刷新令牌有效时报 needs_refresh，下一次调用会自动续期
+  const stale = parseAuthStatus({ identities: { user: { ...status.identities.user, status: "needs_refresh", tokenStatus: "needs_refresh", scope: requiredScopes("read").join(" ") } } }, now);
+  assert.deepEqual([stale.active, stale.expired, stale.hasRefreshToken], [true, true, true]);
+  assert.equal(assessAuthorization(stale, "read").ready, true);
 });
 
 test("authorization preflight returns all missing scopes at once", () => {
