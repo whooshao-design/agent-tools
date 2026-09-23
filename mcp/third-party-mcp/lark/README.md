@@ -88,17 +88,17 @@ claude mcp add lark -- /home/joney/projects/ai/agent-tools/mcp/third-party-mcp/l
 - `wiki_v1_node_search`、`docx_builtin_search` — 搜索
 - `docx_builtin_import`、`drive_v1_permissionMember_create`
 
-该预设能读文档和导入新文档，但**不能修改已有文档块**。需要写入已有文档时，优先使用当前
-会话已暴露的 Lark MCP 写工具；若未暴露，使用 `manage-feishu-doc` 的脚本兜底。脚本会为自己的
-MCP 子进程精确加载 `documentBlockChildren.create/get/batchDelete`，无需把全部 Lark 工具塞进
-常驻会话。
+该预设能读文档和导入新文档，但**不能修改已有文档块**。2026-09-23 起 `manage-feishu-doc` 不再经
+lark-mcp 写入：lark-mcp 0.5.1 已停更，其 zod schema 会静默剥掉 `table_cell`、`column_width`、
+`emoji_id` 等字段。skill 改用同目录的 `bin/lark-cli`（飞书官方 CLI，固定版本、默认直连、凭据存加密文件），
+这个常驻 MCP 只保留读和搜索用途。
 
 ## 权限预检与快速恢复
 
 不要等到写入中途才发现权限不足。目标操作开始前运行：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/manage-feishu-doc/scripts/feishu_doc_mcp.mjs \
+node /home/joney/projects/ai/agent-tools/skills/lexin/manage-feishu-doc/scripts/feishu_doc.mjs \
   auth-check --operation=write-json --target='https://lexin.feishu.cn/docx/<token>'
 ```
 

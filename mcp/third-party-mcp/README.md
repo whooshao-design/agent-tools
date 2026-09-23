@@ -7,7 +7,8 @@
 |---|---|---|
 | `context7` | `context7/bin/context7-mcp` | 查询最新、版本相关的库/API 文档 |
 | `github` | `github/bin/github-mcp` | 只读读取 GitHub 仓库、Issue、PR、Actions 和安全告警上下文 |
-| `lark` | `lark/bin/lark-mcp` | 读写飞书云文档与知识库；需 App 凭证与一次性 OAuth 授权 |
+| `lark` | `lark/bin/lark-mcp` | 常驻 MCP，读和搜索飞书云文档与知识库；需 App 凭证与一次性 OAuth 授权 |
+| `lark`（CLI） | `lark/bin/lark-cli` | 飞书官方 CLI，不是 MCP；`manage-feishu-doc` 经它读写文档（`lark-cli setup` 绑定应用、设备码登录） |
 | `markitdown` | `markitdown/bin/markitdown-mcp` | 将 PDF、Office、HTML、图片、CSV/JSON/XML 等转换为 Markdown |
 | `sonatype` | `sonatype/bin/sonatype-mcp` | 查询依赖版本、安全漏洞、许可证与升级建议；Codex 优先用 remote 配置 |
 

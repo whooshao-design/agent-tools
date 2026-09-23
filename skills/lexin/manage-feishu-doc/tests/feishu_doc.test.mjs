@@ -3,12 +3,9 @@ import test from "node:test";
 
 import {
   assessAuthorization,
-  assessKeyring,
   buildHeadingLinkPlan,
   elementsSignature,
   encodeLinkUrl,
-  parseGdbusBoolean,
-  parseGdbusObjectPath,
   prepareTextPlan,
   updateTextElements,
   buildManagedBlocks,
@@ -19,14 +16,15 @@ import {
   diffTable,
   findManagedSections,
   listTables,
+  parseAuthStatus,
   parseTarget,
-  parseWhoamiOutput,
-  probeSession,
+  readDocument,
   readTable,
   requiredScopes,
   syncTable,
   writeJson,
-} from "../scripts/feishu_doc_mcp.mjs";
+} from "../scripts/feishu_doc.mjs";
+import { LarkCliError } from "../scripts/lib/transport.mjs";
 
 // Mirrors what docx.v1.documentBlock.list returns: a flat block array where
 // table cells reference their children by id.
@@ -91,20 +89,25 @@ test("requiredScopes adds wiki permission only for wiki targets", () => {
   assert.ok(wiki.includes("wiki:wiki:readonly"));
 });
 
-test("parseWhoamiOutput does not expose token and detects refresh token", () => {
-  const output = `AccessToken Expired: false\n{
-    "token": "masked-token",
-    "scopes": ["docx:document", "offline_access"],
-    "expiresAt": 4102444800,
-    "extra": {"refreshToken": "masked-refresh", "appSecret": "masked-secret"}
-  }`;
-  assert.deepEqual(parseWhoamiOutput(output), {
-    active: true,
-    expired: false,
-    scopes: ["docx:document", "offline_access"],
-    hasRefreshToken: true,
-    expiresAt: 4102444800,
-  });
+test("parseAuthStatus reads lark-cli status without tokens and tracks refresh expiry", () => {
+  const now = Date.parse("2026-09-23T10:00:00+08:00");
+  const status = {
+    identities: {
+      user: {
+        status: "ready",
+        tokenStatus: "valid",
+        scope: "docx:document offline_access",
+        expiresAt: "2026-09-23T12:00:00+08:00",
+        refreshExpiresAt: "2026-09-30T10:00:00+08:00",
+      },
+    },
+  };
+  const session = parseAuthStatus(status, now);
+  assert.equal(session.active, true);
+  assert.equal(session.expired, false);
+  assert.deepEqual(session.scopes, ["docx:document", "offline_access"]);
+  assert.equal(session.hasRefreshToken, true);
+  assert.equal(parseAuthStatus({ identities: { user: { status: "not_logged_in" } } }, now).active, false);
 });
 
 test("authorization preflight returns all missing scopes at once", () => {
@@ -137,47 +140,22 @@ test("authorization preflight distinguishes missing and expired sessions", () =>
   );
 });
 
-test("expired session with refresh token is verified by a real call, not trusted from cache", async () => {
-  const scopes = ["docx:document:readonly", "offline_access", "wiki:wiki:readonly"];
-  const expired = { active: true, expired: true, hasRefreshToken: true, scopes };
-  const fresh = { ...expired, expired: false };
-  const wiki = { kind: "wiki", token: "wikitoken" };
+test("checkAuthorization trusts lark-cli refresh and warns before the refresh token runs out", async () => {
+  const scopes = ["docx:document:readonly", "offline_access"];
+  const soon = Math.floor(Date.now() / 1000) + 3600;
+  const later = Math.floor(Date.now() / 1000) + 5 * 24 * 3600;
+  const expired = { active: true, expired: true, hasRefreshToken: true, scopes, refreshExpiresAt: later };
+  const usable = await checkAuthorization("read", { kind: "docx" }, { status: () => expired });
+  assert.equal(usable.result.ready, true);
+  assert.equal(usable.result.warning, undefined);
 
-  let calls = 0;
-  const refreshed = await checkAuthorization("read", wiki, {
-    whoami: () => (calls++ === 0 ? expired : fresh),
-    probe: async () => true,
-  });
-  assert.equal(refreshed.result.ready, true);
-  assert.equal(refreshed.session.expired, false);
-
-  const dead = await checkAuthorization("read", wiki, { whoami: () => expired, probe: async () => false });
-  assert.equal(dead.result.ready, false);
+  const dead = await checkAuthorization("read", { kind: "docx" }, { status: () => ({ ...expired, hasRefreshToken: false }) });
   assert.equal(dead.result.failureClass, "TOKEN_EXPIRED");
 
-  let probed = false;
-  await checkAuthorization("read", wiki, { whoami: () => fresh, probe: async () => (probed = true) });
-  assert.equal(probed, false, "unexpired sessions must not spawn lark-mcp");
-});
-
-test("probeSession treats only lark-mcp's token rejection as dead", async () => {
-  const fake = (message) => async () => ({
-    async call(api, args) {
-      assert.equal(api, "wiki.v2.space.getNode");
-      fake.lastToken = args.params.token;
-      if (message) throw new Error(message);
-      return {};
-    },
-    close: async () => {},
+  const expiring = await checkAuthorization("read", { kind: "docx" }, {
+    status: () => ({ active: true, expired: false, hasRefreshToken: true, scopes, refreshExpiresAt: soon }),
   });
-  assert.equal(await probeSession({ kind: "wiki", token: "w1" }, fake(null)), true);
-  assert.equal(fake.lastToken, "w1");
-  assert.equal(await probeSession({ kind: "docx", token: "d1" }, fake('{"code":131005,"msg":"not found"}')), true);
-  assert.equal(fake.lastToken, "probe");
-  assert.equal(
-    await probeSession(null, fake('{"errorMessage":"Current user_access_token is invalid or expired"}')),
-    false,
-  );
+  assert.match(expiring.result.warning, /24 小时/);
 });
 
 test("classifyFailure extracts exact scope from Feishu 99991679", () => {
@@ -205,13 +183,15 @@ test("classifyFailure digs scopes out of Lark's escaped rawErrorText", () => {
   assert.deepEqual(result.missingScopes, ["drive:drive", "space:document:delete"]);
 });
 
-test("classifyFailure distinguishes app publication, ACL, and tool loading", () => {
+test("classifyFailure distinguishes app publication and ACL, and trusts lark-cli classification", () => {
   assert.equal(classifyFailure("OAuth error 20027").failureClass, "APP_PERMISSION_NOT_PUBLISHED");
   assert.equal(classifyFailure("403 forbidden: no permission").failureClass, "DOCUMENT_ACCESS_DENIED");
-  assert.equal(classifyFailure("MCP tool not found: docx_v1_documentBlock_patch").failureClass, "MCP_TOOL_MISSING");
-  const missingTool = new Error("MCP tool 未加载");
-  missingTool.code = "MCP_TOOL_MISSING";
-  assert.equal(classifyFailure(missingTool).failureClass, "MCP_TOOL_MISSING");
+  const error = new LarkCliError("missing", {
+    ok: false,
+    error: { type: "authorization", subtype: "missing_scope", code: 99991679, missing_scopes: ["board:whiteboard:node:create"] },
+  });
+  assert.equal(classifyFailure(error).failureClass, "OAUTH_SCOPE_MISSING");
+  assert.deepEqual(classifyFailure(error).missingScopes, ["board:whiteboard:node:create"]);
 });
 
 test("deterministicClientToken is stable UUID-shaped and content-sensitive", () => {
@@ -419,23 +399,6 @@ test("upsert verifies new content before deleting old managed section", async ()
   assert.deepEqual(calls, []);
 });
 
-test("keyring preflight blocks only on a confirmed Locked collection", () => {
-  const path = parseGdbusObjectPath("(objectpath '/org/freedesktop/secrets/collection/login',)\n");
-  assert.equal(path, "/org/freedesktop/secrets/collection/login");
-  assert.equal(parseGdbusObjectPath("Error: timeout"), null);
-  assert.equal(parseGdbusBoolean("(<true>,)\n"), true);
-  assert.equal(parseGdbusBoolean("(<false>,)\n"), false);
-  assert.equal(parseGdbusBoolean(null), null);
-
-  const locked = assessKeyring({ collection: path, locked: true });
-  assert.equal(locked.failureClass, "KEYRING_LOCKED");
-  assert.match(locked.nextAction, /unlock_keyring\.py/);
-  assert.match(locked.nextAction, /不要在聊天中提供密码/);
-  assert.equal(assessKeyring({ collection: path, locked: false }).state, "unlocked");
-  assert.equal(assessKeyring({ collection: null, locked: null }).state, "unknown");
-  assert.equal(assessKeyring({ collection: "/", locked: null }).state, "unknown");
-});
-
 const DOC = "DocToken123";
 function textBlock(id, type, runs) {
   const key = { 2: "text", 4: "heading2", 6: "heading4", 12: "bullet", 14: "code" }[type];
@@ -578,4 +541,27 @@ test("updateTextElements reports VERIFY_FAILED when readback differs", async () 
     () => updateTextElements(mcp, DOC, prepareTextPlan([{ block_id: "b1", elements: [{ text_run: { content: "new" } }] }])),
     (error) => error.code === "VERIFY_FAILED" && error.details.mismatches[0].block_id === "b1",
   );
+});
+
+test("readDocument fills text-drawing widgets back in as mermaid fences and leaves other widgets alone", async () => {
+  const markdown = 'A\n\n<readonly-block type="isv"></readonly-block>\n\n<readonly-block type="isv"></readonly-block>\n';
+  const xml = '<p>A</p><readonly-block id="w1" type="isv"></readonly-block><readonly-block id="w2" type="isv"></readonly-block>';
+  const transport = {
+    async shortcut(args) {
+      const format = args[args.indexOf("--doc-format") + 1];
+      return { document: { content: format === "xml" ? xml : markdown, revision_id: 3 } };
+    },
+    async call(name, args) {
+      assert.equal(name, "docx.v1.documentBlock.get");
+      const record = args.path.block_id === "w1" ? JSON.stringify({ data: "flowchart LR\n  A-->B", view: "chart" }) : "{}";
+      const componentType = args.path.block_id === "w1" ? "blk_631fefbbae02400430b8f9f4" : "blk_other";
+      return { block: { block_id: args.path.block_id, add_ons: { component_type_id: componentType, record } } };
+    },
+  };
+  const result = await readDocument(transport, "D1", {});
+  assert.deepEqual(result.widgets, { mermaid: 1, other: 1 });
+  assert.match(result.content, /```mermaid\nflowchart LR\n  A-->B\n```/);
+  assert.match(result.content, /<readonly-block type="isv"><\/readonly-block>\n$/);
+  const text = await readDocument({ call: async () => ({ content: "plain" }) }, "D1", { format: "text" });
+  assert.equal(text.content, "plain");
 });

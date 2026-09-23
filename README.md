@@ -68,7 +68,7 @@
 
 | Skill | 说明 | 配套 MCP |
 |---|---|---|
-| `manage-feishu-doc` | 读写 `lexin.feishu.cn` 飞书文档，预检权限并做幂等与回读校验 | `lark` |
+| `manage-feishu-doc` | 读取、发布（本地 Markdown 新建或全量覆盖）、修改 `lexin.feishu.cn` 飞书文档，预检权限并回读校验 | `lark-cli`（`mcp/third-party-mcp/lark/bin/lark-cli`） |
 
 ### 发布与部署
 

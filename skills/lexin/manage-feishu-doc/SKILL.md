@@ -1,129 +1,92 @@
 ---
 name: manage-feishu-doc
-description: 通过飞书官方 Lark MCP 读取、追加、替换并校验飞书云文档内容。Use when 用户提供 lexin.feishu.cn/docx 或 lexin.feishu.cn/wiki 链接，要求读取飞书文档、把 JSON/文本写入已有文档、更新已有表格或段落、按数据源同步表格数据、更新托管章节、检查文档或 OAuth 权限，或在缺权限时快速申请准确 scope。
+description: 经飞书官方 lark-cli 读取、发布、修改并校验 lexin 飞书云文档。Use when 用户提供 lexin.feishu.cn 的 docx、wiki 或 drive/folder 链接，要求读取飞书文档（含 mermaid 小组件与画板源码）、把本地 Markdown（技术方案、操作手册、资料文档）新建发布或覆盖到飞书、在飞书文档里放 mermaid 图、同步表格数据、改写段落或补页内跳转链接、更新托管 JSON 章节、检查飞书登录与权限，或在缺权限时申请准确 scope。
 metadata:
-  version: 1.2.0
+  version: 2.0.0
 ---
 
 # Manage Feishu Doc
 
 ## 定位与边界
 
-治理 `lexin.feishu.cn/docx/<token>` 与 `lexin.feishu.cn/wiki/<token>` 的文档读写、权限预检、幂等更新和回读校验。
+治理 `lexin.feishu.cn` 云文档的读、发布、修改和权限。一律用本 skill 的脚本，它经官方 lark-cli 以用户身份调用开放平台；会话里的 `mcp__lark__*` 常驻工具走已停更的 lark-mcp，只在脚本不可用时拿来读和搜索，不用它写。
 
-MCP 优先、脚本兜底：当前会话已暴露 `mcp__lark__*` 时优先直接调用；写入已有文档所需工具未暴露时，使用本 Skill 的 MCP 客户端脚本。不要通过 Linux 浏览器访问飞书文档；组织设备策略会拦截。`get-browser-session` 只处理其他网页会话。
+- 不经 Linux 浏览器访问飞书，组织设备策略会拦截。
+- 不治理飞书消息、日历、多维表格；不把 `ledocs.lexincloud.com` 链接当成飞书 token。
+- 飞书上的写入对他人可见：发布、覆盖、改表、改文字都要用户明确要求。探针、回归测试和任何试写只落测试目录：`env/credentials.env` 的 `FEISHU_TEST_FOLDER`（`bin/with-env` 载入），不要在正式文档上试错。
 
-不治理飞书消息、日历、多维表格，也不把 `ledocs.lexincloud.com` 链接猜测成飞书文档 token。
+脚本：`S=/home/joney/projects/ai/agent-tools/skills/lexin/manage-feishu-doc/scripts/feishu_doc.mjs`
 
-## 工作流
-
-1. 解析目标，确认 host、资源类型和 token：
-
-```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/manage-feishu-doc/scripts/feishu_doc_mcp.mjs \
-  parse-target --target='<飞书链接>'
-```
-
-2. 在第一次文档 API 调用前按操作预检权限：
+## 先确认登录与权限
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/manage-feishu-doc/scripts/feishu_doc_mcp.mjs \
-  auth-check --operation=write-json --target='<飞书链接>'
+node $S auth-check --operation=<read|write-blocks|write-json|publish|create-doc> --target='<链接>'
 ```
 
-`auth-check` 及所有会启动 lark-mcp 的命令会先经 D-Bus 预检 gnome-keyring：默认钥匙串 Locked 时几秒内返回 `KEYRING_LOCKED`，不再无输出挂住。此时让用户**在自己的终端**运行 `nextAction` 里的 `unlock_keyring.py`，绝不在聊天中索要密码；解锁后先 `authorize` 再复检。排障步骤见 `references/permission-matrix.md`。
+`ready` 就继续。否则按输出的 `failureClass`、`missingScopes`、`nextAction` 一次性告诉用户，不要先用多个接口试错；需要登录时后台运行 `node $S authorize --operation=<操作>`，把输出里的 `verification_uri_complete` 原样发给用户确认。首次使用先 `/home/joney/projects/ai/agent-tools/mcp/third-party-mcp/lark/bin/lark-cli setup`。细节见 `references/permission-matrix.md`。
 
-权限齐全时直接继续。缺权限时一次性向用户说明 `missingScopes`、`failureClass` 和 `nextAction`，不要先用多个 API 试错。完整映射见 `references/permission-matrix.md`。
+## 按任务选命令
 
-3. 用户已经要求完成目标文档操作时，可直接启动一次 OAuth 授权；让用户只在系统浏览器完成授权，不索取密码、验证码、Cookie 或 token：
+先判断任务，再读对应的参考文件，不用一次读全。
+
+| 任务 | 命令 | 参考 |
+|---|---|---|
+| 读文档、看某一节、拿 mermaid 源码或块 id | `read`（默认 Markdown）、`outline` | `references/read.md` |
+| 本地 Markdown 发布到飞书，或全量覆盖已发布的文档 | `publish` | `references/publish.md` |
+| 把数据源同步进已有表格 | `table-read`、`table-sync` | 本文「表格」 |
+| 改段落文字、样式或补标题跳转链接 | `list-blocks --full`、`update-text`、`link-plan` | 本文「元素级编辑」 |
+| 把 JSON 写进托管章节 | `write-json`、`inspect-sections` | 本文「托管章节」 |
+| 本脚本没包装的接口 | `call --method=<M> --path=/open-apis/...` | `references/api-facts.md` |
+
+接口行为、上限和踩过的坑都在 `references/api-facts.md`，动手写之前遇到不确定的行为先查它。
+
+## 发布
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/manage-feishu-doc/scripts/feishu_doc_mcp.mjs \
-  authorize --operation=write-json --target='<飞书链接>'
+node $S publish --file=<md 绝对路径> --target='<文件夹或知识库节点链接>' --dry-run   # 看计划
+node $S publish --file=<md 绝对路径> --target='<文件夹或知识库节点链接>'             # 首次发布
+node $S publish --file=<md 绝对路径> --overwrite --dry-run                           # 再次发布先看检查
 ```
 
-授权完成后必须再次运行 `auth-check`。若返回 `APP_PERMISSION_NOT_PUBLISHED`，OAuth 无法自愈：给出确切 scope，要求在开放平台添加用户身份权限、发布应用版本后再授权。
+- 首次发布在 md 旁生成 `<文件名>.feishu.json`，之后同一文件不会重复建文档。
+- 再次发布目前只支持 `--overwrite` 全量覆盖，增量更新在后续版本提供。覆盖被 `remote_changed`（飞书上有人改过）或 `open_comments`（有未解决评论）阻断时，把原因和评论原样转给用户，由用户决定是否加 `--force` 或 `--accept-comment-loss`，不要自行加。
+- `published_with_issues` 要逐项报告 `verification.mismatches`、`diagrams` 状态和 `serverWarnings`。
+- 状态文件 `mode` 为 `feishu-master` 的文档以飞书为准，不从本地覆盖；别人的文档不要用 `publish` 接管。
 
-4. 执行操作。读取全文纯文本：
+## 表格
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/manage-feishu-doc/scripts/feishu_doc_mcp.mjs \
-  read --target='<飞书链接>'
+node $S table-read --target='<链接>' --table-index=0
+node $S table-sync --target='<链接>' --table-index=0 --file=/absolute/path/rows.json --dry-run
 ```
 
-`read` 返回的是 rawContent 纯文本，只适合速览。**不要用它做表格内容校验**：单元格之间的换行数取决于格内块数，同一份内容会因排版差异解析成不同结果。要看结构就用 `list-blocks`（一次分页拿到全部块、块类型统计和表格清单），要看表格就用 `table-read`：
+输入是 `{"rows": [["表头1","表头2"],["值1","值2"]]}` 或裸二维数组，全部为字符串，含表头行。先 `--dry-run` 看 `rowsToAppend` 和 `cellsToWrite`，确认后去掉。`table-sync` 只重写与期望不同的格，保留原有加粗、行内代码等样式；行数不足在末尾补行并把新行格内块数对齐到既有数据行；输入行数少于现有行数时报 `ROW_COUNT_SHRINK` 停止，不删行；写后逐格回读，不一致报 `VERIFY_FAILED`。要按某列排序时直接交完整的有序二维数组。表格校验一律用 `table-read`，不要用 rawContent 的换行切分。
+
+## 元素级编辑
+
+加链接、改行内样式、重写单元格走「导出原始块 → 生成计划 → dry-run → 写入」：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/manage-feishu-doc/scripts/feishu_doc_mcp.mjs \
-  list-blocks --target='<飞书链接>'
-
-node /home/joney/projects/ai/agent-tools/skills/lexin/manage-feishu-doc/scripts/feishu_doc_mcp.mjs \
-  table-read --target='<飞书链接>' --table-index=0
+node $S list-blocks --target='<链接>' --full --out=/abs/raw.json
+node $S link-plan --target='<链接>' --labels=/abs/labels.json --out=/abs/plan.json   # 可选：正文文字 → 标题跳转链接
+node $S update-text --target='<链接>' --file=/abs/plan.json --dry-run
+node $S update-text --target='<链接>' --file=/abs/plan.json
 ```
 
-把数据源同步进已有表格（含表头行，行数只增不减）：
+计划是 `[{block_id, elements}]`，整块替换 elements，自己拼 elements 时必须沿用原 run 的 `text_element_style`。`update-text` 跳过已一致的块，每批 40 条、确定性 client_token，写后逐块回读比对内容、样式和解码后的链接。`labels.json` 形如 `{"第 3 章": "3. 国内流水查询"}`（值为标题文本或标题块 id）。原地改写保留块 id，挂在该段的评论不受影响。
+
+## 托管章节
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/manage-feishu-doc/scripts/feishu_doc_mcp.mjs \
-  table-sync --target='<飞书链接>' --table-index=0 \
-  --file=/absolute/path/rows.json --dry-run
+node $S write-json --target='<链接>' --file=/absolute/path/data.json --section=package-all-info --heading='PackageAllInfo' --mode=upsert
 ```
 
-输入是 `{"rows": [["表头1","表头2"],["值1","值2"]]}` 或裸二维数组，全部为字符串。先跑 `--dry-run` 看 `rowsToAppend` 和 `cellsToWrite`，确认无误后去掉该参数正式写入。`table-sync` 只写与期望不同的格，因此不会破坏未变更单元格的加粗、行内代码等样式；行数不足会自动在末尾补行，并把新行的格块数对齐到既有数据行（避免行高不一致）；输入行数少于现有行数时直接报 `ROW_COUNT_SHRINK` 停止，不会删行。写入后自动逐格回读校验，不一致则报 `VERIFY_FAILED` 并列出 mismatches。
-
-需要顺序敏感的表格（例如按某列排序）时，直接把排好序的完整二维数组交给 `table-sync`：它按最终状态对齐，不需要你计算插入位置。
-
-脚本没有包装的 API 用 `call` 逃生口，目标工具会按需加载：
-
-```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/manage-feishu-doc/scripts/feishu_doc_mcp.mjs \
-  call --target='<飞书链接>' --api=docx.v1.documentBlock.get --operation=read \
-  --file=/absolute/path/args.json
-```
-
-元素级编辑（加链接、改行内样式、重写单元格）走「导出原始块 → 生成计划 → dry-run → 写入」：
-
-```bash
-S=/home/joney/projects/ai/agent-tools/skills/lexin/manage-feishu-doc/scripts/feishu_doc_mcp.mjs
-node $S list-blocks --target='<飞书链接>' --full --out=/abs/raw.json      # 原始块，含 text_element_style
-node $S link-plan --target='<飞书链接>' --labels=/abs/labels.json --out=/abs/plan.json   # 可选：正文文字→标题跳转链接
-node $S update-text --target='<飞书链接>' --file=/abs/plan.json --dry-run
-node $S update-text --target='<飞书链接>' --file=/abs/plan.json
-```
-
-`update-text` 的计划是 `[{block_id, elements}]`，整块替换 elements：自行拼 elements 时必须沿用原 run 的 `text_element_style`。它跳过已一致的块，每批 40 条、确定性 client_token，写后逐块回读比对（内容、样式标志、解码后的链接），不一致报 `VERIFY_FAILED`。`labels.json` 形如 `{"第 3 章": "3. 国内流水查询"}`（值为标题文本或标题 block_id）。页内链接格式、样式保留规则与导入注意事项见 `references/docx-block-operations.md`。源文件更新后优先用 API 增量修改，重新导入 Markdown 会丢失在飞书上做的所有增量编辑。
-
-块级操作细节（表格行插入语义、单元格块结构、批量写入上限）见 `references/docx-block-operations.md`。
-
-把 JSON 写入已有文档的托管章节：
-
-```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/manage-feishu-doc/scripts/feishu_doc_mcp.mjs \
-  write-json --target='<飞书链接>' --file=/absolute/path/data.json \
-  --section=package-all-info --heading='PackageAllInfo' --mode=upsert
-```
-
-`upsert` 是默认模式：先创建并精确校验新章节，再删除旧章节；失败时宁可留下重复章节，也不先删旧数据。`append` 不覆盖已有同名章节。输入也可用 `--stdin`。
-
-5. 只在富 Markdown/HTML 必须转换为原生文档块时使用 convert；JSON 和纯文本直接创建块，避免申请 `docx:document.block:convert`。
-
-## 权限和错误处理
-
-- `KEYRING_LOCKED` / `WHOAMI_TIMEOUT`：OS 钥匙串锁定或无响应，与 OAuth 无关；按 `permission-matrix.md` 的钥匙串排障处理，不要反复重试 `auth-check`。
-- `AUTH_REQUIRED` / `TOKEN_EXPIRED`：运行 `authorize`，授权后复检一次。
-- `OAUTH_SCOPE_MISSING`：从 `permission_violations[].subject` 提取准确 scope，只申请缺失项。
-- `APP_PERMISSION_NOT_PUBLISHED`：先在应用后台添加并发布权限；不要反复 OAuth。
-- `DOCUMENT_ACCESS_DENIED`：OAuth scope 已齐全，申请目标文档的编辑/阅读 ACL；不要扩大应用 scope。
-- `MCP_TOOL_MISSING`：当前工具预设不含目标工具；改用本 Skill 脚本或重启已更新 MCP 的会话。
-
-授权后使用相同的确定性 `client_token` 最多重试一次。写入成功必须报告文档 token、section、内容 SHA-256、文档版本及回读校验结果；不得输出 access token、refresh token 或 App Secret。
+`upsert`（默认）先创建并按 SHA-256 校验新章节，再删除旧章节，失败时宁可留下重复章节也不先删旧数据；`append` 不覆盖已有同名章节。输入也可用 `--stdin`。
 
 ## 完成标准
 
-- `lexin.feishu.cn` 链接未经过浏览器链路。
-- 写操作前权限已预检，缺失权限有准确分类和一步到位的后续动作。
-- Wiki token 已解析为 `obj_type=docx` 的真实文档 token。
-- 写入具备确定性幂等标识；托管章节回读 SHA-256 与输入一致，表格写入逐格回读与输入一致。
-- 元素级改动用 `update-text` 写入并通过逐块回读校验。
-- 表格类结果用 `table-read` 结构化比对确认，没有把 rawContent 的换行切分当作校验依据。
-- 没有泄漏凭据；失败时没有把 OAuth、应用发布、文档 ACL 和工具加载问题混为一类。
+- 写操作前已 `auth-check`；缺权限时一次给出准确 scope 和下一步，没有把登录、应用发布、文档权限问题混为一类。
+- wiki 链接已解析为真实 docx token。
+- 发布：计数校验无不一致、没有残留占位、服务端警告已检查，状态文件已更新；覆盖有备份路径。
+- 表格逐格、文本逐块回读一致；托管章节回读 SHA-256 与输入一致。
+- 没有泄露 App Secret、access token 或 refresh token；飞书链接只报告给用户，不写进仓库。

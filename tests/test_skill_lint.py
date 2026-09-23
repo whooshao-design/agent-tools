@@ -29,6 +29,7 @@ NOT_SKILLS = {
     "java-backend-mcp", "verify-execute", "read-only", "write-set", "agent-tools",
     "direct-record-v1", "waiver-record-v1", "approval-record-v1", "repo-snapshot-v1",
     "delegation-result-v1", "producer-stage-result-v1", "auto-loop-run-v1",
+    "inspect-sections",  # manage-feishu-doc 脚本的子命令
 }
 SKILL_PREFIXES = ("dev-", "query-", "review-", "verify-", "lang-", "inspect-", "configure-",
                   "register-", "lexiao-", "handle-", "diagnose-", "java-", "jenkins-", "fix-",

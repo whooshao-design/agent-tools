@@ -1,35 +1,23 @@
 #!/usr/bin/env node
-
+// 飞书云文档读写：经官方 lark-cli（用户身份）调用开放平台，写后回读校验。
 import { createHash } from "node:crypto";
-import { spawn, spawnSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { spawn } from "node:child_process";
+import { readFileSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
-const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
-const REPO_DIR = join(SCRIPT_DIR, "../../../..");
-const LARK_WRAPPER = join(REPO_DIR, "mcp/third-party-mcp/lark/bin/lark-mcp");
+import { blockText, elementsText, listAllBlocks, listChildren, TEXT_CONTAINER_KEYS } from "./lib/blocks.mjs";
+import { MERMAID_WIDGET_TYPE, publishMarkdown } from "./lib/publish.mjs";
+import { createTransport, LARK_CLI, LarkCliError, runLarkCli } from "./lib/transport.mjs";
+
+export { blockText, listAllBlocks };
+
 const SUPPORTED_HOSTS = new Set(["lexin.feishu.cn"]);
-const TOOL_NAMES = [
-  "wiki.v2.space.getNode",
-  "docx.v1.document.rawContent",
-  "docx.v1.documentBlock.list",
-  "docx.v1.documentBlock.patch",
-  "docx.v1.documentBlock.batchUpdate",
-  "docx.v1.documentBlockChildren.get",
-  "docx.v1.documentBlockChildren.create",
-  "docx.v1.documentBlockChildren.batchDelete",
-  "docx.v1.document.convert",
-];
-const TOOL_NAME_MAP = Object.fromEntries(TOOL_NAMES.map((name) => [name, name.replaceAll(".", "_")]));
 const JSON_CHUNK_SIZE = 40_000;
 const MAX_CREATE_BLOCKS = 50;
 const MAX_BATCH_UPDATES = 40;
 const BLOCK_TYPE_TEXT = 2;
 const BLOCK_TYPE_TABLE = 31;
 const BLOCK_TYPE_TABLE_CELL = 32;
-const WHOAMI_TIMEOUT_MS = 60_000;
 
 export const OPERATION_SCOPES = Object.freeze({
   read: ["docx:document:readonly", "offline_access"],
@@ -37,17 +25,19 @@ export const OPERATION_SCOPES = Object.freeze({
   // Editing existing blocks (tables, paragraphs) needs exactly the same scopes as
   // write-json; the separate name keeps auth-check output honest about intent.
   "write-blocks": ["docx:document", "docx:document:readonly", "offline_access"],
-  convert: ["docx:document.block:convert", "offline_access"],
-  "write-markdown": [
-    "docx:document.block:convert",
+  // 建空文档只需要 docx:document，不需要任何 drive 权限
+  "create-doc": ["docx:document", "offline_access"],
+  // docs_ai 写正文 + 块接口放小组件 + 覆盖前查评论；画板权限用于小组件失败时的回退
+  publish: [
+    "board:whiteboard:node:create",
+    "docs:document.comment:read",
+    "docs:document.media:upload",
     "docx:document",
+    "docx:document:create",
     "docx:document:readonly",
+    "docx:document:write_only",
     "offline_access",
   ],
-  // 在目录下建文档只需要 docx:document，不需要任何 drive 权限
-  "create-doc": ["docx:document", "offline_access"],
-  // 插图链路：建图片块 -> 上传媒体 -> replace_image 绑定
-  "insert-image": ["docs:document.media:upload", "docx:document", "offline_access"],
 });
 
 function fail(message, code = "INVALID_ARGUMENT") {
@@ -118,30 +108,22 @@ export function requiredScopes(operation, target = null) {
   return [...scopes].sort();
 }
 
-export function parseWhoamiOutput(output) {
-  const text = String(output ?? "");
-  if (/No active login sessions found/i.test(text)) {
-    return { active: false, expired: false, scopes: [], hasRefreshToken: false, expiresAt: null };
+// lark-cli auth status --json；token 不在输出里，只取状态、scope 和过期时间
+export function parseAuthStatus(status, now = Date.now()) {
+  const user = status?.identities?.user ?? {};
+  if (user.status !== "ready") {
+    return { active: false, expired: false, scopes: [], hasRefreshToken: false, expiresAt: null, message: user.message ?? null };
   }
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start < 0 || end <= start) {
-    return { active: false, expired: false, scopes: [], hasRefreshToken: false, expiresAt: null };
-  }
-  let tokenInfo;
-  try {
-    tokenInfo = JSON.parse(text.slice(start, end + 1));
-  } catch {
-    fail("无法解析 lark-mcp whoami 输出", "WHOAMI_PARSE_FAILED");
-  }
-  const expiresAt = Number.isFinite(Number(tokenInfo.expiresAt)) ? Number(tokenInfo.expiresAt) : null;
-  const explicitExpired = /AccessToken Expired:\s*true/i.test(text);
+  const seconds = (value) => (value ? Math.floor(Date.parse(value) / 1000) : null);
+  const expiresAt = seconds(user.expiresAt);
+  const refreshExpiresAt = seconds(user.refreshExpiresAt);
   return {
     active: true,
-    expired: explicitExpired || (expiresAt !== null && expiresAt <= Date.now() / 1000),
-    scopes: Array.isArray(tokenInfo.scopes) ? tokenInfo.scopes.filter((item) => typeof item === "string") : [],
-    hasRefreshToken: Boolean(tokenInfo.extra?.refreshToken),
+    expired: user.tokenStatus !== "valid" || (expiresAt !== null && expiresAt * 1000 <= now),
+    scopes: String(user.scope ?? "").split(/\s+/).filter(Boolean),
+    hasRefreshToken: refreshExpiresAt !== null && refreshExpiresAt * 1000 > now,
     expiresAt,
+    refreshExpiresAt,
   };
 }
 
@@ -210,13 +192,7 @@ function parseEmbeddedJson(text) {
 }
 
 export function classifyFailure(error, context = {}) {
-  if (error?.code === "MCP_TOOL_MISSING") {
-    return {
-      failureClass: "MCP_TOOL_MISSING",
-      missingScopes: [],
-      nextAction: "使用本 Skill 脚本兜底，或调整 LARK_TOOLS 后重启 MCP 会话",
-    };
-  }
+  if (error instanceof LarkCliError) return error.details;
   let text;
   if (typeof error === "string") {
     text = error;
@@ -254,13 +230,6 @@ export function classifyFailure(error, context = {}) {
       failureClass: "APP_PERMISSION_NOT_PUBLISHED",
       missingScopes: context.requiredScopes ?? [],
       nextAction: "在飞书开放平台添加所需用户身份权限并发布应用版本，然后重新授权",
-    };
-  }
-  if (/tool.+(not found|unknown)|method not found|-32601/i.test(text)) {
-    return {
-      failureClass: "MCP_TOOL_MISSING",
-      missingScopes: [],
-      nextAction: "使用本 Skill 脚本兜底，或调整 LARK_TOOLS 后重启 MCP 会话",
     };
   }
   if (/no active login|token.+expired|unauthorized|invalid.+token/i.test(text)) {
@@ -333,10 +302,6 @@ export function buildManagedBlocks(section, content, heading = null) {
   return { blocks, contentHash, begin, end };
 }
 
-function elementsText(elements = []) {
-  return elements.map((element) => element?.text_run?.content ?? "").join("");
-}
-
 function markerText(block) {
   return block?.block_type === 2 ? elementsText(block.text?.elements) : "";
 }
@@ -371,32 +336,6 @@ export function findManagedSections(blocks, section) {
     index = endIndex;
   }
   return sections;
-}
-
-const TEXT_CONTAINER_KEYS = [
-  "text",
-  "heading1",
-  "heading2",
-  "heading3",
-  "heading4",
-  "heading5",
-  "heading6",
-  "heading7",
-  "heading8",
-  "heading9",
-  "bullet",
-  "ordered",
-  "code",
-  "quote",
-  "todo",
-  "callout",
-];
-
-export function blockText(block) {
-  for (const key of TEXT_CONTAINER_KEYS) {
-    if (block?.[key]?.elements) return elementsText(block[key].elements);
-  }
-  return "";
 }
 
 export function indexBlocks(blocks) {
@@ -481,108 +420,6 @@ export function cellBlockTarget(cellBlockCounts, existingRowSize) {
   return [...tally.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0][0];
 }
 
-// gdbus prints `(objectpath '/org/.../collection/login',)` for ReadAlias and
-// `(<true>,)` for Properties.Get; anything else means "could not tell".
-export function parseGdbusObjectPath(output) {
-  const match = String(output ?? "").match(/objectpath\s+'([^']*)'/);
-  return match ? match[1] : null;
-}
-
-export function parseGdbusBoolean(output) {
-  const match = String(output ?? "").match(/<(true|false)>/);
-  return match ? match[1] === "true" : null;
-}
-
-// lark-mcp reads its AES key through keytar -> gnome-keyring. A Locked default
-// collection makes that call hang for minutes with no output, so only a
-// confirmed Locked=true blocks; an unreachable Secret Service stays "unknown"
-// and lets lark-mcp report its own error.
-export function assessKeyring({ collection, locked }) {
-  if (!collection || collection === "/" || locked === null || locked === undefined) {
-    return { state: "unknown", collection: collection ?? null };
-  }
-  if (!locked) return { state: "unlocked", collection };
-  return {
-    state: "locked",
-    collection,
-    failureClass: "KEYRING_LOCKED",
-    missingScopes: [],
-    nextAction:
-      "gnome-keyring 默认钥匙串处于 Locked 状态，lark-mcp 读取密钥会卡住。请用户在自己的终端运行 " +
-      `/usr/bin/python3 ${join(SCRIPT_DIR, "unlock_keyring.py")} 输入密码解锁（不要在聊天中提供密码），` +
-      "解锁后重新运行本命令；详见 references/permission-matrix.md 的钥匙串排障",
-  };
-}
-
-function gdbusCall(args) {
-  const result = spawnSync("gdbus", ["call", "--session", "--dest", "org.freedesktop.secrets", ...args], {
-    encoding: "utf8",
-    env: process.env,
-    timeout: 5_000,
-  });
-  return result.status === 0 ? result.stdout : null;
-}
-
-export function checkKeyring() {
-  if (process.env.FEISHU_DOC_SKIP_KEYRING_CHECK === "1") return { state: "skipped", collection: null };
-  const collection = parseGdbusObjectPath(
-    gdbusCall([
-      "--object-path",
-      "/org/freedesktop/secrets",
-      "--method",
-      "org.freedesktop.Secret.Service.ReadAlias",
-      "default",
-    ]),
-  );
-  if (!collection || collection === "/") return assessKeyring({ collection, locked: null });
-  const locked = parseGdbusBoolean(
-    gdbusCall([
-      "--object-path",
-      collection,
-      "--method",
-      "org.freedesktop.DBus.Properties.Get",
-      "org.freedesktop.Secret.Collection",
-      "Locked",
-    ]),
-  );
-  return assessKeyring({ collection, locked });
-}
-
-function runWhoami() {
-  const keyring = checkKeyring();
-  if (keyring.state === "locked") {
-    const error = new Error(`钥匙串 ${keyring.collection} 已锁定，未启动 lark-mcp`);
-    error.code = "KEYRING_LOCKED";
-    const { failureClass, missingScopes, nextAction } = keyring;
-    error.details = { failureClass, missingScopes, nextAction };
-    throw error;
-  }
-  const result = spawnSync(LARK_WRAPPER, ["whoami"], { encoding: "utf8", env: process.env, timeout: WHOAMI_TIMEOUT_MS });
-  const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
-  if (result.error?.code === "ETIMEDOUT") {
-    const error = new Error(`lark-mcp whoami ${WHOAMI_TIMEOUT_MS / 1000}s 内无响应`);
-    error.code = "WHOAMI_TIMEOUT";
-    error.details = {
-      failureClass: "WHOAMI_TIMEOUT",
-      missingScopes: [],
-      nextAction:
-        "多为 OS 钥匙串无响应：检查 gnome-keyring 是否锁定、是否有陈旧的 gcr-prompter 进程；" +
-        "详见 references/permission-matrix.md 的钥匙串排障",
-    };
-    throw error;
-  }
-  if (/keytar timeout/i.test(output)) {
-    const error = new Error("lark-mcp 读取 OS 钥匙串超时");
-    error.code = "KEYRING_LOCKED";
-    const { failureClass, missingScopes, nextAction } = assessKeyring({ collection: "default", locked: true });
-    error.details = { failureClass, missingScopes, nextAction };
-    throw error;
-  }
-  if (result.error) throw result.error;
-  if (result.status !== 0) fail(output.trim() || "lark-mcp whoami 失败", "WHOAMI_FAILED");
-  return parseWhoamiOutput(output);
-}
-
 async function runStreaming(command, args) {
   return await new Promise((resolve, reject) => {
     const child = spawn(command, args, { env: process.env, stdio: ["inherit", "pipe", "pipe"] });
@@ -600,129 +437,51 @@ async function runStreaming(command, args) {
   });
 }
 
-// whoami 只读本地缓存。access_token 过期时 lark-mcp 会在工具调用前用 refresh_token 续期
-// （dist/mcp-tool/mcp-tool.js:104），续期失败则报 "user_access_token is invalid or expired"。
-// 所以过期会话是否可用只能靠一次真实调用确认；非 wiki 目标用占位 token，正常会得到 131005 not found。
-const TOKEN_REJECTED = /user_access_token is invalid or expired/i;
-
-export async function probeSession(target, connect = connectLark) {
-  const mcp = await connect();
-  try {
-    const token = target?.kind === "wiki" ? target.token : "probe";
-    await mcp.call("wiki.v2.space.getNode", { params: { token }, useUAT: true });
-    return true;
-  } catch (error) {
-    return !TOKEN_REJECTED.test(String(error?.message ?? error));
-  } finally {
-    await mcp.close();
-  }
+export function readAuthStatus(run = runLarkCli) {
+  return parseAuthStatus(run(["auth", "status", "--json"]));
 }
 
-export async function checkAuthorization(operation, target, { whoami = runWhoami, probe = probeSession } = {}) {
-  const session = whoami();
-  const result = assessAuthorization(session, operation, target);
-  if (!result.ready || !session.expired) return { session, result };
-  if (await probe(target)) {
-    const refreshed = whoami();
-    return { session: refreshed, result: assessAuthorization(refreshed, operation, target) };
+// lark-cli 在调用接口前会用 refresh token 自动续期，所以 access token 过期但 refresh token 有效时照常可用
+export async function checkAuthorization(operation, target, { status = readAuthStatus } = {}) {
+  const session = status();
+  const usable = session.active && session.expired && session.hasRefreshToken ? { ...session, expired: false } : session;
+  const result = assessAuthorization(usable, operation, target);
+  if (result.ready && session.refreshExpiresAt && session.refreshExpiresAt * 1000 - Date.now() < 24 * 3600 * 1000) {
+    result.warning = "refresh token 不到 24 小时就过期，之后需要重新 authorize";
   }
-  return {
-    session,
-    result: {
-      ...result,
-      ready: false,
-      failureClass: "TOKEN_EXPIRED",
-      nextAction: "access_token 已过期且 refresh_token 续期失败，运行 authorize 在浏览器重新授权",
-    },
-  };
+  return { session, result };
 }
 
-async function authorize(operation, target) {
+// 设备码登录：lark-cli 打印 verification_uri_complete 后阻塞到用户确认（最长约 10 分钟）。
+// 在 agent 里要放到后台跑，把链接转给用户，确认后进程自然结束。
+async function authorize(operation, target, options) {
   const { session, result: current } = await checkAuthorization(operation, target);
-  if (current.ready) return current;
-  const desiredScopes = new Set(["auth:user.id:read", ...session.scopes, ...requiredScopes(operation, target)]);
-  if (session.active) {
-    const logout = spawnSync(LARK_WRAPPER, ["logout"], { encoding: "utf8", env: process.env });
-    if (logout.status !== 0) fail(`${logout.stdout ?? ""}${logout.stderr ?? ""}`.trim(), "LOGOUT_FAILED");
+  if (current.ready && !options["device-code"]) return current;
+  const args = ["auth", "login", "--json"];
+  if (options["device-code"]) {
+    args.push("--device-code", options["device-code"]);
+  } else {
+    const desired = new Set(["offline_access", ...session.scopes, ...requiredScopes(operation, target)]);
+    args.push("--scope", [...desired].sort().join(" "));
+    if (options["no-wait"]) args.push("--no-wait");
   }
-  const result = await runStreaming(LARK_WRAPPER, ["login", "--scope", [...desiredScopes].sort().join(" ")]);
+  const result = await runStreaming(LARK_CLI, args);
   if (result.code !== 0) {
-    const classified = classifyFailure(result.output, { requiredScopes: [...desiredScopes].sort() });
-    const error = new Error("飞书 OAuth 授权失败；请按 failureClass 和 nextAction 处理");
-    error.details = classified;
+    const error = new Error("lark-cli 登录未完成；按输出里的提示处理");
+    error.details = { failureClass: "AUTH_REQUIRED", missingScopes: [], nextAction: "重新运行 authorize，并在 10 分钟内让用户打开链接确认" };
     throw error;
   }
-  return assessAuthorization(runWhoami(), operation, target);
-}
-
-function sdkRoot() {
-  const installRoot = process.env.LARK_MCP_HOME || join(homedir(), ".local/share/agent-tools/mcp-cache/lark");
-  return join(installRoot, "node_modules/@modelcontextprotocol/sdk/dist/esm/client");
-}
-
-export async function connectLark({ extraTools = [] } = {}) {
-  const root = sdkRoot();
-  const clientModule = join(root, "index.js");
-  const stdioModule = join(root, "stdio.js");
-  if (!existsSync(clientModule) || !existsSync(stdioModule)) {
-    fail("Lark MCP SDK 尚未安装；先运行 lark-mcp whoami 触发固定版本安装", "MCP_SDK_MISSING");
-  }
-  const [{ Client }, { StdioClientTransport }] = await Promise.all([
-    import(pathToFileURL(clientModule).href),
-    import(pathToFileURL(stdioModule).href),
-  ]);
-  const toolNames = [...new Set([...TOOL_NAMES, ...extraTools])];
-  const transport = new StdioClientTransport({
-    command: LARK_WRAPPER,
-    // credentials.env may define LARK_TOOLS=preset.doc.default. Passing -t after
-    // the wrapper's own arguments deliberately gives this one-shot client the
-    // exact write/readback tool set without broadening the resident MCP server.
-    args: ["mcp", "-t", toolNames.join(",")],
-    env: { ...process.env, LARK_TOOLS: toolNames.join(",") },
-    stderr: "pipe",
-  });
-  transport.stderr?.on("data", (chunk) => {
-    if (process.env.FEISHU_DOC_DEBUG === "1") process.stderr.write(chunk);
-  });
-  const client = new Client({ name: "manage-feishu-doc", version: "1.0.0" });
-  await client.connect(transport);
-  const listed = await client.listTools();
-  const available = new Set(listed.tools.map((tool) => tool.name));
-  return {
-    async call(apiName, args) {
-      const toolName = TOOL_NAME_MAP[apiName] ?? apiName.replaceAll(".", "_");
-      if (!available.has(toolName)) {
-        fail(
-          `MCP tool 未加载: ${toolName}; 当前已加载: ${[...available].sort().join(", ") || "none"}`,
-          "MCP_TOOL_MISSING",
-        );
-      }
-      const result = await client.callTool({ name: toolName, arguments: args });
-      if (result.isError) {
-        const detail = result.content?.map((item) => item.text ?? "").join("\n") || JSON.stringify(result);
-        fail(detail, "LARK_TOOL_FAILED");
-      }
-      return unpackToolResult(result);
-    },
-    close: () => client.close(),
-  };
-}
-
-function unpackToolResult(result) {
-  if (result.structuredContent && typeof result.structuredContent === "object") return result.structuredContent;
-  const texts = (result.content ?? []).filter((item) => item.type === "text").map((item) => item.text);
-  if (texts.length === 0) return result;
-  const combined = texts.join("\n");
-  return parseEmbeddedJson(combined) ?? combined;
+  if (options["no-wait"]) return { ready: false, failureClass: "AUTH_PENDING", nextAction: "把上面的 verification_uri_complete 发给用户，确认后运行 authorize --device-code=<device_code>" };
+  return (await checkAuthorization(operation, target)).result;
 }
 
 function responseNode(value) {
   return value?.node ?? value?.data?.node ?? value;
 }
 
-export async function resolveDocument(mcp, target) {
+export async function resolveDocument(transport, target) {
   if (target.kind === "docx") return { documentToken: target.token, sourceKind: "docx" };
-  const value = await mcp.call("wiki.v2.space.getNode", { params: { token: target.token }, useUAT: true });
+  const value = await transport.call("wiki.v2.space.getNode", { params: { token: target.token } });
   const node = responseNode(value);
   if (node?.obj_type !== "docx" || !node?.obj_token) {
     fail(`wiki 节点不是可写 docx: obj_type=${node?.obj_type ?? "unknown"}`, "UNSUPPORTED_WIKI_OBJECT");
@@ -730,54 +489,26 @@ export async function resolveDocument(mcp, target) {
   return { documentToken: node.obj_token, sourceKind: "wiki", wikiToken: target.token };
 }
 
-function responseItems(value) {
-  return value?.items ?? value?.data?.items ?? [];
+async function getRootBlocks(transport, documentToken) {
+  return listChildren(transport, documentToken, documentToken);
 }
 
-function responsePage(value) {
-  return {
-    hasMore: Boolean(value?.has_more ?? value?.data?.has_more),
-    pageToken: value?.page_token ?? value?.data?.page_token ?? null,
-  };
-}
-
-async function getRootBlocks(mcp, documentToken) {
-  const blocks = [];
-  let pageToken = null;
-  do {
-    const params = { page_size: 500, document_revision_id: -1 };
-    if (pageToken) params.page_token = pageToken;
-    const value = await mcp.call("docx.v1.documentBlockChildren.get", {
-      path: { document_id: documentToken, block_id: documentToken },
-      params,
-      useUAT: true,
-    });
-    blocks.push(...responseItems(value));
-    const page = responsePage(value);
-    pageToken = page.hasMore ? page.pageToken : null;
-    if (page.hasMore && !pageToken) fail("飞书分页响应缺少 page_token", "INVALID_LARK_RESPONSE");
-  } while (pageToken);
-  return blocks;
-}
-
-async function createBlocks(mcp, documentToken, blocks, clientToken) {
-  return await mcp.call("docx.v1.documentBlockChildren.create", {
+async function createBlocks(transport, documentToken, blocks, clientToken) {
+  return await transport.call("docx.v1.documentBlockChildren.create", {
     path: { document_id: documentToken, block_id: documentToken },
     params: { document_revision_id: -1, client_token: clientToken },
     data: { children: blocks },
-    useUAT: true,
   });
 }
 
-async function deleteSection(mcp, documentToken, section, contentHash, range) {
-  return await mcp.call("docx.v1.documentBlockChildren.batchDelete", {
+async function deleteSection(transport, documentToken, section, contentHash, range) {
+  return await transport.call("docx.v1.documentBlockChildren.batchDelete", {
     path: { document_id: documentToken, block_id: documentToken },
     params: {
       document_revision_id: -1,
       client_token: deterministicClientToken(documentToken, section, contentHash, range.startIndex, range.endIndex, "delete"),
     },
     data: { start_index: range.startIndex, end_index: range.endIndex + 1 },
-    useUAT: true,
   });
 }
 
@@ -785,9 +516,9 @@ function revisionOf(value) {
   return value?.document_revision_id ?? value?.data?.document_revision_id ?? null;
 }
 
-export async function writeJson(mcp, documentToken, { content, section, heading, mode }) {
+export async function writeJson(transport, documentToken, { content, section, heading, mode }) {
   const managed = buildManagedBlocks(section, content, heading);
-  let blocks = await getRootBlocks(mcp, documentToken);
+  let blocks = await getRootBlocks(transport, documentToken);
   let existing = findManagedSections(blocks, section);
   if (existing.some((item) => item.endIndex === null)) {
     fail(`检测到未闭合的托管章节 ${section}，为避免误删已停止`, "PARTIAL_MANAGED_SECTION");
@@ -808,13 +539,13 @@ export async function writeJson(mcp, documentToken, { content, section, heading,
   let revision = null;
   if (matches.length === 0) {
     const created = await createBlocks(
-      mcp,
+      transport,
       documentToken,
       managed.blocks,
       deterministicClientToken(documentToken, section, managed.contentHash, "create"),
     );
     revision = revisionOf(created);
-    blocks = await getRootBlocks(mcp, documentToken);
+    blocks = await getRootBlocks(transport, documentToken);
     existing = findManagedSections(blocks, section);
     const inserted = existing.filter((item) => item.actualHash === managed.contentHash && item.verified);
     if (inserted.length === 0) {
@@ -822,7 +553,7 @@ export async function writeJson(mcp, documentToken, { content, section, heading,
     }
   }
 
-  blocks = await getRootBlocks(mcp, documentToken);
+  blocks = await getRootBlocks(transport, documentToken);
   existing = findManagedSections(blocks, section);
   const keep = [...existing]
     .reverse()
@@ -830,11 +561,11 @@ export async function writeJson(mcp, documentToken, { content, section, heading,
   if (!keep) fail("找不到已校验的新托管章节", "VERIFY_FAILED");
   const obsolete = existing.filter((item) => item !== keep).sort((a, b) => b.startIndex - a.startIndex);
   for (const item of obsolete) {
-    const deleted = await deleteSection(mcp, documentToken, section, managed.contentHash, item);
+    const deleted = await deleteSection(transport, documentToken, section, managed.contentHash, item);
     revision = revisionOf(deleted) ?? revision;
   }
 
-  const finalSections = findManagedSections(await getRootBlocks(mcp, documentToken), section);
+  const finalSections = findManagedSections(await getRootBlocks(transport, documentToken), section);
   const final = finalSections.filter((item) => item.actualHash === managed.contentHash && item.verified);
   if (final.length !== 1 || finalSections.length !== 1) {
     fail("写入后托管章节数量或内容校验失败", "VERIFY_FAILED");
@@ -847,31 +578,9 @@ export async function writeJson(mcp, documentToken, { content, section, heading,
   };
 }
 
-// One paged sweep returns every block in the document, table cells and their
-// text children included. Walking the tree with documentBlockChildren.get costs
-// one call per cell instead, which is orders of magnitude slower on big tables.
-export async function listAllBlocks(mcp, documentToken) {
-  const blocks = [];
-  let pageToken = null;
-  do {
-    const params = { page_size: 500, document_revision_id: -1 };
-    if (pageToken) params.page_token = pageToken;
-    const value = await mcp.call("docx.v1.documentBlock.list", {
-      path: { document_id: documentToken },
-      params,
-      useUAT: true,
-    });
-    blocks.push(...responseItems(value));
-    const page = responsePage(value);
-    pageToken = page.hasMore ? page.pageToken : null;
-    if (page.hasMore && !pageToken) fail("飞书分页响应缺少 page_token", "INVALID_LARK_RESPONSE");
-  } while (pageToken);
-  return blocks;
-}
-
-async function insertTableRows(mcp, documentToken, tableId, count) {
+async function insertTableRows(transport, documentToken, tableId, count) {
   for (let index = 0; index < count; index += 1) {
-    await mcp.call("docx.v1.documentBlock.patch", {
+    await transport.call("docx.v1.documentBlock.patch", {
       path: { document_id: documentToken, block_id: tableId },
       params: {
         document_revision_id: -1,
@@ -880,14 +589,13 @@ async function insertTableRows(mcp, documentToken, tableId, count) {
       // row_index -1 appends; a non-negative value makes the new row land at
       // exactly that index and pushes the rest down.
       data: { insert_table_row: { row_index: -1 } },
-      useUAT: true,
     });
   }
 }
 
-async function padCellBlocks(mcp, documentToken, cellId, missing) {
+async function padCellBlocks(transport, documentToken, cellId, missing) {
   for (let index = 0; index < missing; index += 1) {
-    await mcp.call("docx.v1.documentBlockChildren.create", {
+    await transport.call("docx.v1.documentBlockChildren.create", {
       path: { document_id: documentToken, block_id: cellId },
       params: {
         document_revision_id: -1,
@@ -897,7 +605,6 @@ async function padCellBlocks(mcp, documentToken, cellId, missing) {
         index: 0,
         children: [{ block_type: BLOCK_TYPE_TEXT, text: { elements: textElements("") } }],
       },
-      useUAT: true,
     });
   }
 }
@@ -914,7 +621,7 @@ function styleOf(block) {
   return block?.text?.elements?.[0]?.text_run?.text_element_style ?? undefined;
 }
 
-export async function syncTable(mcp, documentToken, { tableId, rows, padCells = "auto", dryRun = false }) {
+export async function syncTable(transport, documentToken, { tableId, rows, padCells = "auto", dryRun = false }) {
   if (!Array.isArray(rows) || rows.length === 0) fail("rows 必须是非空二维数组");
   const columnSize = rows[0].length;
   if (rows.some((row) => !Array.isArray(row) || row.length !== columnSize)) {
@@ -924,7 +631,7 @@ export async function syncTable(mcp, documentToken, { tableId, rows, padCells = 
     fail("rows 的单元格必须是字符串", "INVALID_TABLE_SHAPE");
   }
 
-  let blocks = await listAllBlocks(mcp, documentToken);
+  let blocks = await listAllBlocks(transport, documentToken);
   let table = readTable(blocks, tableId);
   if (table.columnSize !== columnSize) {
     fail(`列数不匹配：表格 ${table.columnSize} 列，输入 ${columnSize} 列`, "COLUMN_COUNT_MISMATCH");
@@ -946,8 +653,8 @@ export async function syncTable(mcp, documentToken, { tableId, rows, padCells = 
 
   const existingRowSize = table.rowSize;
   if (plan.rowsToAppend > 0) {
-    await insertTableRows(mcp, documentToken, tableId, plan.rowsToAppend);
-    blocks = await listAllBlocks(mcp, documentToken);
+    await insertTableRows(transport, documentToken, tableId, plan.rowsToAppend);
+    blocks = await listAllBlocks(transport, documentToken);
     table = readTable(blocks, tableId);
     if (table.rowSize !== rows.length) {
       fail(`插入行后行数为 ${table.rowSize}，期望 ${rows.length}`, "ROW_INSERT_FAILED");
@@ -959,14 +666,14 @@ export async function syncTable(mcp, documentToken, { tableId, rows, padCells = 
         for (let column = 0; column < table.columnSize; column += 1) {
           const missing = target - table.cellBlockCounts[row][column];
           if (missing > 0) {
-            await padCellBlocks(mcp, documentToken, table.cellIds[row][column], missing);
+            await padCellBlocks(transport, documentToken, table.cellIds[row][column], missing);
             padded += missing;
           }
         }
       }
       plan.cellBlocksPadded = padded;
       if (padded > 0) {
-        blocks = await listAllBlocks(mcp, documentToken);
+        blocks = await listAllBlocks(transport, documentToken);
         table = readTable(blocks, tableId);
       }
     }
@@ -987,19 +694,18 @@ export async function syncTable(mcp, documentToken, { tableId, rows, padCells = 
   let revision = null;
   for (let start = 0; start < updates.length; start += MAX_BATCH_UPDATES) {
     const chunk = updates.slice(start, start + MAX_BATCH_UPDATES);
-    const result = await mcp.call("docx.v1.documentBlock.batchUpdate", {
+    const result = await transport.call("docx.v1.documentBlock.batchUpdate", {
       path: { document_id: documentToken },
       params: {
         document_revision_id: -1,
         client_token: deterministicClientToken(documentToken, tableId, "batch", start, chunk.length),
       },
       data: { requests: chunk },
-      useUAT: true,
     });
     revision = revisionOf(result) ?? revision;
   }
 
-  const finalTable = readTable(await listAllBlocks(mcp, documentToken), tableId);
+  const finalTable = readTable(await listAllBlocks(transport, documentToken), tableId);
   const remaining = diffTable(finalTable.rows, rows);
   if (remaining.length > 0) {
     const error = new Error(`回读校验失败：${remaining.length} 个单元格与输入不一致`);
@@ -1109,8 +815,8 @@ export function diffTextPlan(blocks, plan) {
   return mismatches;
 }
 
-export async function updateTextElements(mcp, documentToken, plan, { dryRun = false } = {}) {
-  const blocks = await listAllBlocks(mcp, documentToken);
+export async function updateTextElements(transport, documentToken, plan, { dryRun = false } = {}) {
+  const blocks = await listAllBlocks(transport, documentToken);
   const blockMap = indexBlocks(blocks);
   for (const item of plan) {
     const block = blockMap.get(item.block_id);
@@ -1138,19 +844,18 @@ export async function updateTextElements(mcp, documentToken, plan, { dryRun = fa
     const chunk = pending
       .slice(start, start + MAX_BATCH_UPDATES)
       .map((item) => ({ block_id: item.block_id, update_text_elements: { elements: item.elements } }));
-    const result = await mcp.call("docx.v1.documentBlock.batchUpdate", {
+    const result = await transport.call("docx.v1.documentBlock.batchUpdate", {
       path: { document_id: documentToken },
       params: {
         document_revision_id: -1,
         client_token: deterministicClientToken(documentToken, "update-text", sha256(JSON.stringify(chunk))),
       },
       data: { requests: chunk },
-      useUAT: true,
     });
     revision = revisionOf(result) ?? revision;
   }
 
-  const mismatches = diffTextPlan(await listAllBlocks(mcp, documentToken), plan);
+  const mismatches = diffTextPlan(await listAllBlocks(transport, documentToken), plan);
   if (mismatches.length > 0) {
     const error = new Error(`回读校验失败：${mismatches.length} 个块与计划不一致`);
     error.code = "VERIFY_FAILED";
@@ -1288,25 +993,29 @@ function printJson(value) {
 function usage() {
   return {
     usage: [
+      "auth-check --operation=read|write-blocks|write-json|publish|create-doc [--target=<url>]",
+      "authorize --operation=<operation> [--target=<url>] [--no-wait | --device-code=<code>]",
+      "read --target=<url> [--format=markdown|xml|text] [--scope=full|outline|section|range|keyword] [--keyword=<k>] [--start-block-id=<id>] [--end-block-id=<id>] [--with-ids] [--out=<path>]",
+      "publish --file=<md> [--target=<folder-or-wiki-url>] [--doc=<docx-url>] [--overwrite] [--dry-run] [--force] [--accept-comment-loss]",
+      "outline --target=<url> [--heading=<text>]",
+      "list-blocks --target=<url> [--type=<block_type>] [--full] [--out=<path>]",
+      "table-read --target=<url> [--table=<block_id>|--table-index=<n>]",
+      "table-sync --target=<url> --table=<block_id>|--table-index=<n> --file=<path>|--stdin [--pad-cells=auto|off] [--dry-run]",
+      "update-text --target=<url> --file=<plan.json>|--stdin [--dry-run]",
+      "link-plan --target=<url> --labels=<labels.json> --out=<plan.json>",
+      "inspect-sections --target=<url> [--section=<id>]",
+      "write-json --target=<url> --file=<path>|--stdin --section=<id> [--heading=<text>] [--mode=upsert|append]",
+      "create-doc --target=<folder-url> --title=<title>",
+      "call --method=GET|POST|PATCH|PUT|DELETE --path=/open-apis/... [--params=<json>] [--file=<body.json>|--stdin] [--operation=read|write-blocks]  或  call --api=<已登记接口名> --file=<{path,params,data}>",
       "parse-target --target=<url-or-token>",
-      "auth-check --operation=read|write-json|write-blocks|convert|write-markdown [--target=<url-or-token>]",
-      "authorize --operation=<operation> [--target=<url-or-token>]",
-      "read --target=<url-or-token> [--summary]",
-      "list-blocks --target=<url-or-token> [--type=<block_type>] [--full] [--out=<path>]",
-      "update-text --target=<url-or-token> --file=<plan.json>|--stdin [--dry-run]",
-      "link-plan --target=<url-or-token> --labels=<labels.json> --out=<plan.json>",
-      "table-read --target=<url-or-token> [--table=<block_id>|--table-index=<n>]",
-      "table-sync --target=<url-or-token> --table=<block_id>|--table-index=<n> --file=<path>|--stdin [--pad-cells=auto|off] [--dry-run]",
-      "inspect-sections --target=<url-or-token> [--section=<id>]",
-      "write-json --target=<url-or-token> --file=<path>|--stdin --section=<id> [--heading=<text>] [--mode=upsert|append]",
-      "call --target=<url-or-token> --api=<lark.api.name> --file=<path>|--stdin [--operation=read|write-blocks]",
     ],
     notes: [
+      "read 默认输出 docs_ai 的 Markdown，文本绘图小组件会补成 ```mermaid 代码块；--format=text 是 rawContent 纯文本。",
+      "publish 首次发布要 --target 指定文件夹或知识库节点；再次发布目前只支持 --overwrite 全量覆盖，先 --dry-run 看检查结果。",
       "table-sync 的输入是 {\"rows\": [[...]]} 或裸二维数组，含表头行；行数只增不减。",
       "list-blocks --full 返回原始块（含 text_element_style）；--out 把原始块写入文件，只在 stdout 打印摘要。",
       "update-text 的计划是 [{block_id, elements}]，整块替换 elements；未变化的块跳过，每批 40 条，写后逐块回读校验。",
-      "link-plan 的 labels 是 {正文文字: 标题文本或 block_id}，只生成计划，写入仍走 update-text。",
-      "call 是逃生口，直接透传参数给已加载的 lark MCP 工具；参数 JSON 需自带 path/params/data。",
+      "call 是逃生口，直接用 lark-cli 调任意开放平台接口（用户身份）。",
     ],
   };
 }
@@ -1347,6 +1056,73 @@ async function inputRows(options) {
   return rows;
 }
 
+// docs_ai 读取里文本绘图小组件只是空的 <readonly-block type="isv">，源码要按块 id 从块接口取回
+const ISV_BLOCK = /<readonly-block\b[^>]*type="isv"[^>]*>(?:<\/readonly-block>)?/g;
+
+async function mermaidWidgetCode(transport, documentToken, blockId) {
+  const value = await transport.call("docx.v1.documentBlock.get", { path: { document_id: documentToken, block_id: blockId } });
+  const addOns = (value?.block ?? value)?.add_ons;
+  if (addOns?.component_type_id !== MERMAID_WIDGET_TYPE) return null;
+  try {
+    return JSON.parse(addOns.record ?? "{}").data ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function readDocument(transport, documentToken, options = {}) {
+  const format = options.format ?? "markdown";
+  if (format === "text") {
+    const value = await transport.call("docx.v1.document.rawContent", { path: { document_id: documentToken } });
+    return { format, content: value?.content ?? "" };
+  }
+  if (!["markdown", "xml"].includes(format)) fail("--format 只支持 markdown、xml、text");
+  const scopeArgs = [];
+  if (options.scope) scopeArgs.push("--scope", options.scope);
+  for (const key of ["keyword", "start-block-id", "end-block-id", "max-depth", "context-before", "context-after"]) {
+    if (options[key] !== undefined && options[key] !== true) scopeArgs.push(`--${key}`, String(options[key]));
+  }
+  const detail = options["with-ids"] ? "with-ids" : "simple";
+  const fetch = (fmt, level) => transport.shortcut(["docs", "+fetch", "--doc", documentToken, "--doc-format", fmt, "--detail", level, ...scopeArgs]);
+  const data = await fetch(format, detail);
+  let content = data.document?.content ?? "";
+  const placeholders = content.match(ISV_BLOCK) ?? [];
+  const widgets = { mermaid: 0, other: 0 };
+  if (placeholders.length > 0) {
+    const withIds = format === "xml" && detail === "with-ids" ? content : (await fetch("xml", "with-ids")).document?.content ?? "";
+    const ids = (withIds.match(ISV_BLOCK) ?? []).map((tag) => tag.match(/\bid="([^"]+)"/)?.[1] ?? null);
+    const codes = [];
+    for (const id of ids) codes.push(id ? await mermaidWidgetCode(transport, documentToken, id) : null);
+    let position = 0;
+    content = content.replace(ISV_BLOCK, (tag) => {
+      const code = codes[position];
+      const id = ids[position];
+      position += 1;
+      if (code === null || code === undefined) {
+        widgets.other += 1;
+        return tag;
+      }
+      widgets.mermaid += 1;
+      return format === "markdown"
+        ? `\`\`\`mermaid\n${code}\n\`\`\``
+        : `<mermaid-widget id="${id}">${code.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</mermaid-widget>`;
+    });
+  }
+  const { document, ...rest } = data;
+  return { format, revision: document?.revision_id ?? null, widgets, content, ...rest };
+}
+
+async function ensureAuthorized(operation, target) {
+  const { result } = await checkAuthorization(operation, target);
+  if (result.ready) return true;
+  printJson({ status: "permission_required", ...result });
+  process.exitCode = 2;
+  return false;
+}
+
+const READ_COMMANDS = new Set(["read", "inspect-sections", "list-blocks", "table-read", "outline", "link-plan"]);
+const WRITE_BLOCK_COMMANDS = new Set(["table-sync", "update-text"]);
+
 async function main() {
   const { command, options } = parseArgs(process.argv.slice(2));
   if (!command || command === "help" || options.help) return printJson(usage());
@@ -1354,250 +1130,194 @@ async function main() {
 
   if (command === "parse-target") return printJson({ status: "ok", target });
   if (command === "auth-check") {
-    const operation = options.operation || "read";
-    const { result } = await checkAuthorization(operation, target);
+    const { result } = await checkAuthorization(options.operation || "read", target);
     printJson({ status: result.ready ? "ready" : "permission_required", ...result });
     if (!result.ready) process.exitCode = 2;
     return;
   }
   if (command === "authorize") {
-    const operation = options.operation || "read";
-    const result = await authorize(operation, target);
+    const result = await authorize(options.operation || "read", target, options);
     printJson({ status: result.ready ? "ready" : "permission_required", ...result });
     if (!result.ready) process.exitCode = 2;
     return;
   }
-  // 在指定目录下新建文档。幂等靠调用方给定的 --slug：先在目录里找同 slug 的文档，
-  // 找到就复用（清空正文后重写），避免重跑一次多出一篇同名文档。
-  if (command === "create-doc") {
-    if (!target || target.kind !== "folder") {
-      fail("create-doc 需要 --target 指向 /drive/folder/<token>", "UNSUPPORTED_RESOURCE");
+
+  const transport = createTransport();
+
+  // 本地 Markdown → 飞书：首次新建，之后全量覆盖；发布状态记在 md 旁的 <name>.feishu.json
+  if (command === "publish") {
+    if (!options.file) fail("publish 必须指定 --file=<本地 md 路径>");
+    if (target && !["folder", "wiki"].includes(target.kind)) fail("publish 的 --target 必须是文件夹或知识库节点链接", "UNSUPPORTED_RESOURCE");
+    if (!(await ensureAuthorized("publish", target?.kind === "wiki" ? target : null))) return;
+    let doc = null;
+    if (options.doc) {
+      const docTarget = requireDocumentTarget(parseTarget(options.doc), command);
+      doc = { token: (await resolveDocument(transport, docTarget)).documentToken };
     }
-    if (!options.title) fail("create-doc 必须指定 --title");
-    const auth = assessAuthorization(runWhoami(), "create-doc", null);
-    if (!auth.ready) {
-      printJson({ status: "permission_required", ...auth });
-      process.exitCode = 2;
-      return;
-    }
-    const mcp = await connectLark({ extraTools: ["docx.v1.document.create"] });
-    try {
-      const created = await mcp.call("docx.v1.document.create", {
-        useUAT: true,
-        data: { folder_token: target.token, title: options.title },
-      });
-      const doc = created?.data?.document ?? created?.document ?? created;
-      const documentToken = doc.document_id ?? doc.documentId;
-      printJson({
-        status: "ok",
-        folderToken: target.token,
-        documentToken,
-        url: `https://lexin.feishu.cn/docx/${documentToken}`,
-      });
-    } finally {
-      await mcp.close();
-    }
+    const result = await publishMarkdown(transport, {
+      file: options.file,
+      target,
+      doc,
+      overwrite: Boolean(options.overwrite),
+      dryRun: Boolean(options["dry-run"]),
+      force: Boolean(options.force),
+      acceptCommentLoss: Boolean(options["accept-comment-loss"]),
+    });
+    printJson(result);
+    if (["blocked", "needs_mode"].includes(result.status)) process.exitCode = 2;
+    if (result.status === "published_with_issues") process.exitCode = 3;
     return;
+  }
+
+  // 在指定目录下建空文档；要带正文用 publish
+  if (command === "create-doc") {
+    if (!target || target.kind !== "folder") fail("create-doc 需要 --target 指向 /drive/folder/<token>", "UNSUPPORTED_RESOURCE");
+    if (!options.title) fail("create-doc 必须指定 --title");
+    if (!(await ensureAuthorized("create-doc", null))) return;
+    const created = await transport.call("docx.v1.document.create", { data: { folder_token: target.token, title: options.title } });
+    const documentToken = created?.document?.document_id;
+    return printJson({ status: "ok", folderToken: target.token, documentToken, url: `https://lexin.feishu.cn/docx/${documentToken}` });
+  }
+
+  // 逃生口：本脚本没包装的接口直接透传给 lark-cli
+  if (command === "call") {
+    if (!options.api && (!options.method || !options.path)) fail("call 必须指定 --method 与 --path（/open-apis/...），或已登记的 --api");
+    if (!(await ensureAuthorized(options.operation === "read" ? "read" : "write-blocks", target))) return;
+    const body = options.file || options.stdin ? JSON.parse(await inputJson(options)) : undefined;
+    // --api 沿用旧的 {path, params, data} 参数形状
+    if (options.api) return printJson({ status: "ok", api: options.api, result: await transport.call(options.api, body ?? {}) });
+    const params = options.params ? JSON.parse(options.params) : undefined;
+    const result = await transport.api(String(options.method).toUpperCase(), options.path, { params, data: body });
+    return printJson({ status: "ok", result });
   }
 
   if (!target) fail(`${command} 必须指定 --target`);
   requireDocumentTarget(target, command);
-  const READ_COMMANDS = new Set(["read", "inspect-sections", "list-blocks", "table-read", "outline", "link-plan"]);
   const operation = READ_COMMANDS.has(command)
     ? "read"
     : command === "write-json"
       ? "write-json"
-      : command === "table-sync" || command === "update-text"
+      : WRITE_BLOCK_COMMANDS.has(command)
         ? "write-blocks"
-        : command === "call"
-          ? options.operation === "read"
-            ? "read"
-            : "write-blocks"
-          : null;
+        : null;
   if (!operation) fail(`未知命令: ${command}`);
-  const auth = assessAuthorization(runWhoami(), operation, target);
-  if (!auth.ready) {
-    printJson({ status: "permission_required", ...auth });
-    process.exitCode = 2;
-    return;
-  }
+  if (!(await ensureAuthorized(operation, target))) return;
+  const resolved = await resolveDocument(transport, target);
 
-  // call is an escape hatch for APIs this script has no wrapper for, so the
-  // requested tool is loaded on demand instead of forcing a code change here.
-  const mcp = await connectLark({ extraTools: command === "call" && options.api ? [options.api] : [] });
-  try {
-    const resolved = await resolveDocument(mcp, target);
-    if (command === "read") {
-      const value = await mcp.call("docx.v1.document.rawContent", {
-        path: { document_id: resolved.documentToken },
-        useUAT: true,
-      });
-      const content = value?.content ?? value?.data?.content ?? value;
-      if (options.summary) {
-        const normalized = typeof content === "string" ? content : JSON.stringify(content);
-        return printJson({
-          status: "ok",
-          ...resolved,
-          contentLength: normalized.length,
-          contentHash: sha256(normalized),
-        });
-      }
-      return printJson({ status: "ok", ...resolved, content });
+  if (command === "read") {
+    const result = await readDocument(transport, resolved.documentToken, options);
+    if (options.out) {
+      writeFileSync(options.out, result.content);
+      const { content, ...summary } = result;
+      return printJson({ status: "ok", ...resolved, ...summary, contentLength: content.length, out: options.out });
     }
-    // 大文档先看骨架再定位，避免把整篇 rawContent 拉进上下文。
-    // --heading 只返回该标题到下一个同级或更高级标题之间的内容。
-    if (command === "outline") {
-      const blocks = await listAllBlocks(mcp, resolved.documentToken);
-      const headings = [];
-      blocks.forEach((block, idx) => {
-        const level = block.block_type >= 3 && block.block_type <= 11 ? block.block_type - 2 : 0;
-        if (!level) return;
-        const key = `heading${level}`;
-        const text = (block[key]?.elements ?? []).map((e) => e.text_run?.content ?? "").join("");
-        headings.push({ level, text, blockIndex: idx });
-      });
-      if (!options.heading) {
-        return printJson({ status: "ok", ...resolved, blockCount: blocks.length, headings });
-      }
-      const start = headings.find((h) => h.text.includes(options.heading));
-      if (!start) {
-        return printJson({ status: "not_found", ...resolved, heading: options.heading, headings });
-      }
-      const next = headings.find((h) => h.blockIndex > start.blockIndex && h.level <= start.level);
-      const slice = blocks.slice(start.blockIndex, next ? next.blockIndex : blocks.length);
-      return printJson({
-        status: "ok",
-        ...resolved,
-        heading: start.text,
-        blockCount: slice.length,
-        content: slice.map(blockText).filter(Boolean).join("\n"),
-      });
-    }
-    if (command === "list-blocks") {
-      const blocks = await listAllBlocks(mcp, resolved.documentToken);
-      const filtered = options.type
-        ? blocks.filter((block) => String(block.block_type) === String(options.type))
-        : blocks;
-      const tally = {};
-      for (const block of blocks) tally[block.block_type] = (tally[block.block_type] ?? 0) + 1;
-      if (options.out) {
-        writeFileSync(options.out, `${JSON.stringify(filtered, null, 2)}\n`);
-        return printJson({
-          status: "ok",
-          ...resolved,
-          blockCount: blocks.length,
-          blockTypeCounts: tally,
-          out: options.out,
-          written: filtered.length,
-        });
-      }
-      return printJson({
-        status: "ok",
-        ...resolved,
-        blockCount: blocks.length,
-        blockTypeCounts: tally,
-        tables: listTables(blocks),
-        blocks: options.full
-          ? filtered
-          : filtered.map((block) => ({
-              block_id: block.block_id,
-              block_type: block.block_type,
-              parent_id: block.parent_id,
-              text: blockText(block).slice(0, 120),
-            })),
-      });
-    }
-    if (command === "table-read") {
-      const blocks = await listAllBlocks(mcp, resolved.documentToken);
-      const tableId = tableIdFrom(blocks, options);
-      const table = readTable(blocks, tableId);
-      return printJson({
-        status: "ok",
-        ...resolved,
-        blockId: table.blockId,
-        rowSize: table.rowSize,
-        columnSize: table.columnSize,
-        rows: table.rows,
-      });
-    }
-    if (command === "table-sync") {
-      const rows = await inputRows(options);
-      const blocks = await listAllBlocks(mcp, resolved.documentToken);
-      const tableId = tableIdFrom(blocks, options);
-      const result = await syncTable(mcp, resolved.documentToken, {
-        tableId,
-        rows,
-        padCells: options["pad-cells"] === "off" ? "off" : "auto",
-        dryRun: Boolean(options["dry-run"]),
-      });
-      return printJson({ status: result.status, ...resolved, blockId: tableId, ...result });
-    }
-    if (command === "update-text") {
-      const plan = prepareTextPlan(JSON.parse(await inputJson(options)));
-      const result = await updateTextElements(mcp, resolved.documentToken, plan, {
-        dryRun: Boolean(options["dry-run"]),
-      });
-      return printJson({ ...resolved, ...result });
-    }
-    if (command === "link-plan") {
-      if (!options.labels || !options.out) fail("link-plan 必须指定 --labels=<labels.json> 和 --out=<plan.json>");
-      const labels = JSON.parse(readFileSync(options.labels, "utf8"));
-      const blocks = await listAllBlocks(mcp, resolved.documentToken);
-      const result = buildHeadingLinkPlan(blocks, resolved.documentToken, labels);
-      writeFileSync(options.out, `${JSON.stringify(result.plan, null, 2)}\n`);
-      return printJson({
-        status: "ok",
-        ...resolved,
-        out: options.out,
-        blocks: result.plan.length,
-        linkCount: result.linkCount,
-        targets: result.targets,
-        preview: result.plan.slice(0, 10).map((item) => item.text),
-      });
-    }
-    if (command === "call") {
-      if (!options.api) fail("call 必须指定 --api=<lark.api.name>");
-      const args = await inputJson(options).then((text) => JSON.parse(text));
-      const value = await mcp.call(options.api, { useUAT: true, ...args });
-      return printJson({ status: "ok", ...resolved, api: options.api, result: value });
-    }
-    if (command === "inspect-sections") {
-      const blocks = await getRootBlocks(mcp, resolved.documentToken);
-      const sections = options.section ? findManagedSections(blocks, options.section) : [];
-      return printJson({
-        status: "ok",
-        ...resolved,
-        blockCount: blocks.length,
-        section: options.section || null,
-        sections,
-      });
-    }
-    const mode = options.mode || "upsert";
-    if (!new Set(["upsert", "append"]).has(mode)) fail("mode 仅支持 upsert 或 append");
-    if (!options.section) fail("write-json 必须指定 --section");
-    const content = await inputJson(options);
-    const result = await writeJson(mcp, resolved.documentToken, {
-      content,
-      section: options.section,
-      heading: options.heading || null,
-      mode,
-    });
-    return printJson({ status: result.status, ...resolved, section: options.section, ...result });
-  } finally {
-    await mcp.close();
+    return printJson({ status: "ok", ...resolved, ...result });
   }
+  // 大文档先看骨架再定位，避免把整篇正文拉进上下文。
+  // --heading 只返回该标题到下一个同级或更高级标题之间的内容。
+  if (command === "outline") {
+    const blocks = await listAllBlocks(transport, resolved.documentToken);
+    const headings = [];
+    blocks.forEach((block, idx) => {
+      const level = block.block_type >= 3 && block.block_type <= 11 ? block.block_type - 2 : 0;
+      if (!level) return;
+      headings.push({ level, text: blockText(block), blockId: block.block_id, blockIndex: idx });
+    });
+    if (!options.heading) return printJson({ status: "ok", ...resolved, blockCount: blocks.length, headings });
+    const start = headings.find((h) => h.text.includes(options.heading));
+    if (!start) return printJson({ status: "not_found", ...resolved, heading: options.heading, headings });
+    const next = headings.find((h) => h.blockIndex > start.blockIndex && h.level <= start.level);
+    const slice = blocks.slice(start.blockIndex, next ? next.blockIndex : blocks.length);
+    return printJson({
+      status: "ok",
+      ...resolved,
+      heading: start.text,
+      blockCount: slice.length,
+      content: slice.map(blockText).filter(Boolean).join("\n"),
+    });
+  }
+  if (command === "list-blocks") {
+    const blocks = await listAllBlocks(transport, resolved.documentToken);
+    const filtered = options.type ? blocks.filter((block) => String(block.block_type) === String(options.type)) : blocks;
+    const tally = {};
+    for (const block of blocks) tally[block.block_type] = (tally[block.block_type] ?? 0) + 1;
+    if (options.out) {
+      writeFileSync(options.out, `${JSON.stringify(filtered, null, 2)}\n`);
+      return printJson({ status: "ok", ...resolved, blockCount: blocks.length, blockTypeCounts: tally, out: options.out, written: filtered.length });
+    }
+    return printJson({
+      status: "ok",
+      ...resolved,
+      blockCount: blocks.length,
+      blockTypeCounts: tally,
+      tables: listTables(blocks),
+      blocks: options.full
+        ? filtered
+        : filtered.map((block) => ({
+            block_id: block.block_id,
+            block_type: block.block_type,
+            parent_id: block.parent_id,
+            text: blockText(block).slice(0, 120),
+          })),
+    });
+  }
+  if (command === "table-read") {
+    const blocks = await listAllBlocks(transport, resolved.documentToken);
+    const table = readTable(blocks, tableIdFrom(blocks, options));
+    return printJson({ status: "ok", ...resolved, blockId: table.blockId, rowSize: table.rowSize, columnSize: table.columnSize, rows: table.rows });
+  }
+  if (command === "table-sync") {
+    const rows = await inputRows(options);
+    const blocks = await listAllBlocks(transport, resolved.documentToken);
+    const tableId = tableIdFrom(blocks, options);
+    const result = await syncTable(transport, resolved.documentToken, {
+      tableId,
+      rows,
+      padCells: options["pad-cells"] === "off" ? "off" : "auto",
+      dryRun: Boolean(options["dry-run"]),
+    });
+    return printJson({ status: result.status, ...resolved, blockId: tableId, ...result });
+  }
+  if (command === "update-text") {
+    const plan = prepareTextPlan(JSON.parse(await inputJson(options)));
+    const result = await updateTextElements(transport, resolved.documentToken, plan, { dryRun: Boolean(options["dry-run"]) });
+    return printJson({ ...resolved, ...result });
+  }
+  if (command === "link-plan") {
+    if (!options.labels || !options.out) fail("link-plan 必须指定 --labels=<labels.json> 和 --out=<plan.json>");
+    const labels = JSON.parse(readFileSync(options.labels, "utf8"));
+    const blocks = await listAllBlocks(transport, resolved.documentToken);
+    const result = buildHeadingLinkPlan(blocks, resolved.documentToken, labels);
+    writeFileSync(options.out, `${JSON.stringify(result.plan, null, 2)}\n`);
+    return printJson({
+      status: "ok",
+      ...resolved,
+      out: options.out,
+      blocks: result.plan.length,
+      linkCount: result.linkCount,
+      targets: result.targets,
+      preview: result.plan.slice(0, 10).map((item) => item.text),
+    });
+  }
+  if (command === "inspect-sections") {
+    const blocks = await getRootBlocks(transport, resolved.documentToken);
+    const sections = options.section ? findManagedSections(blocks, options.section) : [];
+    return printJson({ status: "ok", ...resolved, blockCount: blocks.length, section: options.section || null, sections });
+  }
+  const mode = options.mode || "upsert";
+  if (!new Set(["upsert", "append"]).has(mode)) fail("mode 仅支持 upsert 或 append");
+  if (!options.section) fail("write-json 必须指定 --section");
+  const content = await inputJson(options);
+  const result = await writeJson(transport, resolved.documentToken, { content, section: options.section, heading: options.heading || null, mode });
+  return printJson({ status: result.status, ...resolved, section: options.section, ...result });
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   main().catch((error) => {
-    const operation = process.argv.includes("read") ? "read" : "write-json";
+    const command = process.argv[2];
+    const operation = READ_COMMANDS.has(command) ? "read" : command === "publish" ? "publish" : "write-json";
     const classified = error.details ?? classifyFailure(error, { requiredScopes: OPERATION_SCOPES[operation] ?? [] });
-    printJson({
-      status: "error",
-      code: error.code ?? classified.failureClass,
-      message: error.message,
-      ...classified,
-    });
+    printJson({ status: "error", code: error.code ?? classified.failureClass, message: error.message, ...classified });
     process.exitCode = 1;
   });
 }

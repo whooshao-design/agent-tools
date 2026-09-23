@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# 飞书官方 CLI（larksuite/cli）的本地 wrapper，manage-feishu-doc 经它调用开放平台。
+#
+#   lark-cli setup           用 env/credentials.env 的 LARK_APP_ID / LARK_APP_SECRET 绑定 profile（已存在则跳过）
+#   lark-cli auth login ...  设备码登录（给用户一个链接确认，不需要 Linux 浏览器）
+#   lark-cli <其它参数>       原样透传
+#
+# 固定版本、装到缓存目录、直接 exec Go 二进制。凭据由 lark-cli 存成加密文件（~/.local/share/lark-cli），
+# 不经 gnome-keyring。默认直连飞书（LARK_CLI_NO_PROXY=1）：本机代理出口在境外，会被当成异地登录触发风控。
+set -euo pipefail
+
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
+# shellcheck source=../../../../bin/_load_env.sh
+source "$REPO_DIR/bin/_load_env.sh"
+
+PACKAGE="${LARK_CLI_PACKAGE:-@larksuite/cli@1.0.96}"
+CACHE_ROOT="${AGENT_TOOLS_CLI_CACHE:-$HOME/.local/share/agent-tools/cli-cache}"
+INSTALL_ROOT="${LARK_CLI_HOME:-$CACHE_ROOT/lark-cli}"
+PACKAGE_SPEC_FILE="$INSTALL_ROOT/.package-spec"
+BIN="${LARK_CLI_BIN:-$INSTALL_ROOT/node_modules/@larksuite/cli/bin/lark-cli}"
+
+if [[ -z "${LARK_CLI_BIN:-}" ]]; then
+    if [[ ! -x "$BIN" || ! -f "$PACKAGE_SPEC_FILE" || "$(cat "$PACKAGE_SPEC_FILE")" != "$PACKAGE" ]]; then
+        mkdir -p "$INSTALL_ROOT"
+        echo "Installing $PACKAGE into $INSTALL_ROOT" >&2
+        # postinstall 从 GitHub Releases 下载二进制并校验 checksum，这一步需要走代理
+        NPM_CONFIG_CACHE="${NPM_CONFIG_CACHE:-$HOME/.local/share/agent-tools/mcp-cache/npm}" \
+            npm --prefix "$INSTALL_ROOT" install --save-exact --omit=dev --no-audit --no-fund "$PACKAGE" >&2
+        printf '%s\n' "$PACKAGE" > "$PACKAGE_SPEC_FILE"
+    fi
+fi
+
+export LARK_CLI_NO_PROXY="${LARK_CLI_NO_PROXY:-1}"
+
+if [[ "${1:-}" == "setup" ]]; then
+    load_agent_tools_env "$REPO_DIR" --required
+    for key in LARK_APP_ID LARK_APP_SECRET; do
+        if [[ -z "${!key:-}" ]]; then
+            echo "$(agent_tools_env_file "$REPO_DIR") 中 $key 未填写" >&2
+            exit 1
+        fi
+    done
+    profile="${LARK_CLI_PROFILE:-lexin}"
+    if "$BIN" profile list | grep -q "\"name\": \"$profile\""; then
+        echo "profile $profile 已存在"
+        exit 0
+    fi
+    # 密钥只经标准输入传给 lark-cli，不出现在命令行和 shell 历史里
+    printf '%s' "$LARK_APP_SECRET" | "$BIN" profile add --name "$profile" --app-id "$LARK_APP_ID" \
+        --app-secret-stdin --brand feishu --lang zh --use
+    exit 0
+fi
+
+exec "$BIN" "$@"
