@@ -31,7 +31,7 @@
 - `row_index: -1` → 追加到表格末尾
 - `row_index: n`（n ≥ 0）→ 新行落在索引 `n`，原第 `n` 行及之后整体下移
 
-`docx.v1.documentBlock.batchUpdate` 在 lark-mcp 的 schema 中只声明了 `update_text_elements`，插入行仍需逐次 `patch`。
+`docx.v1.documentBlock.batchUpdate` 的 schema 也声明了 `update_table_property`、`insert_table_row` 等表格类子请求，但同一批里 Block ID 不能重复，所以对同一张表的多次插行、逐列改宽仍需逐次 `patch`。
 
 `table-sync` 只在末尾补行，靠"重写差异格"达成中间插入的效果——这样调用方不需要计算插入位置，代价是被下移的行会被重写。
 
@@ -90,6 +90,10 @@ HTML 模式下**内联 `<svg>` 会被整个丢弃**（产出 0 块）；`<img sr
 2. 再用 `update-text` 按 convert 结果逐格写 elements（保留行内代码与链接样式），写后用 `table-read` 逐格核对。
 
 表格前后的其他块仍可用 descendant，按"表前 → 建表 → 表后"三段依次插入。
+
+`children.create` 的 `table.property` 同样会被 zod 剥掉 `column_width`，新表是飞书默认的每列 100。建好后用 `documentBlock.patch` 的 `update_table_property`（`column_width` 最小 50，另加 `column_index`）逐列恢复列宽；2026-09-23 实测可用，回读 `table.property.column_width` 核对。
+
+有序列表的 `ordered.style.sequence` 在 descendant、children.create、patch 的 update_text_style/update_text、batchUpdate 五条写入路径上都会被 zod 剥掉，API 建出的有序块没有 sequence 字段，rawContent 也不带编号，只能按相邻关系推断或在客户端目视核对。需要固定编号时，把列表之间的代码块挂到前一个有序项的 children 下，让各项保持相邻。
 
 ## 插图：唯一可行路径
 
