@@ -96,7 +96,7 @@
 - `update_text_elements` 整体替换 elements，`text_element_style` 不传就丢加粗、行内代码等样式；`table-sync` 只重写有差异的格并沿用原样式。
 - 做元素级修改要用 `list-blocks --full --out=<file>` 导出原始块，里面才有 `text.elements[].text_run.text_element_style`。常用块类型：1 页面、2 文本、3–11 为 H1–H9、12 无序列表、13 有序列表、14 代码、19 高亮块、24/25 分栏、27 图片、31 表格、32 单元格、40 小组件、43 画板。
 - `link-plan` 的改写规则：按 text_run 拆分，保留原样式，只把匹配子串拆成新 run 加 `link`；跳过已有 `link` 或 `inline_code` 的 run、标题和代码块，只处理 2/12/13，重跑幂等。`update-text` 每批 40 条、确定性 client_token，写后逐块比对内容、样式和解码后的链接，比对前合并相邻同样式 run。2026-09 实测一次 51 处改动全部一致。
-- 页内跳转链接格式 `https://lexin.feishu.cn/docx/<document_token>#<heading_block_id>`（已点击验证）；飞书「复制链接」给的 `#share-<id>` 不是 API 的块 id。`link.url` 必须整体 `encodeURIComponent`，`update-text` 和 `link-plan` 会自动编码一次。
+- 页内跳转链接格式：普通云文档用 `https://lexin.feishu.cn/docx/<document_token>#<heading_block_id>`；挂在知识库下的文档要用 `https://lexin.feishu.cn/wiki/<wiki_token>#<heading_block_id>`，否则读者从 wiki 地址打开时，docx 链接被当成另一页、会新开页面（2026-09-24 点击验证，wiki 形式在当前页滚动）。`link-plan` 按目标自动选择；飞书「复制链接」给的 `#share-<id>` 不是 API 的块 id。`link.url` 必须整体 `encodeURIComponent`，`update-text` 和 `link-plan` 会自动编码一次。
 
 ## lark-mcp 0.5.1 的字段剥离（历史，skill 已改用 lark-cli）
 

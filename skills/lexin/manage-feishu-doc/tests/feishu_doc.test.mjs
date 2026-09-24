@@ -519,6 +519,10 @@ test("buildHeadingLinkPlan splits runs, keeps style, and skips headings, code, l
   const after = blocks.map((block) => (block.block_id === "p1" ? { ...block, text: { elements: plan[0].elements } } : block));
   assert.equal(buildHeadingLinkPlan(after, DOC, { "第 3 章": "3. 查询方法" }).plan.length, 0);
 
+  // Wiki-hosted documents link through the wiki page so the jump scrolls in place instead of opening a new page.
+  const wiki = buildHeadingLinkPlan(blocks, DOC, { "第 3 章": "3. 查询方法" }, { wikiToken: "WIKI123" });
+  assert.equal(wiki.plan[0].elements[1].text_run.text_element_style.link.url, encodeURIComponent("https://lexin.feishu.cn/wiki/WIKI123#h3"));
+
   assert.throws(() => buildHeadingLinkPlan(blocks, DOC, { x: "不存在" }), (error) => error.code === "HEADING_NOT_FOUND");
   const dup = [...blocks, textBlock("h3b", 4, [["3. 查询方法"]])];
   assert.throws(() => buildHeadingLinkPlan(dup, DOC, { x: "3. 查询方法" }), (error) => error.code === "AMBIGUOUS_HEADING");

@@ -1087,12 +1087,16 @@ export function linkRuns(elements, pattern, urlFor) {
   return { elements: out, count };
 }
 
-export function headingLinkUrl(documentToken, blockId) {
-  return `https://lexin.feishu.cn/docx/${documentToken}#${blockId}`;
+// A wiki-hosted document is opened as /wiki/<wiki token>; a /docx/ link to the same document counts as
+// another page and opens a new tab, while /wiki/<token>#<block id> scrolls in place (clicked 2026-09-24).
+export function headingLinkUrl(documentToken, blockId, wikiToken = null) {
+  return wikiToken
+    ? `https://lexin.feishu.cn/wiki/${wikiToken}#${blockId}`
+    : `https://lexin.feishu.cn/docx/${documentToken}#${blockId}`;
 }
 
 // labels: {"正文里出现的文字": "标题文本或标题 block_id"}
-export function buildHeadingLinkPlan(blocks, documentToken, labels) {
+export function buildHeadingLinkPlan(blocks, documentToken, labels, { wikiToken = null } = {}) {
   const entries = Object.entries(labels ?? {});
   if (entries.length === 0) fail("labels 必须是非空对象 {标签: 标题文本或 block_id}", "INVALID_PLAN");
   const blockMap = indexBlocks(blocks);
@@ -1113,7 +1117,7 @@ export function buildHeadingLinkPlan(blocks, documentToken, labels) {
     .sort((a, b) => b.length - a.length)
     .map((label) => label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
   const pattern = new RegExp(escaped.join("|"), "g");
-  const urlFor = (label) => headingLinkUrl(documentToken, targets.get(label));
+  const urlFor = (label) => headingLinkUrl(documentToken, targets.get(label), wikiToken);
   const plan = [];
   let linkCount = 0;
   for (const block of blocks) {
@@ -1571,7 +1575,7 @@ async function main() {
     if (!options.labels || !options.out) fail("link-plan 必须指定 --labels=<labels.json> 和 --out=<plan.json>");
     const labels = JSON.parse(readFileSync(options.labels, "utf8"));
     const blocks = await listAllBlocks(transport, resolved.documentToken);
-    const result = buildHeadingLinkPlan(blocks, resolved.documentToken, labels);
+    const result = buildHeadingLinkPlan(blocks, resolved.documentToken, labels, { wikiToken: resolved.wikiToken ?? null });
     writeFileSync(options.out, `${JSON.stringify(result.plan, null, 2)}\n`);
     return printJson({
       status: "ok",
