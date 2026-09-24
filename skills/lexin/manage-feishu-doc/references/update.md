@@ -34,7 +34,7 @@
 
 ## 写之前的检查
 
-先加 `--dry-run` 看 `removedPreview`（将被替换或删除的块）和 `insertExpected`（片段里各类元素的数量）。以下情况会返回 `blocked`（退出码 2），原样告诉用户，由用户确认后才加对应参数：
+先加 `--dry-run` 看 `removedPreview`（将被替换或删除的块）、`writes`（实际要发的写请求）和 `insertExpected`（片段里各类元素的数量）。范围跨出列表或含文本绘图小组件时，飞书不接受一个区间，`writes` 会是按列表拆开的几次 `block_delete` 加一次 `block_insert_after`。以下情况会返回 `blocked`（退出码 2），原样告诉用户，由用户确认后才加对应参数：
 
 | 检查 | 触发 | 确认后加 |
 |---|---|---|

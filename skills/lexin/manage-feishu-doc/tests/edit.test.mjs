@@ -161,3 +161,34 @@ test("a nested item recreated in Feishu between the read and the write stops the
   await assert.rejects(editDocument(transport, "D1", { op: "replace", block: "l2", file }), (error) => error.code === "REMOTE_CHANGED_DURING_EDIT");
   assert.equal(updates().length, 0);
 });
+
+// docs_ai 的区间两端必须是同一父块下的兄弟块：列表项的父块是没有 id 的 <ul>/<ol>，跨出列表的区间整次报 1002
+test("a range that runs into or across a list is deleted list by list and refilled after the block before it", async () => {
+  const { file } = fragment("新的安装说明。\n");
+  const dry = fakeDocument();
+  const preview = await editDocument(dry.transport, "D1", { op: "replace-section", heading: "安装", file, allowProtected: true, dryRun: true });
+  assert.equal(preview.status, "dry_run");
+  assert.deepEqual(preview.writes, [
+    "block_delete --start-block-id h3 --end-block-id i1",
+    "block_delete --start-block-id l1 --end-block-id l3",
+    "block_delete --start-block-id p1 --end-block-id h2",
+    "block_insert_after --block-id h1",
+  ], "dry-run shows the split instead of one range that would fail");
+  assert.equal(dry.updates().length, 0);
+
+  const live = fakeDocument();
+  assert.equal((await editDocument(live.transport, "D1", { op: "replace-section", heading: "安装", file, allowProtected: true })).status, "updated");
+  assert.deepEqual(live.updates().map((entry) => entry.args.slice(5).join(" ")), [...preview.writes.slice(0, 3), "block_insert_after --block-id h1 --doc-format markdown --content -"]);
+  assert.equal(live.updates().at(-1).input, "新的安装说明。\n");
+
+  // 端点本身是列表项：列表里的几项自成一段，插入锚点是它前面那一项
+  const endpoint = fakeDocument();
+  await editDocument(endpoint.transport, "D1", { op: "delete", block: "l2", "end-block": "h3" });
+  assert.deepEqual(endpoint.updates().map((entry) => entry.args.slice(5).join(" ")), [
+    "block_delete --block-id h3",
+    "block_delete --start-block-id l2 --end-block-id l3",
+  ]);
+
+  const inside = await editDocument(fakeDocument().transport, "D1", { op: "replace", block: "l1", "end-block": "l3", file, dryRun: true });
+  assert.deepEqual(inside.writes, ["block_replace --start-block-id l1 --end-block-id l3"], "items of one list stay one range");
+});

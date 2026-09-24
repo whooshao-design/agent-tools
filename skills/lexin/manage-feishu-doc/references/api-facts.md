@@ -20,6 +20,7 @@
 - 页内锚点链接 `[x](#y)` 只剩文字。
 - `str_replace`、`block_replace`、`block_insert_after`、`block_delete`、`overwrite` 都可用，每次 revision +1；`warnings` 在 `ok=true` 时也可能有降级，必须检查。
 - **选区不能含文本绘图小组件**：`block_replace` 的范围里有小组件（XML 里的 `readonly-block`）时返回 `result: failed`、`degrade_code=1002 … non-addressable unit`，整次不写入。但 `block_delete --block-id <小组件>` 单独删它可以，`block_insert_after` 以它为锚点也可以。`publish` 增量和 `edit` 遇到这种区间改成「分段删除 → 在前一个块后插入」（2026-09-23 实测）。
+- **区间跨不出列表**：`--start-block-id`/`--end-block-id` 必须是同一父块下的兄弟块，中间的兄弟也都要有 id。列表项的父块是没有 id 的 `<ul>`/`<ol>`，所以段落到段落的区间中间夹着列表报 `1002 … an intermediate sibling has no block ID`，一端是列表项、另一端在列表外（或在另一个列表里）报 `1002 … must be sibling blocks under the same parent`，都整次不写入；同一列表内的几项可以一起 `block_replace`/`block_delete`，替换成段落也行。`block_insert_after` 以列表最后一项为锚点插段落，段落落在列表之后。`publish` 增量和 `edit` 把这种区间按列表拆段删除，再在前一个块后插入（2026-09-24 实测）。
 - 失败时 lark-cli 信封 `ok=false` 但**没有 `error` 字段**，原因只在 `data.warnings` 里；脚本已把它带进错误信息。
 - `str_replace` 替换**全部**匹配处；Markdown 模式下 `--pattern` 按导出的 Markdown（特殊字符已转义）匹配，只适合单行行内文字。`--content`、`--reference-map` 以 `@` 开头时 lark-cli 当成文件路径读取，内容一律走 `--content -` 加标准输入。
 - docs_ai 建不了文本绘图小组件；`publish` 和 `edit` 先写占位段落 `[[feishu-mermaid:<本次随机前缀>-N]]`，再用块接口在同一位置建小组件并删掉占位（已验证）。只替换与本次占位完全相同的段落，文档里原有的相似文字不动。

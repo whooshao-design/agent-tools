@@ -7,6 +7,7 @@ import {
   compareCounts,
   countPublished,
   MERMAID_WIDGET_TYPE,
+  planBlockWrites,
   publishMarkdown,
   readState,
   replaceBlocks,
@@ -331,6 +332,21 @@ test("a range with a text-drawing widget is deleted piecewise and refilled after
   log.length = 0;
   await replaceBlocks(transport, "D1", { ids: ["w"], readonly: new Set(["w"]), anchor: null });
   assert.deepEqual(log, ["--command block_delete --block-id w"]);
+});
+
+test("list items only join items of the same list into one range; other blocks and the next list start new ranges", () => {
+  const lists = new Map([["l1", 0], ["l2", 0], ["o1", 2]]);
+  const plan = (ids, replace) => planBlockWrites({ ids, lists, anchor: "z", replace }).map((step) => step.slice(1).join(" "));
+  assert.deepEqual(plan(["p", "l1", "l2", "q", "o1"], true), [
+    "block_delete --block-id o1",
+    "block_delete --block-id q",
+    "block_delete --start-block-id l1 --end-block-id l2",
+    "block_delete --block-id p",
+    "block_insert_after --block-id z",
+  ]);
+  assert.deepEqual(plan(["l1", "l2"], true), ["block_replace --start-block-id l1 --end-block-id l2"]);
+  assert.deepEqual(plan(["p", "q"], false), ["block_delete --start-block-id p --end-block-id q"]);
+  assert.deepEqual(plan([], true), ["block_insert_after --block-id z"]);
 });
 
 // ---- 第一轮评审（codex-vps）发现的问题 ----

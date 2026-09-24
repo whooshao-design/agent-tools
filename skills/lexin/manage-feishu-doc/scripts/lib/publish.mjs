@@ -80,27 +80,39 @@ export function compareCounts(expected, counts, codeFallbacks = 0) {
 // 用一段 Markdown 替换一串相邻的顶层块（ids 为空时只在 anchor 后插入，markdown 为空时只删除）。
 // docs_ai 选不中只读块（文本绘图等小组件，XML 里是 readonly-block）：选区含它时 block_replace 报 1002，
 // 但它能单独 block_delete、也能作插入锚点，所以这种区间改成分段删除后再在 anchor 后插入
+// 区间的两端必须是同一父块下的兄弟块，中间的兄弟块也都要有 id：列表项的父块是没有 id 的 <ul>/<ol>，
+// 所以列表项只和同一列表的项连成一段（lists 是列表项 id → 所在列表），跨出列表的区间同样分段删除后再插入
 // position 是飞书当前的块顺序（blockOrder）：给了就按当前顺序排，夹着别的块（飞书上调过顺序或新加了块）的地方拆开删，
 // 不用区间一并删掉没选中的块
-export async function replaceBlocks(transport, documentToken, { ids, readonly = new Set(), position = null, anchor, markdown, cwd }) {
-  const update = (args, input) =>
-    transport.shortcut(["docs", "+update", "--doc", documentToken, ...args, ...(input === undefined ? [] : ["--doc-format", "markdown", "--content", "-"])], { input, cwd });
+// 返回要依次执行的 docs +update 参数（不含 --doc 与正文），dry-run 也用它预览
+export function planBlockWrites({ ids, readonly = new Set(), lists = new Map(), position = null, anchor, replace }) {
   const select = (run) => (run.length === 1 ? ["--block-id", run[0]] : ["--start-block-id", run[0], "--end-block-id", run.at(-1)]);
-  if (ids.length === 0) return markdown === undefined ? [] : [await update(["--command", "block_insert_after", "--block-id", anchor ?? "0"], markdown)];
+  const insert = ["--command", "block_insert_after", "--block-id", anchor ?? "0"];
+  if (ids.length === 0) return replace ? [insert] : [];
   const ordered = position ? [...ids].sort((a, b) => position.get(a) - position.get(b)) : ids;
   const runs = [];
   for (const id of ordered) {
     const last = runs.at(-1)?.at(-1);
-    const joins = last !== undefined && !readonly.has(id) && !readonly.has(last) && (!position || position.get(id) === position.get(last) + 1);
+    const joins = last !== undefined && !readonly.has(id) && !readonly.has(last) && lists.get(id) === lists.get(last)
+      && (!position || position.get(id) === position.get(last) + 1);
     if (joins) runs.at(-1).push(id);
     else runs.push([id]);
   }
-  if (runs.length === 1 && !readonly.has(runs[0][0])) {
-    return [await update(markdown === undefined ? ["--command", "block_delete", ...select(runs[0])] : ["--command", "block_replace", ...select(runs[0])], markdown)];
-  }
+  if (runs.length === 1 && !readonly.has(runs[0][0])) return [["--command", replace ? "block_replace" : "block_delete", ...select(runs[0])]];
+  const steps = runs.reverse().map((run) => ["--command", "block_delete", ...select(run)]);
+  if (replace) steps.push(insert);
+  return steps;
+}
+
+export async function replaceBlocks(transport, documentToken, { ids, readonly, lists, position = null, anchor, markdown, cwd }) {
   const results = [];
-  for (const run of runs.reverse()) results.push(await update(["--command", "block_delete", ...select(run)]));
-  if (markdown !== undefined) results.push(await update(["--command", "block_insert_after", "--block-id", anchor ?? "0"], markdown));
+  for (const step of planBlockWrites({ ids, readonly, lists, position, anchor, replace: markdown !== undefined })) {
+    const input = step[1] === "block_delete" ? undefined : markdown;
+    results.push(await transport.shortcut(
+      ["docs", "+update", "--doc", documentToken, ...step, ...(input === undefined ? [] : ["--doc-format", "markdown", "--content", "-"])],
+      { input, cwd },
+    ));
+  }
   return results;
 }
 
@@ -519,6 +531,7 @@ async function incrementalPublish(transport, context) {
 
   const markdownOf = (indexes) => indexes.map((index) => newUnits[index].markdown).join("\n\n") + "\n";
   const readonly = new Set(elements.filter((element) => element.tag === "readonly-block").flatMap((element) => element.topIds));
+  const lists = new Map(elements.flatMap((element, index) => (["ul", "ol"].includes(element.tag) ? element.topIds.map((id) => [id, index]) : [])));
   const serverWarnings = [];
   // 结构改动从后往前做，锚点都是没动过的块，互不影响
   for (const step of [...steps].reverse()) {
@@ -528,6 +541,7 @@ async function incrementalPublish(transport, context) {
     const results = await replaceBlocks(transport, documentToken, {
       ids,
       readonly,
+      lists,
       position,
       anchor: step.anchor,
       markdown: step.inserted.length ? markdownOf(step.inserted) : undefined,

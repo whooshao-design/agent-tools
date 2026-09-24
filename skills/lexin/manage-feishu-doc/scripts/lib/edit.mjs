@@ -4,7 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 
 import { preparePublishMarkdown } from "./markdown.mjs";
-import { fetchContent, listOpenComments, replaceBlocks, replaceDiagramPlaceholders } from "./publish.mjs";
+import { fetchContent, listOpenComments, planBlockWrites, replaceBlocks, replaceDiagramPlaceholders } from "./publish.mjs";
 import { documentShape, parseTopLevel } from "./structure.mjs";
 
 // 这些块读出来无法用 Markdown 原样写回，替换或删除前要用户确认
@@ -164,12 +164,21 @@ export async function editDocument(transport, documentToken, options) {
   if (comments.length > 0 && !options.acceptCommentLoss) {
     blockers.push({ check: "open_comments", message: `有 ${comments.length} 条未解决评论挂在要替换或删除的块上：先处理，或确认后加 --accept-comment-loss`, comments: comments.slice(0, 10) });
   }
+  // 列表项只能和同一列表的项连成一个区间，范围跨出列表时分段删除再插入；预览里列出实际要发的写请求
+  const write = {
+    ids: removed.map((block) => block.id),
+    readonly: new Set(removed.filter((block) => block.tag === "readonly-block").map((block) => block.id)),
+    lists: new Map(removed.filter((block) => block.tag === "li").map((block) => [block.id, block.element])),
+    anchor: removed.length ? (target.blocks[target.removed.start - 1]?.id ?? "0") : target.anchor,
+  };
+  const writes = planBlockWrites({ ...write, replace: needsContent }).map((step) => step.slice(1).join(" "));
   const preview = {
     op,
     heading: target.heading ?? null,
     anchor: target.anchor,
     removedBlocks: removed.length,
     removedPreview: removed.slice(0, 8).map((block) => `${block.tag}: ${block.tag === "readonly-block" ? "（小组件，如文本绘图）" : block.text.slice(0, 60)}`),
+    writes,
     insertExpected: fragment?.expected ?? null,
     localWarnings: fragment?.warnings ?? [],
   };
@@ -182,9 +191,7 @@ export async function editDocument(transport, documentToken, options) {
   }
 
   const results = await replaceBlocks(transport, documentToken, {
-    ids: removed.map((block) => block.id),
-    readonly: new Set(removed.filter((block) => block.tag === "readonly-block").map((block) => block.id)),
-    anchor: removed.length ? (target.blocks[target.removed.start - 1]?.id ?? "0") : target.anchor,
+    ...write,
     markdown: fragment?.body,
     cwd: fragment?.baseDir,
   });
