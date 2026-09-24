@@ -2,7 +2,7 @@
 name: healthy-dashboard-config
 description: "修改已有 Healthy/雷神/Nightingale 监控大盘的配置。Use when 用户要求修改已有监控大盘、配置大盘变量、Prometheus 面板或穿透加载监控指标；读取和更新 /api/n9e/board/{id}/configs，并复用本地浏览器登录态完成回读校验。"
 metadata:
-  version: 1.1.2
+  version: 1.1.3
 ---
 
 # healthy-dashboard-config
@@ -70,7 +70,7 @@ Content-Type: application/json;charset=UTF-8
 ## 推荐流程
 
 1. 直接用正式入口回读；仅登录失效时复用 `get-browser-session`，不在每次调用前重复检查登录。
-2. 回读结果包含完整 `configs`、`configsSha256` 和独立的 `/tmp/healthy-dashboard-{id}-*/` 备份目录。
+2. 回读结果包含完整 `configs`、`configsSha256` 和独立的 `/tmp/agent-work/healthy-dashboard/{id}-*/` 备份目录；备份保留 7 天后由下次调用清理，需要长期保留的要及时移走。
 3. 保留无关内容，提交目标 `configs` 和回读的指纹；配置冲突时重新回读合并，不覆盖他人的改动。
 4. 工具在写入前再次回读检查，写后逐字段完整比较；相同目标不发 PUT。该检查不能替代服务端原子版本控制，应避免同时编辑。
 5. 用 `healthy_verify_board` 指定变量，检查真实 PromQL、响应及截图；空数据需结合指标检查判断，不能等同于业务正常。
@@ -190,4 +190,4 @@ avg by (app,method) (fql_fk_hawk_executor_snapshotLoad_average{app="$app",env="$
 - `GET /api/n9e/board/{id}` 能返回 `configs`，且 `configs` 可解析为 JSON。
 - `PUT /api/n9e/board/{id}/configs` 返回 HTTP 200，响应里 `err` 为空或无错误字段。
 - 回读后检查 `configs.var` 与目标筛选项一致（单应用可无 `app`），目标面板名称和 PromQL 存在。
-- 不要把 `/tmp/healthy-dashboard-*.json` 备份提交到仓库。
+- 不要把 `/tmp/agent-work/healthy-dashboard/` 下的备份提交到仓库。

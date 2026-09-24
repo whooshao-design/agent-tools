@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { createHash } = require('crypto');
 const { isDeepStrictEqual } = require('util');
@@ -14,10 +15,25 @@ function usage() {
 Options:
   --configs-json       Full configs object, alternative to --configs-file
   --profile            Persistent browser profile (default browser-profiles/healthy)
-  --output-dir         Evidence directory; defaults to a unique /tmp/healthy-dashboard-* directory
+  --output-dir         Evidence directory; defaults to a unique directory under /tmp/agent-work/healthy-dashboard (kept 7 days)
   --expected-sha256    Config hash from --read; required for full configs updates
   --verify-page        Capture actual panel queries, dropdown options and screenshot
 `);
+}
+
+// 备份用于回滚和核对，保留 7 天；集中放一个目录，每次新建时清理过期的，避免在 /tmp 根目录堆积。
+const EVIDENCE_ROOT = path.join(os.tmpdir(), 'agent-work', 'healthy-dashboard');
+const EVIDENCE_TTL_MS = 7 * 24 * 3600 * 1000;
+
+function newEvidenceDir(board, root = EVIDENCE_ROOT) {
+  fs.mkdirSync(root, { recursive: true });
+  const cutoff = Date.now() - EVIDENCE_TTL_MS;
+  for (const name of fs.readdirSync(root)) {
+    const entry = path.join(root, name);
+    const info = fs.lstatSync(entry);
+    if (info.isDirectory() && info.mtimeMs < cutoff) fs.rmSync(entry, { recursive: true, force: true });
+  }
+  return fs.mkdtempSync(path.join(root, `${board}-`));
 }
 
 function parseBoardConfigs(boardResp) {
@@ -251,7 +267,7 @@ async function main() {
     throw new Error('请指定 configs-file/configs-json 或 mode=hawk-read-through');
   }
   resolveBaseUrl(args);
-  const outputDir = args['output-dir'] || fs.mkdtempSync(`/tmp/healthy-dashboard-${args.board}-`);
+  const outputDir = args['output-dir'] || newEvidenceDir(args.board);
   fs.mkdirSync(outputDir, { recursive: true });
   const save = (name, value) => fs.writeFileSync(path.join(outputDir, name), JSON.stringify(value, null, 2), { flag: 'wx' });
   await withHealthyClient(args, async client => {
@@ -275,5 +291,5 @@ async function main() {
   });
 }
 
-module.exports = { configsHash, dashboardUrl, hawkReadThroughPatch, queryResponseSummary, updateBoard };
+module.exports = { EVIDENCE_TTL_MS, configsHash, dashboardUrl, hawkReadThroughPatch, newEvidenceDir, queryResponseSummary, updateBoard };
 if (require.main === module) main().catch(error => { console.error(error.message); process.exitCode = 1; });

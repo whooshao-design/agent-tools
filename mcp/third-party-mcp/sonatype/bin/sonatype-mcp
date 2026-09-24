@@ -3,7 +3,7 @@ set -euo pipefail
 
 PACKAGE="${SONATYPE_MCP_REMOTE_PACKAGE:-mcp-remote@0.1.38}"
 URL="${SONATYPE_MCP_URL:-https://mcp.guide.sonatype.com/mcp}"
-CACHE_ROOT="${AGENT_TOOLS_MCP_CACHE:-/tmp/agent-tools-mcp-cache}"
+CACHE_ROOT="${AGENT_TOOLS_MCP_CACHE:-$HOME/.local/share/agent-tools/mcp-cache}"
 export NPM_CONFIG_CACHE="${NPM_CONFIG_CACHE:-$CACHE_ROOT/npm}"
 export NPM_CONFIG_UPDATE_NOTIFIER="${NPM_CONFIG_UPDATE_NOTIFIER:-false}"
 

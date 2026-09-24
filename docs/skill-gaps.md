@@ -23,3 +23,5 @@
 |---|---|---|
 | 2026-09-24 | markitdown MCP 进程加载 onnxruntime 遥测，每个进程留下 `/tmp/mat-debug-<pid>.log` | launcher 默认设置 `ORT_DISABLE_TELEMETRY=1` |
 | 2026-09-24 | `healthy_query_metrics` 每次调用在 `/tmp` 根目录留一个 `healthy-metrics-*` 目录 | 结果集中到 `/tmp/agent-work/healthy-metrics/`，超过 24 小时的由下次调用清理 |
+| 2026-09-24 | `healthy_dashboard_config.js` 每次回读/写入在 `/tmp` 根目录留一个 `healthy-dashboard-<id>-*` 备份目录 | 集中到 `/tmp/agent-work/healthy-dashboard/`，超过 7 天的由下次调用清理（healthy-dashboard-config 1.1.3） |
+| 2026-09-24 | sonatype MCP 的 npm 缓存默认放在 `/tmp/agent-tools-mcp-cache` | 默认改为 `~/.local/share/agent-tools/mcp-cache`，与其他 wrapper 一致 |

@@ -63,9 +63,8 @@ claude mcp add --scope user sonatype -- /home/joney/projects/ai/agent-tools/mcp/
 
 ## 运行时缓存
 
-wrapper 不在仓库提交依赖缓存。Context7 默认使用
-`$HOME/.local/share/agent-tools/mcp-cache` 持久化 npm 安装，避免 Codex 启动时反复执行 `npx`；
-其余 wrapper 可能仍使用 `/tmp/agent-tools-mcp-cache` 放 npm/pip/venv 缓存。
+wrapper 不在仓库提交依赖缓存。Context7、MarkItDown、Sonatype 默认使用
+`$HOME/.local/share/agent-tools/mcp-cache` 持久化 npm/pip/venv 缓存，避免重启后反复安装，也不在 `/tmp` 留缓存。
 如需统一指定缓存根目录，可在启动 agent 前设置：
 
 ```bash

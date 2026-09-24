@@ -1,8 +1,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const vm = require('node:vm');
 const { apiUrl, openSessionPage, readPageAuth, requestJson, resolveBaseUrl } = require('./healthy_client');
-const { configsHash, dashboardUrl, hawkReadThroughPatch, queryResponseSummary, updateBoard } = require('./healthy_dashboard_config');
+const { EVIDENCE_TTL_MS, configsHash, dashboardUrl, hawkReadThroughPatch, newEvidenceDir, queryResponseSummary, updateBoard } = require('./healthy_dashboard_config');
 const { inspectMetric, loadMetrics, loadQueries, parseBatchResults, parseDuration, runQueries } = require('../../inspect-healthy-metrics/scripts/inspect_metrics');
 const { buildBrowserEnv, chromiumArgsFor } = require('../../get-browser-session/scripts/browser_network');
 
@@ -218,4 +221,23 @@ test('原指标展开与 QUERY_ERROR 语义保留', async () => {
   const row = await inspectMetric(client, {}, 'up', { range: '30m' });
   assert.equal(row.status, 'QUERY_ERROR');
   assert.match(row.error, /401/);
+});
+
+test('备份目录集中存放，只清理超过保留期的旧目录', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'healthy-evidence-test-'));
+  try {
+    const expired = path.join(root, '1-expired');
+    const recent = path.join(root, '1-recent');
+    fs.mkdirSync(expired);
+    fs.mkdirSync(recent);
+    const old = (Date.now() - EVIDENCE_TTL_MS - 60000) / 1000;
+    fs.utimesSync(expired, old, old);
+    const created = newEvidenceDir(7, root);
+    assert.equal(path.dirname(created), root);
+    assert.match(path.basename(created), /^7-/);
+    assert.ok(!fs.existsSync(expired));
+    assert.ok(fs.existsSync(recent));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
