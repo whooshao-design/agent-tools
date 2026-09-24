@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -15,15 +14,16 @@ import {
   statePathFor,
 } from "../scripts/lib/publish.mjs";
 import { readRegistry } from "../scripts/lib/cleanup.mjs";
+import { tempDir } from "./temp.mjs";
 
 // 发布会把新建的文档记进 $XDG_DATA_HOME 下的清单，测试一律写到临时目录
-process.env.XDG_DATA_HOME = mkdtempSync(join(tmpdir(), "feishu-xdg-"));
+process.env.XDG_DATA_HOME = tempDir("feishu-xdg-");
 
 const SAMPLE = "---\ntitle: 手册\n---\n# 手册\n\n## 步骤\n\n> [!NOTE]\n> 先登录\n\n```mermaid\nflowchart LR\n  A-->B\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |\n";
 const PUBLISHED_XML = '<title>手册</title><h2>步骤</h2><callout emoji="📝"><p>先登录</p></callout><readonly-block id="w1" type="isv"></readonly-block><table></table>';
 
 function workspace(markdown = SAMPLE) {
-  const dir = mkdtempSync(join(tmpdir(), "feishu-publish-"));
+  const dir = tempDir("feishu-publish-");
   const file = join(dir, "manual.md");
   writeFileSync(file, markdown);
   return { dir, file, backupRoot: join(dir, "backups") };

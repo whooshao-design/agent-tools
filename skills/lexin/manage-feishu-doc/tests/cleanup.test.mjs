@@ -1,14 +1,13 @@
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
 import { buildCleanupList, cleanupChecklist, readRegistry, recordCreated, writeRegistry } from "../scripts/lib/cleanup.mjs";
 import { LarkCliError } from "../scripts/lib/transport.mjs";
+import { tempDir } from "./temp.mjs";
 
 test("created documents are recorded, read back and rewritten", () => {
-  const path = join(mkdtempSync(join(tmpdir(), "feishu-registry-")), "created.jsonl");
+  const path = join(tempDir("feishu-registry-"), "created.jsonl");
   assert.deepEqual(readRegistry(path), []);
   recordCreated({ doc_token: "A", parent_token: "F", source: "publish" }, path);
   recordCreated({ doc_token: "B", parent_token: "F", source: "create-doc" }, path);

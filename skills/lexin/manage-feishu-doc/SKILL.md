@@ -2,7 +2,7 @@
 name: manage-feishu-doc
 description: 经飞书官方 lark-cli 读取、发布、修改并校验 lexin 飞书云文档。Use when 用户提供 lexin.feishu.cn 的 docx、wiki 或 drive/folder 链接，要求读取飞书文档（含 mermaid 小组件与画板源码）、把本地 Markdown（技术方案、操作手册、资料文档）新建发布到飞书或把本地改动增量同步/整篇覆盖过去、在飞书文档里插入替换删除一段或一节、替换一处文字、按技术方案/操作手册/资料文档排版、在飞书文档里放 mermaid 图或图表、发布前检查 Markdown 写法、把 HTML 转成可发布的 Markdown、同步表格数据或删行、合并单元格、调列宽、改写段落或补页内跳转链接、更新托管 JSON 章节、检查飞书登录与权限、在缺权限时申请准确 scope，或列出需要删除的飞书文档交给用户手动删除。
 metadata:
-  version: 2.3.0
+  version: 2.3.1
 ---
 
 # Manage Feishu Doc

@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
 import { CHECK_MERMAID, lintFile, lintMarkdown } from "../scripts/lib/lint.mjs";
 import { preparePublishMarkdown } from "../scripts/lib/markdown.mjs";
+import { tempDir } from "./temp.mjs";
 
 const found = (markdown) => lintMarkdown(markdown).map((issue) => `${issue.level}:${issue.rule}:${issue.line}`);
 const fence = (code, lang = "mermaid") => `\`\`\`${lang}\n${code}\n\`\`\``;
@@ -108,7 +108,7 @@ test("publish prechecks carry lint errors (blocking) and warnings with line numb
 });
 
 test("lintFile maps mermaid syntax results: mermaid 11 failures block, old-version-only failures warn", () => {
-  const dir = mkdtempSync(join(tmpdir(), "feishu-lint-test-"));
+  const dir = tempDir("feishu-lint-test-");
   const file = join(dir, "doc.md");
   writeFileSync(file, `# T\n\n${fence("flowchart LR\n  A --> B")}\n\n${fence("sequenceDiagram\n  A->>B: hi")}\n`);
   const run = () => ({
@@ -168,7 +168,7 @@ test("a fence right after a comment is recognized the same way publishing does",
 });
 
 test("a broken diagram kept inside a comment does not fail the syntax check", () => {
-  const dir = mkdtempSync(join(tmpdir(), "feishu-lint-test-"));
+  const dir = tempDir("feishu-lint-test-");
   const file = join(dir, "doc.md");
   writeFileSync(file, `# T\n\n<!--\n${fence("flowchart LR\nA[")}\n-->\n\n${fence("flowchart LR\n  A-->B")}\n`);
   let checkedInput = "";
@@ -184,7 +184,7 @@ test("a broken diagram kept inside a comment does not fail the syntax check", ()
 });
 
 test("syntax results map back to source lines, also for CRLF files", () => {
-  const dir = mkdtempSync(join(tmpdir(), "feishu-lint-test-"));
+  const dir = tempDir("feishu-lint-test-");
   const file = join(dir, "doc.md");
   writeFileSync(file, "---\r\ntitle: T\r\n---\r\n# T\r\n\r\n```mermaid\r\nflowchart LR\r\nA[\r\n```\r\n");
   let checkedInput = "";
@@ -198,7 +198,7 @@ test("syntax results map back to source lines, also for CRLF files", () => {
 });
 
 test("the checker input never overwrites a source file, and a ``` line inside a diagram survives", () => {
-  const dir = mkdtempSync(join(tmpdir(), "feishu-lint-test-"));
+  const dir = tempDir("feishu-lint-test-");
   const file = join(dir, "diagrams.md");
   const source = "# 图\n\n正文\n\n~~~mermaid\nflowchart LR\nA-->B\n```\nA[\n~~~\n";
   writeFileSync(file, source);
@@ -215,7 +215,7 @@ test("the checker input never overwrites a source file, and a ``` line inside a 
 
 
 test("checker output goes into a new folder, so files already in --out are left alone", () => {
-  const dir = mkdtempSync(join(tmpdir(), "feishu-lint-test-"));
+  const dir = tempDir("feishu-lint-test-");
   const file = join(dir, "results.md");
   const source = "# 结果\n\n```mermaid\nflowchart LR\n  A-->B\n```\n";
   writeFileSync(file, source);

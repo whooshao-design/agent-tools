@@ -2,7 +2,7 @@
 // lintMarkdown 只做静态检查，返回 [{level: "error"|"warning", rule, line, message}]，line 是源文件行号；
 // lintFile 另外调用 dev-design-solution 的 check_mermaid.js 做 mermaid 语法校验。
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -310,15 +310,19 @@ export function lintFile(file, { prepare, out, render = true, run = runCheckMerm
     // 只校验发布端识别出的图（注释里的、代码示例里的都不算），换行已归一；结果按顺序对回源文件行号。
     // 校验输入写进单独的临时目录，不会碰到 --out 或源文件所在目录里的同名文件；
     // 围栏比源码里最长的反引号串多一个，源码里有 ``` 行也不会被提前截断
-    const input = join(mkdtempSync(join(tmpdir(), "feishu-lint-input-")), "diagrams.md");
+    const inputDir = mkdtempSync(join(tmpdir(), "feishu-lint-input-"));
+    const input = join(inputDir, "diagrams.md");
     writeFileSync(input, prepared.diagrams.map((diagram) => {
       const fence = "`".repeat(Math.max(3, ...(diagram.code.match(/`+/g) ?? []).map((run) => run.length + 1)));
       return `## 第 ${diagram.line} 行\n\n${fence}mermaid\n${diagram.code}\n${fence}\n`;
     }).join("\n"));
     const checked = run(input, outDir);
-    mermaid = { status: checked.status, reason: checked.reason, outDir };
+    // 用完就删：校验输入一律删；没给 --out 时渲染产物也不留
+    rmSync(inputDir, { recursive: true, force: true });
+    if (!out) rmSync(outDir, { recursive: true, force: true });
+    mermaid = { status: checked.status, reason: checked.reason, ...(out ? { outDir } : {}) };
     if (checked.status === "skipped") {
-      warnings.push(`mermaid 语法没校验（${checked.reason}）：手动跑 node ${CHECK_MERMAID} ${input} <输出目录>`);
+      warnings.push(`mermaid 语法没校验（${checked.reason}）：手动跑 node ${CHECK_MERMAID} ${path} <输出目录>`);
     } else if ((checked.blocks ?? []).length !== prepared.diagrams.length) {
       warnings.push(`发布会建 ${prepared.diagrams.length} 张图，语法校验只返回 ${(checked.blocks ?? []).length} 张结果：逐张核对`);
     }

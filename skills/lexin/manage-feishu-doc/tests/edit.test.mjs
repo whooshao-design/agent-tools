@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
 import { editDocument, resolveTarget } from "../scripts/lib/edit.mjs";
 import { parseTopLevel } from "../scripts/lib/structure.mjs";
+import { tempDir } from "./temp.mjs";
 
 // 两个同名标题「Linux」、一个空章节、一张独立图片、一个带子项的列表项
 const DOC = [
@@ -85,7 +85,7 @@ function fakeDocument({ comments = [], drift = null } = {}) {
 }
 
 function fragment(markdown) {
-  const dir = mkdtempSync(join(tmpdir(), "feishu-edit-"));
+  const dir = tempDir("feishu-edit-");
   writeFileSync(join(dir, "part.md"), markdown);
   return { dir, file: join(dir, "part.md") };
 }

@@ -43,4 +43,4 @@
 | 警告 | `ordered-list-start` | 有序列表不从 1 开始（飞书会从 1 重排） |
 | 警告 | `math-dollar`、`local-link`、`html-tag` | 夹着中文的 `$…$` 会变公式、链接指向本地文件、HTML 标签按文字显示 |
 
-mermaid 语法校验需要 `get-browser-session` 装好的 Chrome 与 Playwright，并联网加载 mermaid；缺工具或断网时给出警告和手动命令，其余检查照常。`--out=<目录>` 会在这个目录下新建一个子目录，保存渲染出的 SVG/PNG 和 `results.md`（不覆盖已有文件），`--no-render` 跳过语法校验。警告按需处理：历史文档里的宽表、长单元格可以保留，但要知道飞书上会横向滚动或难读。
+mermaid 语法校验需要 `get-browser-session` 装好的 Chrome 与 Playwright，并联网加载 mermaid；缺工具或断网时给出警告和手动命令，其余检查照常。`--out=<目录>` 会在这个目录下新建一个子目录，保存渲染出的 SVG/PNG 和 `results.md`（不覆盖已有文件）；不给 `--out` 就不保留这些产物，`--no-render` 跳过语法校验。警告按需处理：历史文档里的宽表、长单元格可以保留，但要知道飞书上会横向滚动或难读。
