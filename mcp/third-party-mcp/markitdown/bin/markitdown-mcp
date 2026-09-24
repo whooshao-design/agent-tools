@@ -10,6 +10,8 @@ CACHE_ROOT="${AGENT_TOOLS_MCP_CACHE:-$HOME/.local/share/agent-tools/mcp-cache}"
 VENV="${MARKITDOWN_MCP_VENV:-$CACHE_ROOT/markitdown-mcp-venv}"
 PYTHON_BIN="${PYTHON:-python3}"
 export PIP_DISABLE_PIP_VERSION_CHECK="${PIP_DISABLE_PIP_VERSION_CHECK:-1}"
+# magika 依赖的 onnxruntime 默认开启微软遥测，每个进程都会留下一个 /tmp/mat-debug-<pid>.log。
+export ORT_DISABLE_TELEMETRY="${ORT_DISABLE_TELEMETRY:-1}"
 
 if [ -n "${MARKITDOWN_MCP_BIN:-}" ]; then
   exec "$MARKITDOWN_MCP_BIN" "$@"

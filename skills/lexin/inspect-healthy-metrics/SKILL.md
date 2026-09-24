@@ -2,7 +2,7 @@
 name: inspect-healthy-metrics
 description: 只读查看 Healthy/雷神/Nightingale 指标上报状态。Use when 用户要求确认指标是否有数据、最近是否正常上报、批量检查 stable 或线上指标、按 metric 列表或 app+suffix 展开查询 Prometheus 样本、区分未注册/无数据/已过期/正常上报。
 metadata:
-  version: 1.1.1
+  version: 1.1.2
 ---
 
 # inspect-healthy-metrics
@@ -124,7 +124,7 @@ range 整批调用一次 `query-range-batch`；instant 在同一会话内查询�
 - `--check-registry`：同时查询指标注册表，区分未注册和无数据。
 - `--format json`：输出完整 JSON；默认输出 TSV 表格。
 - `--queries-json/--queries-file`：批量任意 PromQL，`--query-type=instant|range`，默认 range。
-- `--output`：保存完整查询数据并返回文件位置；MCP 自动使用独立结果目录。
+- `--output`：保存完整查询数据并返回文件位置；MCP 自动在 `/tmp/agent-work/healthy-metrics/` 下建独立结果目录，保留 24 小时后由下次调用清理，需要长期保留的结果要及时移走。
 
 ## 多 series 陷阱（查聚合值时必读）
 

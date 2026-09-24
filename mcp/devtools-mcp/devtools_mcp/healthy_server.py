@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import tempfile
+import time
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
@@ -18,10 +20,22 @@ HEALTHY_SCRIPT = skill_path("healthy-dashboard-config", "scripts", "healthy_dash
 METRICS_SCRIPT = skill_path("inspect-healthy-metrics", "scripts", "inspect_metrics.js")
 DEFAULT_PROFILE = "/home/joney/.local/state/agent-tools/browser-profiles/healthy"
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True)
+# 结果文件要留给调用方读取，不能随调用删除；集中放在一个目录并按保留期清理，避免在 /tmp 根目录堆积。
+RESULTS_ROOT = Path(tempfile.gettempdir()) / "agent-work" / "healthy-metrics"
+RESULTS_TTL_SECONDS = 24 * 3600
 
 
 def _run(args: list[str], timeout: int = 180, script: str = HEALTHY_SCRIPT) -> str:
     return command_result_text(run_command(["node", script, *args], timeout=timeout), max_chars=50000)
+
+
+def _new_results_dir() -> Path:
+    RESULTS_ROOT.mkdir(parents=True, exist_ok=True)
+    cutoff = time.time() - RESULTS_TTL_SECONDS
+    for child in RESULTS_ROOT.iterdir():
+        if child.is_dir() and not child.is_symlink() and child.stat().st_mtime < cutoff:
+            shutil.rmtree(child, ignore_errors=True)
+    return Path(tempfile.mkdtemp(dir=RESULTS_ROOT))
 
 
 def _board_args(board_id: int, env: str, profile: str) -> list[str]:
@@ -100,7 +114,7 @@ def healthy_query_metrics(
                           or not item["name"].strip() or not isinstance(item.get("expr"), str)
                           or not item["expr"].strip() for item in queries):
         return error_text("queries 必须是非空的 {name,expr} 数组")
-    output = Path(tempfile.mkdtemp(prefix="healthy-metrics-")) / "results.json"
+    output = _new_results_dir() / "results.json"
     return _run([f"--env={env}", f"--profile={profile}", f"--queries-json={json.dumps(queries, ensure_ascii=False)}",
                  f"--query-type={query_type}", f"--range={range_window}", f"--step={step}", f"--output={output}"],
                 timeout=240, script=METRICS_SCRIPT)

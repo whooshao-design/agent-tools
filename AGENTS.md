@@ -28,7 +28,8 @@ agent-tools/
 ├── env/                 # 公共凭证 credentials.env（gitignore）与模板 credentials.env.example
 ├── evals/               # skill 评测：cases/<skill>.json 触发/路由用例与行为压力用例（README 说明三层）
 ├── tests/               # 仓库级测试：install.py、toolchain_audit、dev-workflow 契约一致性、skill 结构 lint 与路由评测
-├── docs/                # 维护用长文：design-basis 三份评估与旧模板；reviews/ 外部仓库评估、试点与 codex 全量 skill 评审记录。不随 skill 链接到客户端
+├── AGENTS.global.md     # 全局用户级指令源文件，--with-global 链接为 ~/.codex/AGENTS.md 与 ~/.claude/CLAUDE.md
+├── docs/                # 维护用长文（含 skill-gaps.md 缺口清单）：design-basis 三份评估与旧模板；reviews/ 外部仓库评估、试点与 codex 全量 skill 评审记录。不随 skill 链接到客户端
 ├── install.py           # 符号链接安装脚本（claude + codex 双目标）
 └── AGENTS.md            # 本文件（主文档）
 ```
@@ -40,6 +41,7 @@ python3 install.py            # 符号链接安装到 ~/.claude/skills 和 ~/.co
 python3 install.py --copy     # 复制模式兜底（符号链接不可用时）
 python3 install.py --with-subagents  # 额外安装 reviewer agents 与结果守卫 hook
 python3 install.py --with-subagents --dry-run
+python3 install.py --with-global    # 额外把 AGENTS.global.md 链接为双端全局指令
 python3 install.py --list     # 查看分类与技能
 python3 install.py --with-subagents --uninstall
 ```
@@ -47,6 +49,7 @@ python3 install.py --with-subagents --uninstall
 - 符号链接已实测可用：Claude Code（2026-06 验证）与 Codex 都能发现 skill 目录下的符号链接。
   早期"符号链接不可靠"的结论已过时。
 - 本仓库使用符号链接分发；不要手动修改 `~/.claude/plugins/local/` 或插件缓存来注册插件。需要插件打包时按当前客户端官方 CLI 与 manifest 约定另行实施，不沿用历史手工注册方式。
+- 全局指令只改仓库里的 `AGENTS.global.md`，不要直接改 `~/.codex/AGENTS.md` 或 `~/.claude/CLAUDE.md`；目标已存在且不归安装器所有时会跳过，先备份移走再装。
 - `--with-subagents` 只合并 owner 为 `agent-tools-subagent-result-v1` 的 `SubagentStop` handler，
   不覆盖其他 settings/hooks；Codex 的 hook 信任由用户在 `/hooks` 中审查，安装器不代替确认。
 - settings/hooks JSON 本身是符号链接时安装器会拒绝写入，避免破坏 dotfiles 管理关系。

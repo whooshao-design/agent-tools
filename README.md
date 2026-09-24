@@ -159,6 +159,7 @@ python3 install.py --targets claude        # 只装 Claude
 python3 install.py --copy                  # 复制模式兜底
 python3 install.py --with-subagents        # 额外安装双端 reviewer agents 与结果守卫 hook
 python3 install.py --with-subagents --dry-run
+python3 install.py --with-global           # 额外把 AGENTS.global.md 链接为 ~/.codex/AGENTS.md 与 ~/.claude/CLAUDE.md
 python3 install.py --list
 python3 install.py --with-subagents --uninstall
 ```

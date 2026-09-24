@@ -117,6 +117,31 @@ class InstallTest(unittest.TestCase):
         self.assertFalse((self.home / ".claude/agents").exists())
         self.assertFalse((self.home / ".claude/hooks").exists())
         self.assertFalse((self.home / ".claude/settings.json").exists())
+        self.assertFalse((self.home / ".claude/CLAUDE.md").exists())
+
+    def test_with_global_links_client_instructions_and_uninstalls(self):
+        existing = self.home / ".codex/AGENTS.md"
+        existing.parent.mkdir(parents=True)
+        existing.write_text("user rules\n", encoding="utf-8")
+
+        result = self.run_install("--with-global", "--skills", "skill-authoring")
+
+        source = (REPO / "AGENTS.global.md").resolve()
+        claude = self.home / ".claude/CLAUDE.md"
+        self.assertTrue(claude.is_symlink())
+        self.assertEqual(source, claude.resolve())
+        self.assertIn("[global] AGENTS.md: skip (exists, use --force)", result.stdout)
+        self.assertEqual("user rules\n", existing.read_text(encoding="utf-8"))
+
+        existing.unlink()
+        self.run_install("--with-global", "--skills", "skill-authoring")
+        self.assertEqual(source, existing.resolve())
+
+        self.run_install(
+            "--with-global", "--skills", "skill-authoring", "--uninstall"
+        )
+        self.assertFalse(claude.exists() or claude.is_symlink())
+        self.assertFalse(existing.exists() or existing.is_symlink())
 
     def test_with_subagents_preserves_configs_and_is_idempotent(self):
         foreign = self.foreign_group()
@@ -376,6 +401,7 @@ class InstallTest(unittest.TestCase):
             copy=False,
             force=False,
             with_subagents=True,
+            with_global=False,
             dry_run=False,
             list=False,
             uninstall=False,
@@ -433,6 +459,7 @@ class InstallTest(unittest.TestCase):
             copy=False,
             force=True,
             with_subagents=True,
+            with_global=False,
             dry_run=False,
             list=False,
             uninstall=False,
@@ -463,6 +490,7 @@ class InstallTest(unittest.TestCase):
             copy=False,
             force=False,
             with_subagents=True,
+            with_global=False,
             dry_run=False,
             list=False,
             uninstall=False,
@@ -610,6 +638,7 @@ class InstallTest(unittest.TestCase):
             copy=True,
             force=False,
             with_subagents=True,
+            with_global=False,
             dry_run=False,
             list=False,
             uninstall=False,
@@ -742,6 +771,7 @@ class InstallTest(unittest.TestCase):
             copy=True,
             force=False,
             with_subagents=False,
+            with_global=False,
             dry_run=False,
             list=False,
             uninstall=False,
@@ -787,6 +817,7 @@ class InstallTest(unittest.TestCase):
             copy=True,
             force=False,
             with_subagents=False,
+            with_global=False,
             dry_run=False,
             list=False,
             uninstall=False,

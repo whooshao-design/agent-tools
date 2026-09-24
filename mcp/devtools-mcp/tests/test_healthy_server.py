@@ -1,5 +1,8 @@
 import json
+import os
 import sys
+import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -41,11 +44,25 @@ class HealthyToolsTest(unittest.TestCase):
 
     def test_batch_routes_to_formal_metrics_script(self):
         with patch.object(server, "_run", return_value="ok") as run, \
-                patch.object(server.tempfile, "mkdtemp", return_value="/tmp/mock-metrics"):
+                patch.object(server, "_new_results_dir", return_value=Path("/tmp/mock-metrics")):
             server.healthy_query_metrics([{"name": "up", "expr": "count(up)"}], env="stable")
         self.assertEqual(run.call_args.kwargs["script"], server.METRICS_SCRIPT)
         self.assertIn("--output=/tmp/mock-metrics/results.json", run.call_args.args[0])
         self.assertIn("--query-type=range", run.call_args.args[0])
+
+    def test_results_dir_prunes_only_expired_runs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "healthy-metrics"
+            expired, recent = root / "expired", root / "recent"
+            expired.mkdir(parents=True)
+            recent.mkdir()
+            old = time.time() - server.RESULTS_TTL_SECONDS - 60
+            os.utime(expired, (old, old))
+            with patch.object(server, "RESULTS_ROOT", root):
+                created = server._new_results_dir()
+            self.assertFalse(expired.exists())
+            self.assertTrue(recent.is_dir())
+            self.assertEqual(root, created.parent)
 
     def test_invalid_queries_do_not_execute(self):
         with patch.object(server, "_run") as run:

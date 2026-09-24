@@ -8,6 +8,7 @@ Usage:
   python3 install.py --targets claude         # only one client
   python3 install.py --copy                   # copy instead of symlink
   python3 install.py --with-subagents         # also install reviewer agents/hooks
+  python3 install.py --with-global            # also link AGENTS.global.md as client-level instructions
   python3 install.py --dry-run                # report without writing
   python3 install.py --list                   # show available groups/skills
   python3 install.py --uninstall              # remove owned installations
@@ -55,6 +56,11 @@ AGENT_NAMES = (
 )
 SUBAGENT_MATCHER = "^(" + "|".join(AGENT_NAMES) + ")$"
 HOOK_SOURCE = REPO / "hooks" / "subagent_result_guard.py"
+GLOBAL_SOURCE = REPO / "AGENTS.global.md"
+GLOBAL_NAMES = {
+    "claude": "CLAUDE.md",
+    "codex": "AGENTS.md",
+}
 HOOK_SCRIPT_PATTERN = re.compile(r"subagent_result_guard-([0-9a-f]{64})\.py")
 
 
@@ -718,7 +724,7 @@ def _promote_completed_pending_copies(
 ) -> None:
     """Commit pending ownership when the planned copy already reached its target."""
     manifest = state["manifest"]
-    allowed_parents = {TARGETS[client], state["root"] / "agents"}
+    allowed_parents = {TARGETS[client], state["root"] / "agents", state["root"]}
     changed = False
 
     for destination, record in list(manifest["pending_copies"].items()):
@@ -760,7 +766,7 @@ def _cleanup_stale_ownership(
 ) -> None:
     """Remove unchanged owned installs whose repository source disappeared."""
     manifest = state["manifest"]
-    allowed_parents = {TARGETS[client], state["root"] / "agents"}
+    allowed_parents = {TARGETS[client], state["root"] / "agents", state["root"]}
     changed = False
 
     for destination, source_value in list(manifest["links"].items()):
@@ -840,6 +846,7 @@ def _stage_copy_ownership(
     *,
     force: bool,
     with_subagents: bool,
+    with_global: bool,
     dry_run: bool,
 ) -> None:
     """Persist planned copy ownership before files can be partially installed."""
@@ -850,6 +857,16 @@ def _stage_copy_ownership(
             name,
             source,
             TARGETS[client],
+            copy=True,
+            force=force,
+            manifest=simulated,
+            dry_run=True,
+        )
+    if with_global:
+        install(
+            GLOBAL_NAMES[client],
+            GLOBAL_SOURCE,
+            state["root"],
             copy=True,
             force=force,
             manifest=simulated,
@@ -1052,6 +1069,7 @@ def _run(args: argparse.Namespace) -> int:
                 skills,
                 force=args.force,
                 with_subagents=args.with_subagents,
+                with_global=args.with_global,
                 dry_run=args.dry_run,
             )
     for client in clients:
@@ -1083,6 +1101,28 @@ def _run(args: argparse.Namespace) -> int:
                     dry_run=args.dry_run,
                 )
             print(f"  {name}: {status}")
+
+        if args.with_global:
+            name = GLOBAL_NAMES[client]
+            if args.uninstall:
+                status = uninstall(
+                    name,
+                    GLOBAL_SOURCE,
+                    state["root"],
+                    manifest=manifest,
+                    dry_run=args.dry_run,
+                )
+            else:
+                status = install(
+                    name,
+                    GLOBAL_SOURCE,
+                    state["root"],
+                    copy=args.copy,
+                    force=args.force,
+                    manifest=manifest,
+                    dry_run=args.dry_run,
+                )
+            print(f"  [global] {name}: {status}")
 
         if args.with_subagents:
             _install_subagents(
@@ -1119,6 +1159,11 @@ def main() -> int:
         "--with-subagents",
         action="store_true",
         help="also install reviewer agents and SubagentStop hooks",
+    )
+    parser.add_argument(
+        "--with-global",
+        action="store_true",
+        help="also link AGENTS.global.md as ~/.claude/CLAUDE.md and ~/.codex/AGENTS.md",
     )
     parser.add_argument("--dry-run", action="store_true", help="report without writing")
     parser.add_argument("--list", action="store_true")
