@@ -143,6 +143,38 @@ class InstallTest(unittest.TestCase):
         self.assertFalse(claude.exists() or claude.is_symlink())
         self.assertFalse(existing.exists() or existing.is_symlink())
 
+    def test_session_cleanup_hook_keeps_foreign_hooks_and_uninstalls(self):
+        foreign = {"hooks": [{"type": "command", "command": "node botmux.js end"}]}
+        settings = self.write_json(
+            ".claude/settings.json",
+            {"model": "opus", "hooks": {"SessionEnd": [foreign]}},
+        )
+        args = ("--targets", "claude", "--skills", "skill-authoring", "--with-session-cleanup")
+
+        self.run_install(*args)
+        self.run_install(*args)
+
+        groups = json.loads(settings.read_text(encoding="utf-8"))["hooks"]["SessionEnd"]
+        self.assertEqual(foreign, groups[0])
+        self.assertEqual(2, len(groups))
+        command = groups[1]["hooks"][0]["command"]
+        self.assertIn(str(REPO / "hooks/session_tmp_cleanup.py"), command)
+        self.assertIn("--owner agent-tools-session-cleanup-v1", command)
+
+        self.run_install(*args, "--uninstall")
+        self.assertEqual(
+            {"model": "opus", "hooks": {"SessionEnd": [foreign]}},
+            json.loads(settings.read_text(encoding="utf-8")),
+        )
+
+    def test_session_cleanup_uninstall_drops_created_hooks_key(self):
+        args = ("--targets", "claude", "--skills", "skill-authoring", "--with-session-cleanup")
+        self.run_install(*args)
+        self.run_install(*args, "--uninstall")
+        self.assertEqual(
+            {}, json.loads((self.home / ".claude/settings.json").read_text(encoding="utf-8"))
+        )
+
     def test_with_subagents_preserves_configs_and_is_idempotent(self):
         foreign = self.foreign_group()
         claude_config = self.write_json(
@@ -402,6 +434,7 @@ class InstallTest(unittest.TestCase):
             force=False,
             with_subagents=True,
             with_global=False,
+            with_session_cleanup=False,
             dry_run=False,
             list=False,
             uninstall=False,
@@ -460,6 +493,7 @@ class InstallTest(unittest.TestCase):
             force=True,
             with_subagents=True,
             with_global=False,
+            with_session_cleanup=False,
             dry_run=False,
             list=False,
             uninstall=False,
@@ -491,6 +525,7 @@ class InstallTest(unittest.TestCase):
             force=False,
             with_subagents=True,
             with_global=False,
+            with_session_cleanup=False,
             dry_run=False,
             list=False,
             uninstall=False,
@@ -639,6 +674,7 @@ class InstallTest(unittest.TestCase):
             force=False,
             with_subagents=True,
             with_global=False,
+            with_session_cleanup=False,
             dry_run=False,
             list=False,
             uninstall=False,
@@ -772,6 +808,7 @@ class InstallTest(unittest.TestCase):
             force=False,
             with_subagents=False,
             with_global=False,
+            with_session_cleanup=False,
             dry_run=False,
             list=False,
             uninstall=False,
@@ -818,6 +855,7 @@ class InstallTest(unittest.TestCase):
             force=False,
             with_subagents=False,
             with_global=False,
+            with_session_cleanup=False,
             dry_run=False,
             list=False,
             uninstall=False,

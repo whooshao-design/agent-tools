@@ -19,7 +19,7 @@ agent-tools/
 ├── agents/
 │   ├── claude/          # Claude Code 只读独立评审 subagents
 │   └── codex/           # Codex 只读独立评审 agents
-├── hooks/               # SubagentStop 结构化结果守卫及测试
+├── hooks/               # SubagentStop 结构化结果守卫、SessionEnd 会话临时目录清理及测试
 ├── mcp/
 │   ├── devtools-mcp/    # 研发工具链 MCP（16 个 server；查询为主，部分工具可写）
 │   ├── bastion-mcp/     # 堡垒机 SSH 通道 MCP（config.json 本地化）
@@ -42,6 +42,7 @@ python3 install.py --copy     # 复制模式兜底（符号链接不可用时）
 python3 install.py --with-subagents  # 额外安装 reviewer agents 与结果守卫 hook
 python3 install.py --with-subagents --dry-run
 python3 install.py --with-global    # 额外把 AGENTS.global.md 链接为双端全局指令
+python3 install.py --with-session-cleanup  # 额外给 Claude 加 SessionEnd hook，会话结束删除自己的 /tmp/claude-<uid>/*/<session-id>/
 python3 install.py --list     # 查看分类与技能
 python3 install.py --with-subagents --uninstall
 ```

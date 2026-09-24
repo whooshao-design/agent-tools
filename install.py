@@ -9,6 +9,7 @@ Usage:
   python3 install.py --copy                   # copy instead of symlink
   python3 install.py --with-subagents         # also install reviewer agents/hooks
   python3 install.py --with-global            # also link AGENTS.global.md as client-level instructions
+  python3 install.py --with-session-cleanup   # also add Claude SessionEnd hook that removes the session temp dir
   python3 install.py --dry-run                # report without writing
   python3 install.py --list                   # show available groups/skills
   python3 install.py --uninstall              # remove owned installations
@@ -57,6 +58,8 @@ AGENT_NAMES = (
 SUBAGENT_MATCHER = "^(" + "|".join(AGENT_NAMES) + ")$"
 HOOK_SOURCE = REPO / "hooks" / "subagent_result_guard.py"
 GLOBAL_SOURCE = REPO / "AGENTS.global.md"
+CLEANUP_SOURCE = REPO / "hooks" / "session_tmp_cleanup.py"
+CLEANUP_OWNER = "agent-tools-session-cleanup-v1"
 GLOBAL_NAMES = {
     "claude": "CLAUDE.md",
     "codex": "AGENTS.md",
@@ -549,6 +552,69 @@ def _merge_hook_config(
 
     hooks["SubagentStop"] = retained_groups
     return updated, removed_owned
+
+
+def _merge_session_cleanup_hook(
+    data: dict[str, Any], *, install_hook: bool
+) -> dict[str, Any]:
+    """Add or remove the owned Claude SessionEnd handler, keeping all others."""
+    updated = copy_module.deepcopy(data)
+    hooks = updated.get("hooks")
+    if hooks is None:
+        if not install_hook:
+            return updated
+        hooks = updated["hooks"] = {}
+    if not isinstance(hooks, dict):
+        raise InstallError("hooks must be a JSON object")
+    groups = hooks.get("SessionEnd", [])
+    if not isinstance(groups, list):
+        raise InstallError("hooks.SessionEnd must be a JSON array")
+
+    def owned(handler: Any) -> bool:
+        tokens = _command_tokens(handler.get("command")) if isinstance(handler, dict) else []
+        return f"--owner={CLEANUP_OWNER}" in tokens or any(
+            token == "--owner" and tokens[index + 1 : index + 2] == [CLEANUP_OWNER]
+            for index, token in enumerate(tokens)
+        )
+
+    retained = []
+    for group in groups:
+        if isinstance(group, dict) and isinstance(group.get("hooks"), list):
+            handlers = [handler for handler in group["hooks"] if not owned(handler)]
+            if not handlers and len(handlers) != len(group["hooks"]):
+                continue
+            group = {**group, "hooks": handlers}
+        retained.append(group)
+    if install_hook:
+        command = (
+            f"{shlex.quote(sys.executable)} {shlex.quote(str(CLEANUP_SOURCE))} "
+            f"--owner {CLEANUP_OWNER}"
+        )
+        retained.append({"hooks": [{"type": "command", "command": command, "timeout": 10}]})
+    if retained:
+        hooks["SessionEnd"] = retained
+    else:
+        hooks.pop("SessionEnd", None)
+        if not hooks:
+            updated.pop("hooks", None)
+    return updated
+
+
+def _install_session_cleanup(*, uninstalling: bool, dry_run: bool) -> None:
+    config_path = TARGETS["claude"].parent / HOOK_CONFIG_NAMES["claude"]
+    revision = _file_revision(config_path)
+    before = _load_json_object(config_path, default={})
+    after = _merge_session_cleanup_hook(before, install_hook=not uninstalling)
+    _write_json_if_needed(
+        config_path, before, after, dry_run=dry_run, expected_revision=revision
+    )
+    if before == after:
+        status = "ok" if not uninstalling else "absent"
+    elif dry_run:
+        status = "would remove" if uninstalling else "would add"
+    else:
+        status = "removed" if uninstalling else "added"
+    print(f"  [hook] SessionEnd session cleanup: {status}")
 
 
 def _install_hook_script(client_root: Path, *, dry_run: bool) -> tuple[Path, str]:
@@ -1141,6 +1207,11 @@ def _run(args: argparse.Namespace) -> int:
             dry_run=args.dry_run,
             expected_revision=state["manifest_revision"],
         )
+    if args.with_session_cleanup:
+        if "claude" in clients:
+            _install_session_cleanup(uninstalling=args.uninstall, dry_run=args.dry_run)
+        else:
+            print("  [hook] SessionEnd session cleanup: skip (claude target only)")
     return 0
 
 
@@ -1164,6 +1235,11 @@ def main() -> int:
         "--with-global",
         action="store_true",
         help="also link AGENTS.global.md as ~/.claude/CLAUDE.md and ~/.codex/AGENTS.md",
+    )
+    parser.add_argument(
+        "--with-session-cleanup",
+        action="store_true",
+        help="also add a Claude SessionEnd hook that removes the session's temp dir",
     )
     parser.add_argument("--dry-run", action="store_true", help="report without writing")
     parser.add_argument("--list", action="store_true")
