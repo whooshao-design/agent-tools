@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { preparePublishMarkdown } from "../scripts/lib/markdown.mjs";
-import { alignUnits, diffUnits, parseTopLevel, remoteChanges, splitUnits } from "../scripts/lib/structure.mjs";
+import { alignUnits, blockOrder, diffUnits, parseTopLevel, remoteChanges, splitUnits } from "../scripts/lib/structure.mjs";
 
 const fixture = (name) => readFileSync(new URL(`./fixtures/${name}`, import.meta.url), "utf8");
 
@@ -60,12 +60,37 @@ test("remoteChanges flags edited or vanished units and blocks that belong to no 
   const after = parseTopLevel('<p id="a">一（改）</p><p id="n">新</p>');
   const changes = remoteChanges(units, after);
   assert.deepEqual(changes.changed, [0, 1]);
-  assert.deepEqual(changes.inserted.map((element) => element.topIds[0]), ["n"]);
-  assert.deepEqual(remoteChanges(units, before), { changed: [], inserted: [] });
+  assert.deepEqual(changes.inserted.map((block) => block.id), ["n"]);
+  assert.deepEqual(remoteChanges(units, before), { changed: [], inserted: [], reordered: false });
+  const swapped = parseTopLevel('<p id="b">二</p><p id="a">一</p>');
+  assert.deepEqual(remoteChanges(units, swapped), { changed: [], inserted: [], reordered: true }, "same content, different order");
+});
+
+test("an image written inside inline code stays part of the paragraph", () => {
+  const prepared = preparePublishMarkdown("# T\n\n写法：`![说明](相对路径)`，照抄即可\n", { fileName: "t.md", exists: () => false });
+  const units = splitUnits(prepared.body, { diagrams: prepared.diagrams, imageHashes: prepared.imageHashes });
+  assert.deepEqual(units.map((unit) => unit.tags), [["p"]]);
+  const elements = parseTopLevel('<title>T</title><p id="a">写法：<code>![说明](相对路径)</code>，照抄即可</p>');
+  assert.equal(alignUnits(units, elements).ok, true);
 });
 
 test("mermaid units hash by their code, so renumbered placeholders do not look like edits", () => {
-  const first = splitUnits("[[feishu-mermaid:1]]\n", { diagrams: [{ index: 1, code: "flowchart LR\n  A-->B" }] });
-  const second = splitUnits("[[feishu-mermaid:2]]\n", { diagrams: [{ index: 2, code: "flowchart LR\n  A-->B" }] });
+  const first = splitUnits("[[feishu-mermaid:0a1b2c3d-1]]\n", { diagrams: [{ index: 1, placeholder: "[[feishu-mermaid:0a1b2c3d-1]]", code: "flowchart LR\n  A-->B" }] });
+  const second = splitUnits("[[feishu-mermaid:9f8e7d6c-2]]\n", { diagrams: [{ index: 2, placeholder: "[[feishu-mermaid:9f8e7d6c-2]]", code: "flowchart LR\n  A-->B" }] });
+  assert.equal(first[0].kind, "diagram");
+  assert.equal(splitUnits("[[feishu-mermaid:1]]\n")[0].kind, "paragraph", "text that merely looks like a placeholder is a paragraph");
+  assert.equal(splitUnits("[[feishu-mermaid:deadbeef-1]]\n")[0].kind, "paragraph", "a placeholder from another run is text too");
   assert.equal(first[0].hash, second[0].hash);
+});
+
+test("every list item gets its own position, in the current order", () => {
+  const order = blockOrder(parseTopLevel('<p id="p">x</p><ul><li id="l2">b</li><li id="l1">a</li></ul><p id="q">y</p>'));
+  assert.deepEqual([...order.entries()], [["p", 0], ["l2", 1], ["l1", 2], ["q", 3]]);
+});
+
+test("remoteChanges sees items reordered or added inside a list the local side did not touch", () => {
+  const units = alignUnits(splitUnits("- a\n- b\n- c\n"), parseTopLevel('<ul><li id="l1">a</li><li id="l2">b</li><li id="l3">c</li></ul>')).units;
+  assert.equal(remoteChanges(units, parseTopLevel('<ul><li id="l1">a</li><li id="l3">c</li><li id="l2">b</li></ul>')).reordered, true);
+  const added = remoteChanges(units, parseTopLevel('<ul><li id="l1">a</li><li id="l2">b</li><li id="l3">c</li><li id="l4">d</li></ul>'));
+  assert.deepEqual(added.inserted.map((block) => block.id), ["l4"]);
 });

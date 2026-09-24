@@ -22,7 +22,7 @@
 - **选区不能含文本绘图小组件**：`block_replace` 的范围里有小组件（XML 里的 `readonly-block`）时返回 `result: failed`、`degrade_code=1002 … non-addressable unit`，整次不写入。但 `block_delete --block-id <小组件>` 单独删它可以，`block_insert_after` 以它为锚点也可以。`publish` 增量和 `edit` 遇到这种区间改成「分段删除 → 在前一个块后插入」（2026-09-23 实测）。
 - 失败时 lark-cli 信封 `ok=false` 但**没有 `error` 字段**，原因只在 `data.warnings` 里；脚本已把它带进错误信息。
 - `str_replace` 替换**全部**匹配处；Markdown 模式下 `--pattern` 按导出的 Markdown（特殊字符已转义）匹配，只适合单行行内文字。`--content`、`--reference-map` 以 `@` 开头时 lark-cli 当成文件路径读取，内容一律走 `--content -` 加标准输入。
-- docs_ai 建不了文本绘图小组件；`publish` 先写占位段落 `[[feishu-mermaid:N]]`，再用块接口在同一位置建小组件并删掉占位（已验证）。
+- docs_ai 建不了文本绘图小组件；`publish` 和 `edit` 先写占位段落 `[[feishu-mermaid:<本次随机前缀>-N]]`，再用块接口在同一位置建小组件并删掉占位（已验证）。只替换与本次占位完全相同的段落，文档里原有的相似文字不动。
 
 ## 文本绘图小组件（add_ons，block_type 40）
 
@@ -49,6 +49,11 @@
 - 列宽用 `patch` 的 `update_table_property`（`column_width` 最小 50，另加 `column_index`）逐列设置，回读 `table.property.column_width` 核对。
 - 单元格常见两种形态：人工建的 `[空文本块, 内容文本块]`，`insert_table_row` 新建的 `[空文本块]`。混在一张表里行高会不一致；`table-sync --pad-cells=auto`（默认）按既有数据行（跳过表头）每格块数的众数补齐新行，`--pad-cells=off` 关闭。补块只能逐格 `children.create`，N 行 × M 列要 N×M 次调用，是扩表的主要耗时。写入以格内最后一个文本块为目标，读取拼接格内所有文本块。
 - `table-sync` 只在末尾补行，靠重写差异格实现中间插入，被下移的行会被重写。
+- docs_ai 发布的 GFM 表格默认 `header_row: true`，列宽按内容估算（实测 `[120, 201, 120, 120]`、`[144, 531]`）。
+- 表格结构改动都走 `documentBlock.patch`（2026-09-23 实测）：`delete_table_rows`、`merge_table_cells` 的区间左闭右开；删掉全部行、合并区域与已有合并部分重叠都报 `1770024 invalid operation`；`update_table_property` 的 `column_width` 小于 50 报 `99992402`。
+- `merge_table_cells` 把区域里各格内容按行拼进左上角那一格，其余格清空；`unmerge_table_cells` 后内容仍留在左上角，不会分回去。
+- `unmerge_table_cells` 只认合并区域的左上角；给区域里别的格或没合并的格，返回成功但什么都不做。
+- 删掉与合并区域相交的行：删除成功，但整个合并被取消，没有报错。
 
 ## convert（Markdown/HTML → 块）
 
@@ -80,6 +85,8 @@
 - `document_revision_id` 是「这次操作基于哪个版本计算位置」，服务端会把位置换算到最新版本，**不会拒绝旧版本**：基于第 32 版追加的块落在第 32 版时的文末，未来版本号按最新处理（P9）。纯追加传 `-1`；按快照算出的位置要带快照版本号；并发检测只能写前读版本、写后核对是否恰好 +1。
 - 评论挂在块 id 上（评论接口 `extra.content_anchor_id`）：原地 `update_text_elements` 保住评论；整块替换后评论仍在列表里、未解决，但指向已删除的块，失去挂靠位置（P12）。
 - 文档被用户删除（进回收站）后，`docx.v1.document.get` 返回 `1770003 resource deleted`，lark-cli 子类型是 `unknown`；`cleanup-list --prune` 按 1770002/1770003 判定已删除（2026-09-23 实测 5 篇）。
+- docs_ai 写入没有乐观锁（`--revision-id` 只是换算位置的基准）。`publish` 增量和 `edit` 在写之前再读一次正文，与之前读到的块和内容比对，变了就报 `REMOTE_CHANGED_DURING_PUBLISH` / `REMOTE_CHANGED_DURING_EDIT` 不写入；第二次读取到写入之间仍有不到一秒的窗口，同时有人在同一位置编辑时要回读核对。
+- `client_token` 会被飞书去重：再次发出同一个 token 的请求返回成功但不执行（2026-09-23 实测，同一张表第二次 `table-sync` 补一行没插进去，报 `ROW_INSERT_FAILED`）。token 只在同一请求的重试间复用，每次新操作用随机 token；按内容哈希算的 token 只适合「内容相同就不必重做」的写入。
 - 频率：应用写接口 3 次/秒（超限 400/99991400），单篇文档编辑 3 次/秒（超限 429）。lark-cli 传输层写请求间隔 350ms，限流自动退避重试 3 次。
 - 高亮块、分栏建好后飞书会自动塞一个空段落，写内容要复用它或删掉它。
 

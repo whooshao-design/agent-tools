@@ -6,29 +6,14 @@
 
 ## 流程
 
-1. 先看计划：`node $S publish --file=<md 绝对路径> --target=<文件夹或知识库节点链接> --dry-run`。输出标题、各类元素的预期数量（标题、表格、图片、高亮块、图）和本地警告。
-2. 发布：去掉 `--dry-run`。脚本依次预处理 Markdown → docs_ai 建文档 → 把 mermaid 占位换成文本绘图小组件 → 读回计数校验 → 在 md 旁写 `<文件名>.feishu.json`。
-3. 报告：给用户文档链接、`status`、`diagrams` 各项状态、`verification.mismatches`、`serverWarnings`；有问题逐项说明。
+1. 写完先检查：`node $S lint --file=<md 绝对路径>`，错误必须改，警告按需处理（见 `authoring-rules.md`）。
+2. 再看计划：`node $S publish --file=<md 绝对路径> --target=<文件夹或知识库节点链接> --dry-run`。输出标题、各类元素的预期数量（标题、表格、图片、高亮块、图）和本地警告。
+3. 发布：去掉 `--dry-run`。脚本依次预处理 Markdown → docs_ai 建文档 → 把 mermaid 占位换成文本绘图小组件 → 读回计数校验 → 在 md 旁写 `<文件名>.feishu.json`。
+4. 报告：给用户文档链接、`status`、`diagrams` 各项状态、`verification.mismatches`、`serverWarnings`；有问题逐项说明。
 
 ## 本地怎么写
 
-| 写法 | 发布后 |
-|---|---|
-| frontmatter `title:` 或开头的 `# 标题` | 文档标题；正文里不再重复这个 H1 |
-| ```` ```mermaid ```` | 文本绘图小组件（只显示图，读者可切到代码）；建不出来就退到画板，再不行保留为代码块 |
-| `> [!NOTE]`、`[!TIP]`、`[!IMPORTANT]`、`[!WARNING]`、`[!CAUTION]` | 高亮块：📝 蓝、💡 绿、📌 紫、❗ 橙、⛔ 红；内容可含段落、列表、待办和行内格式 |
-| `![说明](相对路径)` | 上传的图片，说明作图注；图片必须在 md 所在目录或其子目录里 |
-| GFM 表格 | 原生表格，任意行数；建议不超过 6 列 |
-| 有意写的 DocxXML 标签（如 `<table>` 带 `colspan`） | 原样交给 docs_ai |
-| `List<String>` 这类正文里的尖括号 | 自动转义，照常显示；代码里的不动 |
-| `<!-- 注释 -->` | 去掉（飞书不保留注释），会给出本地警告 |
-| `[文字](#标题)` 页内链接 | 只剩文字，会给出本地警告；需要跳转时发布后用 `link-plan` 补 |
-
-mermaid 在小组件里的写法：沿用本地稳定子集；quadrantChart、xychart、sankey 里的中文要加双引号，不加就不出图；不要给所有标签都加引号（小组件失败退到画板时，全加引号的图会解析失败）。写 `<whiteboard>` 会被本地检查拦下。
-
-发布前检查不通过（图片不在目录内、图片不存在、data URI 图片、代码块没闭合、写了 `<whiteboard>`）时直接报 `PUBLISH_PRECHECK_FAILED`，不会写飞书。
-
-代码一律用围栏代码块（```` ``` ````）：4 个空格缩进式的代码块不被识别为代码，里面的 `<` 会被当成正文转义。
+按 `markdown-profile.md` 的飞书方言写，图按 `diagrams.md`，排版按 `authoring-rules.md`。发布前先 `node $S lint --file=<md>`；`publish` 自己也会跑静态检查，错误直接报 `PUBLISH_PRECHECK_FAILED`、不写飞书。
 
 ## 状态文件与两种模式
 
@@ -58,9 +43,15 @@ mermaid 在小组件里的写法：沿用本地稳定子集；quadrantChart、xy
 |---|---|---|
 | 要改的段落在飞书上被人改过 | `remote_changed` | `--force`（飞书上的这些改动会被本地内容替换） |
 | 飞书上多了本地没有的块 | `remote_inserted`，给出样例 | `--force`（之后要覆盖一次才能继续增量） |
+| 本地改了标题，飞书上的标题也被人改过 | `remote_title_changed` | `--force` |
+| 飞书上调整过段落顺序 | `remote_reordered` | 先把顺序合回本地后 `--overwrite`；`--force` 照样按块写入，但之后要覆盖一次才能继续增量 |
 | 有未解决评论挂在要替换或删除的块上（原地改写的段不算） | `open_comments`，列出评论 | `--accept-comment-loss` |
 
-飞书上改过、但本地这次没动的段不会被覆盖，计入 `checks.preservedRemoteEdits`；这时本地与飞书已不一致，提醒用户把这些改动合回本地。
+飞书上改过、但本地这次没动的段不会被覆盖，计入 `checks.preservedRemoteEdits`；这时本地与飞书已不一致，提醒用户把这些改动合回本地。这些段之后本地再改时仍按冲突（`remote_changed`）处理，合回本地后确认再加 `--force`。文本绘图小组件在 XML 里是空块，比对时会读图的源码，飞书上改了图同样算改过。
+
+发布后脚本核对没改动的段落块 id 是否与上次一致；对不上说明飞书上调整过顺序，逐段映射作废（`verification.incrementalReady` 为 false），下次要 `--overwrite`。
+
+检查通过后、写入前会再读一次正文：这几秒里有人改了正文就报 `REMOTE_CHANGED_DURING_PUBLISH`、不写入，重新运行即可（会重新做上面的检查）。
 
 `needs_mode`：状态文件没有 `units`（2.2.0 以前发布的），或者本地切出的段与飞书上的块对不上。先整篇覆盖一次，之后就能增量。
 
@@ -70,7 +61,8 @@ mermaid 在小组件里的写法：沿用本地稳定子集；quadrantChart、xy
 
 | 检查 | 阻断时 | 用户确认后加 |
 |---|---|---|
-| 上次发布后飞书上有人改过正文（revision 变了且正文哈希不同） | `remote_changed` | `--force` |
+| 上次发布后飞书上有人改过正文（revision 变了且正文哈希不同），或之前的增量发布保留了还没合回本地的飞书改动（`checks.unmergedRemoteEdits`） | `remote_changed` | `--force` |
+| 本地改了标题，飞书上的标题也被人改过 | `remote_title_changed` | `--force` |
 | 有未解决、挂在正文上的评论（覆盖后会失去挂靠位置；全文评论不受影响） | `open_comments`，列出评论 | `--accept-comment-loss` |
 
 阻断时把原因和评论原样转给用户，由用户决定：合回本地再发、先处理评论，或者确认后加对应参数。执行覆盖前会把当前飞书内容备份到 `~/.local/share/agent-tools/feishu-backups/<文档 token>/<时间>-r<版本>.{xml,md}`；标题变了会一并更新。要恢复，用飞书的历史版本回滚到备份里记录的版本。

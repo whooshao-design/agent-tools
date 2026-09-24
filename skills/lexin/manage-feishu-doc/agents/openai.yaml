@@ -1,6 +1,6 @@
 interface:
   display_name: "Manage Feishu Doc"
   short_description: "读取、发布、修改 lexin.feishu.cn 飞书文档并处理权限"
-  default_prompt: "使用 $manage-feishu-doc 经 lark-cli 读写飞书文档：先 auth-check，缺权限时准确申请；发布本地 Markdown 先 --dry-run，写入后回读校验。"
+  default_prompt: "使用 $manage-feishu-doc 经 lark-cli 读写飞书文档：先 auth-check，缺权限时准确申请；发布本地 Markdown 先 lint 再 --dry-run，写入后回读校验。"
 policy:
   allow_implicit_invocation: true

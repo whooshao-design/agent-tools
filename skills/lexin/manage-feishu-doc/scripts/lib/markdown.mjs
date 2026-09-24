@@ -1,13 +1,13 @@
 // 发布前把本地 Markdown 整理成 docs_ai 能正确落块的形式。规则都来自 lexin 租户实测，
 // 见 references/publish.md 与 references/api-facts.md。
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { basename, isAbsolute, relative, resolve } from "node:path";
 
-import { MERMAID_PLACEHOLDER_PATTERN, splitUnits } from "./structure.mjs";
+import { lintMarkdown, scanComments } from "./lint.mjs";
+import { splitUnits } from "./structure.mjs";
 
-export { MERMAID_PLACEHOLDER_PATTERN };
-export const MERMAID_PLACEHOLDER = (index) => `[[feishu-mermaid:${index}]]`;
+export const MERMAID_PLACEHOLDER = (nonce, index) => `[[feishu-mermaid:${nonce}-${index}]]`;
 
 // GitHub 提示块 → 高亮块。emoji 只用飞书表情枚举里有的（没有 ⚠️）
 export const ALERT_STYLES = Object.freeze({
@@ -29,6 +29,10 @@ const DOCX_TAGS = new Set([
   "figure", "grid", "h1", "h2", "h3", "h4", "h5", "h6", "hr", "img", "latex", "li", "ol", "p", "pre", "source",
   "span", "table", "tbody", "td", "th", "thead", "time", "tr", "u", "ul",
 ]);
+
+// 行内代码原样保留：发布前的检查和改写只作用于代码之外的部分
+const CODE_SPAN = /(`+)[\s\S]*?\1/g;
+const maskCode = (line) => line.replace(CODE_SPAN, (whole) => " ".repeat(whole.length));
 
 export function escapeXml(text) {
   return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -131,9 +135,9 @@ export function escapeTagLikeText(line) {
 
 function splitFrontmatter(markdown) {
   const match = markdown.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
-  if (!match) return { title: null, body: markdown };
+  if (!match) return { title: null, body: markdown, offset: 0 };
   const title = match[1].match(/^title:\s*["']?(.*?)["']?\s*$/m)?.[1] ?? null;
-  return { title: title || null, body: markdown.slice(match[0].length) };
+  return { title: title || null, body: markdown.slice(match[0].length), offset: (match[0].match(/\n/g) ?? []).length };
 }
 
 function takeTitle(body, frontTitle, fileName) {
@@ -142,19 +146,25 @@ function takeTitle(body, frontTitle, fileName) {
   const h1 = first >= 0 ? lines[first].match(/^#\s+(.+?)\s*#*\s*$/) : null;
   if (h1 && (!frontTitle || h1[1].trim() === frontTitle.trim())) {
     lines.splice(first, 1);
-    return { title: frontTitle ?? h1[1].trim(), body: lines.join("\n") };
+    return { title: frontTitle ?? h1[1].trim(), body: lines.join("\n"), removed: first };
   }
-  return { title: frontTitle ?? basename(fileName ?? "untitled.md").replace(/\.(md|markdown)$/i, ""), body };
+  return { title: frontTitle ?? basename(fileName ?? "untitled.md").replace(/\.(md|markdown)$/i, ""), body, removed: -1 };
 }
 
 // 把 body 里的图片改成 lark-cli 能上传的 @./相对路径；只接受文档目录内的本地文件
+// 图片语法的起点落在行内代码里的是示例文字，不当图片处理；说明文字里带行内代码的图片照常处理
 function rewriteImages(line, baseDir, exists, readFile, collect) {
-  return line.replace(IMAGE, (whole, alt, rawTarget, title = "") => {
-    const target = rawTarget.startsWith("<") ? rawTarget.slice(1, -1) : rawTarget;
-    if (/^https?:\/\//i.test(target) || target.startsWith("@")) {
-      collect.images.push({ source: target, remote: /^https?:/i.test(target) });
+  const spans = [...line.matchAll(CODE_SPAN)].map((match) => [match.index, match.index + match[0].length]);
+  return line.replace(IMAGE, (whole, alt, rawTarget, title, offset) => {
+    if (spans.some(([start, end]) => offset >= start && offset < end)) return whole;
+    title ??= "";
+    const written = rawTarget.startsWith("<") ? rawTarget.slice(1, -1) : rawTarget;
+    if (/^https?:\/\//i.test(written)) {
+      collect.images.push({ source: written, remote: true });
       return whole;
     }
+    // lark-cli 原生的 @./ 写法按本地图片处理：同样检查存在、算内容哈希
+    const target = written.startsWith("@") ? written.slice(1) : written;
     if (/^data:/i.test(target)) {
       collect.errors.push(`不支持 data URI 图片（${alt || "无说明"}），先存成本地文件`);
       return whole;
@@ -179,8 +189,8 @@ function rewriteImages(line, baseDir, exists, readFile, collect) {
     collect.images.push({ source: target, remote: false, path: absolute });
     const ref = `@./${rel.split("\\").join("/")}`;
     const rewritten = `![${alt}](${/\s/.test(ref) ? `<${ref}>` : ref}${title})`;
-    // 增量发布按图片内容判断是否改动：路径不变但换了图也要重传
-    collect.imageHashes[rewritten] = createHash("sha256").update(readFile(absolute)).digest("hex");
+    // 增量发布按图片内容判断是否改动：路径不变但换了图也要重传。按路径取键，说明文字之后还会被转义
+    collect.imageHashes[ref] = createHash("sha256").update(readFile(absolute)).digest("hex");
     return rewritten;
   });
 }
@@ -191,8 +201,15 @@ export function preparePublishMarkdown(
 ) {
   const front = splitFrontmatter(markdown.replace(/\r\n/g, "\n"));
   // 往已有文档插入片段时不提取标题，片段开头的 # 就是正文里的一级标题
-  const { title, body } = extractTitle ? takeTitle(front.body, front.title, fileName) : { title: front.title, body: front.body };
+  const { title, body, removed } = extractTitle ? takeTitle(front.body, front.title, fileName) : { title: front.title, body: front.body, removed: -1 };
+  // 正文第 i 行在源文件里的行号（去掉的 frontmatter 和标题行要补回来），写前检查按它报图的位置
+  const sourceLine = (i) => front.offset + (removed >= 0 && i >= removed ? i + 1 : i) + 1;
   const collect = { images: [], errors: [], warnings: [], imageHashes: {} };
+  const nonce = randomBytes(4).toString("hex");
+  // 写前检查（lint.mjs）：会出错的写法挡住发布，其余作为本地警告带行号给出
+  for (const issue of lintMarkdown(markdown)) {
+    (issue.level === "error" ? collect.errors : collect.warnings).push(`第 ${issue.line} 行：${issue.message}`);
+  }
   const diagrams = [];
   const expected = { headings: 0, tables: 0, images: 0, callouts: 0, diagrams: 0 };
   const out = [];
@@ -209,8 +226,8 @@ export function preparePublishMarkdown(
       if (fence.mermaid) {
         if (new RegExp(`^ {0,3}${fence.char}{${fence.length},}\\s*$`).test(line)) {
           const index = diagrams.length + 1;
-          diagrams.push({ index, placeholder: MERMAID_PLACEHOLDER(index), code: fence.body.join("\n") });
-          out.push("", MERMAID_PLACEHOLDER(index), "");
+          diagrams.push({ index, placeholder: MERMAID_PLACEHOLDER(nonce, index), code: fence.body.join("\n"), line: fence.line });
+          out.push("", MERMAID_PLACEHOLDER(nonce, index), "");
           fence = null;
         } else {
           fence.body.push(line.slice(Math.min(fence.indent, line.match(/^ */)[0].length)));
@@ -222,33 +239,20 @@ export function preparePublishMarkdown(
       continue;
     }
 
-    if (inComment) {
-      const end = line.indexOf("-->");
-      if (end < 0) continue;
-      inComment = false;
-      line = line.slice(end + 3);
-      if (!line.trim()) continue;
-    }
+    // HTML 注释会被服务端删掉并报 warning，发布前直接去掉：顺序扫描，跨行注释接着上一行的状态；
+    // 注释之间的正文照常保留，只剩注释的行整行去掉
+    const scanned = scanComments(line, inComment);
+    removedComments += scanned.removed;
+    inComment = scanned.inComment;
+    if (scanned.touched && !scanned.stripped.trim()) continue;
+    line = scanned.stripped;
 
     const open = line.match(FENCE_OPEN);
     if (open) {
       const info = (open[3] ?? "").toLowerCase();
-      fence = { char: open[2][0], length: open[2].length, indent: open[1].length, mermaid: info === "mermaid", body: [] };
+      fence = { char: open[2][0], length: open[2].length, indent: open[1].length, mermaid: info === "mermaid", body: [], line: sourceLine(i) };
       if (!fence.mermaid) out.push(line);
       continue;
-    }
-
-    // HTML 注释会被服务端删掉并报 warning，发布前直接去掉
-    line = line.replace(/<!--[\s\S]*?-->/g, () => {
-      removedComments += 1;
-      return "";
-    });
-    const commentStart = line.indexOf("<!--");
-    if (commentStart >= 0) {
-      removedComments += 1;
-      inComment = true;
-      line = line.slice(0, commentStart);
-      if (!line.trim()) continue;
     }
 
     const alert = line.match(ALERT_START);
@@ -263,16 +267,17 @@ export function preparePublishMarkdown(
       continue;
     }
 
+    const visible = maskCode(line);
     if (/^ {0,3}#{1,6}\s+\S/.test(line)) expected.headings += 1;
     if (line.includes("|") && TABLE_SEPARATOR.test(line) && i > 0 && lines[i - 1].includes("|")) expected.tables += 1;
-    if (/<callout[\s>]/.test(line)) expected.callouts += (line.match(/<callout[\s>]/g) ?? []).length;
-    if (/<whiteboard[\s>]/i.test(line)) {
+    if (/<callout[\s>]/.test(visible)) expected.callouts += (visible.match(/<callout[\s>]/g) ?? []).length;
+    if (/<whiteboard[\s>]/i.test(visible)) {
       collect.errors.push("Markdown 里不要写 <whiteboard>：实测会解析失败并被整块丢弃，画图改用 ```mermaid 代码块");
     }
-    anchorLinks += (line.match(/\]\(#[^)]+\)/g) ?? []).length;
+    anchorLinks += (visible.match(/\]\(#[^)]+\)/g) ?? []).length;
 
     line = rewriteImages(line, baseDir, exists, readFile, collect);
-    out.push(/<callout[\s>]/.test(line) ? line : escapeTagLikeText(line));
+    out.push(/<callout[\s>]/.test(visible) ? line : escapeTagLikeText(line));
   }
 
   if (fence) collect.errors.push(`代码块没有闭合（从 ${fence.mermaid ? "mermaid" : "代码"}块开始）`);

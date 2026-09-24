@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // 飞书云文档读写：经官方 lark-cli（用户身份）调用开放平台，写后回读校验。
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -8,7 +8,9 @@ import { fileURLToPath } from "node:url";
 import { blockText, elementsText, listAllBlocks, listChildren, TEXT_CONTAINER_KEYS } from "./lib/blocks.mjs";
 import { buildCleanupList, cleanupChecklist, readRegistry, recordCreated, writeRegistry } from "./lib/cleanup.mjs";
 import { editDocument } from "./lib/edit.mjs";
-import { MERMAID_WIDGET_TYPE, publishMarkdown, readState, statePathFor } from "./lib/publish.mjs";
+import { lintFile } from "./lib/lint.mjs";
+import { preparePublishMarkdown } from "./lib/markdown.mjs";
+import { listOpenComments, MERMAID_WIDGET_TYPE, publishMarkdown, readState, statePathFor } from "./lib/publish.mjs";
 import { createTransport, LARK_CLI, LarkCliError, runLarkCli } from "./lib/transport.mjs";
 
 export { blockText, listAllBlocks };
@@ -24,6 +26,8 @@ const BLOCK_TYPE_TABLE_CELL = 32;
 export const OPERATION_SCOPES = Object.freeze({
   read: ["docx:document:readonly", "offline_access"],
   "write-json": ["docx:document", "docx:document:readonly", "offline_access"],
+  // 删行前要查挂在这些行上的评论
+  "table-edit": ["docs:document.comment:read", "docx:document", "docx:document:readonly", "offline_access"],
   // Editing existing blocks (tables, paragraphs) needs exactly the same scopes as
   // write-json; the separate name keeps auth-check output honest about intent.
   "write-blocks": ["docx:document", "docx:document:readonly", "offline_access"],
@@ -596,10 +600,8 @@ async function insertTableRows(transport, documentToken, tableId, count) {
   for (let index = 0; index < count; index += 1) {
     await transport.call("docx.v1.documentBlock.patch", {
       path: { document_id: documentToken, block_id: tableId },
-      params: {
-        document_revision_id: -1,
-        client_token: deterministicClientToken(documentToken, tableId, "insert-row", index, count),
-      },
+      // client_token 会被飞书去重：内容无关的固定 token 会让下一次补行被当成重复请求而忽略（实测）
+      params: { document_revision_id: -1, client_token: randomUUID() },
       // row_index -1 appends; a non-negative value makes the new row land at
       // exactly that index and pushes the rest down.
       data: { insert_table_row: { row_index: -1 } },
@@ -710,10 +712,7 @@ export async function syncTable(transport, documentToken, { tableId, rows, padCe
     const chunk = updates.slice(start, start + MAX_BATCH_UPDATES);
     const result = await transport.call("docx.v1.documentBlock.batchUpdate", {
       path: { document_id: documentToken },
-      params: {
-        document_revision_id: -1,
-        client_token: deterministicClientToken(documentToken, tableId, "batch", start, chunk.length),
-      },
+      params: { document_revision_id: -1, client_token: randomUUID() },
       data: { requests: chunk },
     });
     revision = revisionOf(result) ?? revision;
@@ -737,6 +736,173 @@ export async function syncTable(transport, documentToken, { tableId, rows, padCe
     contentHash: sha256(rows.map((row) => row.join("")).join("\n")),
     revision,
   };
+}
+
+// ---- 表格结构编辑：删行、合并/拆分单元格、调列宽 ----
+// 实测（2026-09-23）：合并会把区域里各格的内容按行拼进左上角那一格、其余格清空；删掉与合并区域相交的行
+// 会悄悄取消合并；拆分只认合并区域的左上角，给别的格不报错也不生效；列宽最小 50px。
+
+const TABLE_EDIT_OPS = ["delete-rows", "merge", "unmerge", "widths"];
+
+// 行列号从 0 开始（0 是表头行，与 table-read 的 rows 下标一致）；「a-b」含两端，返回左闭右开区间
+export function parseIndexRange(value, label, size) {
+  const match = String(value ?? "").trim().match(/^(\d+)(?:-(\d+))?$/);
+  if (!match) fail(`--${label} 写成序号或「起-止」（从 0 开始，含两端）`, "INVALID_ARGUMENT");
+  const start = Number(match[1]);
+  const end = Number(match[2] ?? match[1]) + 1;
+  if (end <= start || end > size) fail(`--${label}=${value} 超出范围：序号是 0 到 ${size - 1}`, "INVALID_ARGUMENT");
+  return { start, end };
+}
+
+// merge_info 按行优先、每格一项；返回合并区域的左上角与跨度
+export function mergedRegions(property) {
+  const columns = property.column_size;
+  return (property.merge_info ?? []).flatMap((info, index) =>
+    (info.row_span ?? 1) > 1 || (info.col_span ?? 1) > 1
+      ? [{ row: Math.floor(index / columns), column: index % columns, rowSpan: info.row_span ?? 1, colSpan: info.col_span ?? 1 }]
+      : []);
+}
+
+const overlaps = (a, b) => a.start < b.end && b.start < a.end;
+const within = (inner, outer) => outer.start <= inner.start && inner.end <= outer.end;
+const regionRows = (region) => ({ start: region.row, end: region.row + region.rowSpan });
+const regionColumns = (region) => ({ start: region.column, end: region.column + region.colSpan });
+const describeRegion = (region) => `第 ${region.row} 行第 ${region.column} 列起 ${region.rowSpan} 行 × ${region.colSpan} 列`;
+
+function descendantIds(blockMap, id) {
+  return [id, ...(blockMap.get(id)?.children ?? []).flatMap((child) => descendantIds(blockMap, child))];
+}
+
+function verifyTable(condition, message) {
+  if (condition) return;
+  const error = new Error(`回读校验失败：${message}`);
+  error.code = "VERIFY_FAILED";
+  error.details = { failureClass: "VERIFY_FAILED", missingScopes: [], nextAction: "用 table-read 看表格现状后再决定是否重试" };
+  throw error;
+}
+
+export async function editTable(transport, documentToken, options) {
+  const { tableId, op, dryRun = false, acceptCommentLoss = false } = options;
+  if (!TABLE_EDIT_OPS.includes(op)) fail(`不支持的 --op=${op ?? ""}；可用：${TABLE_EDIT_OPS.join("、")}`, "INVALID_ARGUMENT");
+  const blocks = await listAllBlocks(transport, documentToken);
+  const blockMap = indexBlocks(blocks);
+  const table = readTable(blocks, tableId);
+  const property = blockMap.get(tableId).table.property;
+  const regions = mergedRegions(property);
+  // 写之前再读一次：行号、列号都是按刚才读到的表算的，这期间有人插删行列或改了合并，就不按旧位置写
+  // 比对内容：单元格网格、每格整棵子块树的完整块内容（文字、链接、样式、父子关系都在里面；按原文重建也算）、合并信息和列宽
+  const layout = (allBlocks) => {
+    const map = indexBlocks(allBlocks);
+    const current = readTable(allBlocks, tableId);
+    const currentProperty = map.get(tableId).table.property;
+    const tree = current.cellIds.flat().map((id) => descendantIds(map, id).map((child) => map.get(child) ?? child));
+    return JSON.stringify([current.cellIds, tree, currentProperty.merge_info ?? [], currentProperty.column_width ?? []]);
+  };
+  const before = layout(blocks);
+  const unchangedSinceRead = async () => {
+    if (layout(await listAllBlocks(transport, documentToken)) !== before) {
+      fail("读取之后表格被人改过（行列或合并变了），这次没有写入：重新运行（先 --dry-run 看新的行号）", "TABLE_CHANGED_DURING_EDIT");
+    }
+  };
+  let checkedBeforeWrite = false;
+  const patch = async (data) => {
+    // 只在第一次写之前核对：改多列宽度要连续提交，后面几次比对的是自己刚改过的表
+    if (!checkedBeforeWrite) await unchangedSinceRead();
+    checkedBeforeWrite = true;
+    return transport.call("docx.v1.documentBlock.patch", {
+      path: { document_id: documentToken, block_id: tableId },
+      // 每次操作用新 token：同一个 token 会被飞书当成重复请求（例如合并、拆分后再合并同一区域）
+      params: { document_revision_id: -1, client_token: randomUUID() },
+      data,
+    });
+  };
+  const reread = async () => {
+    const after = await listAllBlocks(transport, documentToken);
+    return { table: readTable(after, tableId), property: indexBlocks(after).get(tableId).table.property };
+  };
+
+  if (op === "delete-rows") {
+    const range = parseIndexRange(options.rows, "rows", table.rowSize);
+    if (range.end - range.start >= table.rowSize) fail("不能删掉表格的全部行；要删整张表用 edit --op=delete --block=<表格块 id>", "INVALID_ARGUMENT");
+    const crossing = regions.find((region) => overlaps(regionRows(region), range) && !within(regionRows(region), range));
+    if (crossing) {
+      fail(`要删的行和合并单元格（${describeRegion(crossing)}）相交：删除会取消合并，合并格的内容只在左上角那一格。先 --op=unmerge 再删，或调整范围`, "MERGED_CELLS_IN_RANGE");
+    }
+    const preview = { op, rows: `${range.start}-${range.end - 1}`, removedRows: table.rows.slice(range.start, range.end) };
+    const ids = new Set(table.cellIds.slice(range.start, range.end).flat().flatMap((id) => descendantIds(blockMap, id)));
+    const comments = (await listOpenComments(transport, documentToken)).filter((comment) => ids.has(comment.anchor));
+    if (comments.length > 0 && !acceptCommentLoss) {
+      const message = `有 ${comments.length} 条未解决评论挂在要删的行上：先处理，或确认后加 --accept-comment-loss`;
+      return { status: "blocked", ...preview, blockers: [{ check: "open_comments", message, comments: comments.slice(0, 10) }] };
+    }
+    if (dryRun) return { status: "dry_run", ...preview };
+    await patch({ delete_table_rows: { row_start_index: range.start, row_end_index: range.end } });
+    const after = await reread();
+    const expected = [...table.rows.slice(0, range.start), ...table.rows.slice(range.end)];
+    verifyTable(JSON.stringify(after.table.rows) === JSON.stringify(expected), "删行后表格内容与预期不一致");
+    return { status: "updated", ...preview, rowSize: after.table.rowSize };
+  }
+
+  if (op === "merge") {
+    const rows = parseIndexRange(options.rows, "rows", table.rowSize);
+    const columns = parseIndexRange(options.cols, "cols", table.columnSize);
+    if ((rows.end - rows.start) * (columns.end - columns.start) < 2) fail("合并至少要两个格", "INVALID_ARGUMENT");
+    const partial = regions.find((region) => {
+      const r = regionRows(region);
+      const c = regionColumns(region);
+      if (!overlaps(r, rows) || !overlaps(c, columns)) return false;
+      return !(within(r, rows) && within(c, columns)) && !(within(rows, r) && within(columns, c));
+    });
+    if (partial) fail(`合并范围和已有的合并单元格（${describeRegion(partial)}）部分重叠，飞书会拒绝：先 unmerge 或调整范围`, "MERGE_OVERLAP");
+    const texts = [];
+    for (let row = rows.start; row < rows.end; row += 1) {
+      for (let column = columns.start; column < columns.end; column += 1) if (table.rows[row][column]) texts.push(table.rows[row][column]);
+    }
+    const preview = {
+      op,
+      rows: `${rows.start}-${rows.end - 1}`,
+      cols: `${columns.start}-${columns.end - 1}`,
+      mergedText: texts.join(""),
+      warnings: texts.length > 1 ? [`${texts.length} 个格有内容，合并后按行拼进左上角那一格：「${texts.join("")}」`] : [],
+    };
+    if (dryRun) return { status: "dry_run", ...preview };
+    await patch({ merge_table_cells: { row_start_index: rows.start, row_end_index: rows.end, column_start_index: columns.start, column_end_index: columns.end } });
+    const after = await reread();
+    const info = after.property.merge_info?.[rows.start * after.property.column_size + columns.start] ?? {};
+    verifyTable(info.row_span === rows.end - rows.start && info.col_span === columns.end - columns.start, "合并区域的跨度与请求不一致");
+    return { status: "updated", ...preview };
+  }
+
+  if (op === "unmerge") {
+    const row = parseIndexRange(options.row, "row", table.rowSize).start;
+    const column = parseIndexRange(options.col, "col", table.columnSize).start;
+    const region = regions.find((item) => overlaps(regionRows(item), { start: row, end: row + 1 }) && overlaps(regionColumns(item), { start: column, end: column + 1 }));
+    if (!region) fail(`第 ${row} 行第 ${column} 列不在合并单元格里`, "NOT_MERGED");
+    const preview = { op, region: describeRegion(region), text: table.rows[region.row][region.column], note: "拆分后内容留在左上角那一格，其余格为空" };
+    if (dryRun) return { status: "dry_run", ...preview };
+    // 拆分只认左上角：给区域里别的格飞书不报错也不生效
+    await patch({ unmerge_table_cells: { row_index: region.row, column_index: region.column } });
+    const after = await reread();
+    verifyTable(!mergedRegions(after.property).some((item) => item.row === region.row && item.column === region.column), "合并区域仍然存在");
+    return { status: "updated", ...preview };
+  }
+
+  const values = String(options.widths ?? "").split(",").map((value) => value.trim());
+  if (values.length !== table.columnSize) fail(`--widths 要给全部 ${table.columnSize} 列，用逗号分隔，不改的列写 *`, "INVALID_ARGUMENT");
+  const current = property.column_width ?? [];
+  const changes = [];
+  values.forEach((value, column) => {
+    if (value === "*") return;
+    if (!/^\d+$/.test(value) || Number(value) < 50) fail(`第 ${column} 列的宽度「${value}」无效：写像素整数，最小 50`, "INVALID_ARGUMENT");
+    if (Number(value) !== current[column]) changes.push({ column, from: current[column] ?? null, to: Number(value) });
+  });
+  if (changes.length === 0) return { status: "unchanged", op, changes };
+  if (dryRun) return { status: "dry_run", op, changes };
+  // 同一张表的多次改宽不能放进一个 batchUpdate（块 id 重复），逐列 patch
+  for (const change of changes) await patch({ update_table_property: { column_index: change.column, column_width: change.to } });
+  const after = await reread();
+  verifyTable(changes.every((change) => after.property.column_width?.[change.column] === change.to), "列宽与请求不一致");
+  return { status: "updated", op, changes };
 }
 
 // ---- 元素级文本编辑：update-text / link-plan ----
@@ -1010,6 +1176,7 @@ function usage() {
       "auth-check --operation=read|write-blocks|write-json|publish|edit|create-doc [--target=<url>]",
       "authorize --operation=<operation> [--target=<url>] [--no-wait | --device-code=<code>]",
       "read --target=<url> [--format=markdown|xml|text] [--scope=full|outline|section|range|keyword] [--keyword=<k>] [--start-block-id=<id>] [--end-block-id=<id>] [--with-ids] [--out=<path>]",
+      "lint --file=<md> [--out=<mermaid 渲染输出目录>] [--no-render]",
       "publish --file=<md> [--target=<folder-or-wiki-url>] [--doc=<docx-url>] [--overwrite] [--dry-run] [--force] [--accept-comment-loss]",
       "edit --target=<url> --op=insert-after --file=<md> (--after=<块id> | --after-heading=<标题> | --at=start|end) [--dry-run]",
       "edit --target=<url> --op=replace|delete --block=<块id> [--end-block=<块id>] [--file=<md>] [--dry-run] [--allow-protected] [--accept-comment-loss]",
@@ -1019,6 +1186,10 @@ function usage() {
       "list-blocks --target=<url> [--type=<block_type>] [--full] [--out=<path>]",
       "table-read --target=<url> [--table=<block_id>|--table-index=<n>]",
       "table-sync --target=<url> --table=<block_id>|--table-index=<n> --file=<path>|--stdin [--pad-cells=auto|off] [--dry-run]",
+      "table-edit --target=<url> --table=<block_id>|--table-index=<n> --op=delete-rows --rows=<a>[-<b>] [--dry-run] [--accept-comment-loss]",
+      "table-edit --target=<url> --table=<block_id>|--table-index=<n> --op=merge --rows=<a>-<b> --cols=<c>-<d> [--dry-run]",
+      "table-edit --target=<url> --table=<block_id>|--table-index=<n> --op=unmerge --row=<r> --col=<c> [--dry-run]",
+      "table-edit --target=<url> --table=<block_id>|--table-index=<n> --op=widths --widths=<w0,w1,...|*> [--dry-run]",
       "update-text --target=<url> --file=<plan.json>|--stdin [--dry-run]",
       "link-plan --target=<url> --labels=<labels.json> --out=<plan.json>",
       "inspect-sections --target=<url> [--section=<id>]",
@@ -1031,7 +1202,7 @@ function usage() {
     notes: [
       "read 默认输出 docs_ai 的 Markdown，文本绘图小组件会补成 ```mermaid 代码块；--format=text 是 rawContent 纯文本。",
       "publish 首次发布要 --target 指定文件夹或知识库节点；再次发布默认增量（只改变动的段落），整篇覆盖加 --overwrite；都可先 --dry-run 看计划和检查。",
-      "table-sync 的输入是 {\"rows\": [[...]]} 或裸二维数组，含表头行；行数只增不减。",
+      "table-sync 的输入是 {\"rows\": [[...]]} 或裸二维数组，含表头行；行数只增不减。删行、合并/拆分单元格、调列宽用 table-edit，行列号从 0 开始（0 是表头行，与 table-read 的 rows 下标一致），a-b 含两端。",
       "list-blocks --full 返回原始块（含 text_element_style）；--out 把原始块写入文件，只在 stdout 打印摘要。",
       "update-text 的计划是 [{block_id, elements}]，整块替换 elements；未变化的块跳过，每批 40 条，写后逐块回读校验。",
       "call 是逃生口，直接用 lark-cli 调任意开放平台接口（用户身份）。",
@@ -1149,6 +1320,14 @@ async function main() {
   const target = options.target ? parseTarget(options.target) : null;
 
   if (command === "parse-target") return printJson({ status: "ok", target });
+  // 写前检查只读本地文件，不需要飞书登录
+  if (command === "lint") {
+    if (!options.file) fail("lint 必须指定 --file=<md 路径>");
+    const result = lintFile(options.file, { prepare: preparePublishMarkdown, out: options.out, render: !options["no-render"] });
+    printJson(result);
+    if (result.status === "errors") process.exitCode = 2;
+    return;
+  }
   if (command === "auth-check") {
     const { result } = await checkAuthorization(options.operation || "read", target);
     printJson({ status: result.ready ? "ready" : "permission_required", ...result });
@@ -1265,8 +1444,8 @@ async function main() {
       ? "write-json"
       : WRITE_BLOCK_COMMANDS.has(command)
         ? "write-blocks"
-        : command === "edit"
-          ? "edit"
+        : ["edit", "table-edit"].includes(command)
+          ? command
           : null;
   if (!operation) fail(`未知命令: ${command}`);
   if (!(await ensureAuthorized(operation, target))) return;
@@ -1365,6 +1544,24 @@ async function main() {
     });
     return printJson({ status: result.status, ...resolved, blockId: tableId, ...result });
   }
+  if (command === "table-edit") {
+    const blocks = await listAllBlocks(transport, resolved.documentToken);
+    const tableId = tableIdFrom(blocks, options);
+    const result = await editTable(transport, resolved.documentToken, {
+      tableId,
+      op: options.op,
+      rows: options.rows,
+      cols: options.cols,
+      row: options.row,
+      col: options.col,
+      widths: options.widths,
+      dryRun: Boolean(options["dry-run"]),
+      acceptCommentLoss: Boolean(options["accept-comment-loss"]),
+    });
+    printJson({ ...resolved, blockId: tableId, ...result });
+    if (result.status === "blocked") process.exitCode = 2;
+    return;
+  }
   if (command === "update-text") {
     const plan = prepareTextPlan(JSON.parse(await inputJson(options)));
     const result = await updateTextElements(transport, resolved.documentToken, plan, { dryRun: Boolean(options["dry-run"]) });
@@ -1402,7 +1599,7 @@ async function main() {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   main().catch((error) => {
     const command = process.argv[2];
-    const operation = READ_COMMANDS.has(command) ? "read" : ["publish", "edit"].includes(command) ? command : "write-json";
+    const operation = READ_COMMANDS.has(command) ? "read" : ["publish", "edit", "table-edit"].includes(command) ? command : "write-json";
     const classified = error.details ?? classifyFailure(error, { requiredScopes: OPERATION_SCOPES[operation] ?? [] });
     printJson({ status: "error", code: error.code ?? classified.failureClass, message: error.message, ...classified });
     process.exitCode = 1;

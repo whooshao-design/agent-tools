@@ -61,14 +61,16 @@ test("duplicate heading text fails closed and names the ids; an empty section ca
   rejects({ op: "replace-section", heading: "不存在" }, "HEADING_NOT_FOUND");
 });
 
-function fakeDocument({ comments = [] } = {}) {
+function fakeDocument({ comments = [], drift = null } = {}) {
   const log = [];
+  let xmlFetches = 0;
   const transport = {
     async shortcut(args, options = {}) {
       log.push({ args, input: options.input, cwd: options.cwd });
       if (args[1] === "+fetch") {
         const format = args[args.indexOf("--doc-format") + 1];
-        return { document: { content: format === "xml" ? DOC : MARKDOWN, revision_id: 5 } };
+        const xml = drift && format === "xml" && (xmlFetches += 1) > 1 ? drift : DOC;
+        return { document: { content: format === "xml" ? xml : MARKDOWN, revision_id: 5 } };
       }
       if (args[1] === "+update") return { result: "success", warnings: [] };
       throw new Error(`unexpected shortcut ${args.join(" ")}`);
@@ -143,4 +145,19 @@ test("replace-text counts matches in the Markdown export, needs --all for severa
   const [update] = updates();
   assert.deepEqual(update.args.slice(4), ["--command", "str_replace", "--doc-format", "markdown", "--pattern=安装", "--content", "-"]);
   assert.equal(update.input, "@部署", "a leading @ would make lark-cli read a file if passed as an argument");
+});
+
+test("an edit made in Feishu between the read and the write stops the edit before anything is written", async () => {
+  const { file } = fragment("- yum 安装（改）\n");
+  const drift = DOC.replace('<li id="l3">源码编译</li>', '<li id="l3">源码编译</li><li id="l9">别人刚加的一项</li>');
+  const { transport, updates } = fakeDocument({ drift });
+  await assert.rejects(editDocument(transport, "D1", { op: "replace", block: "l2", file }), (error) => error.code === "REMOTE_CHANGED_DURING_EDIT");
+  assert.equal(updates().length, 0);
+});
+
+test("a nested item recreated in Feishu between the read and the write stops the edit too", async () => {
+  const { file } = fragment("- yum 安装（改）\n");
+  const { transport, updates } = fakeDocument({ drift: DOC.replace('id="l2a"', 'id="l2b"') });
+  await assert.rejects(editDocument(transport, "D1", { op: "replace", block: "l2", file }), (error) => error.code === "REMOTE_CHANGED_DURING_EDIT");
+  assert.equal(updates().length, 0);
 });

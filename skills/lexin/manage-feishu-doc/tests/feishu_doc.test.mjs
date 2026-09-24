@@ -327,6 +327,44 @@ test("syncTable appends rows, pads new cells, and writes only differing cells", 
   assert.deepEqual(calls, []);
 });
 
+test("syncTable can append rows again in a later run: Feishu drops requests that reuse a client_token", async () => {
+  const blocks = buildTableDoc([["ID", "名称"], ["M1000", "调用数"]], { fillerParagraph: false });
+  const seen = new Set();
+  const mcp = {
+    async call(name, args) {
+      if (name === "docx.v1.documentBlock.list") return { items: structuredClone(blocks) };
+      const token = args.params?.client_token;
+      if (token && seen.has(token)) return {};
+      if (token) seen.add(token);
+      if (name === "docx.v1.documentBlock.patch") {
+        const table = blocks.find((item) => item.block_id === "table-1");
+        const rowIndex = table.table.property.row_size;
+        for (let column = 0; column < table.table.property.column_size; column += 1) {
+          const cellId = `cell-${rowIndex}-${column}`;
+          blocks.push({ block_id: `text-${rowIndex}-${column}`, block_type: 2, parent_id: cellId, text: { elements: [{ text_run: { content: "" } }] } });
+          blocks.push({ block_id: cellId, block_type: 32, parent_id: "table-1", children: [`text-${rowIndex}-${column}`] });
+          table.table.cells.push(cellId);
+        }
+        table.table.property.row_size += 1;
+        return {};
+      }
+      if (name === "docx.v1.documentBlock.batchUpdate") {
+        for (const request of args.data.requests) {
+          blocks.find((item) => item.block_id === request.block_id).text.elements = request.update_text_elements.elements;
+        }
+        return {};
+      }
+      throw new Error(`unexpected tool: ${name}`);
+    },
+  };
+  const first = [["ID", "名称"], ["M1000", "调用数"], ["M1001", "通过数"]];
+  assert.equal((await syncTable(mcp, "doc-token", { tableId: "table-1", rows: first })).status, "updated");
+  const second = [...first, ["M1002", "拒绝数"]];
+  const result = await syncTable(mcp, "doc-token", { tableId: "table-1", rows: second });
+  assert.equal(result.status, "updated");
+  assert.deepEqual(readTable(blocks, "table-1").rows, second);
+});
+
 test("syncTable refuses shrinking row counts and column mismatch", async () => {
   const blocks = buildTableDoc([
     ["ID", "名称"],

@@ -10,6 +10,7 @@
 | `write-blocks`（table-sync、update-text）、`write-json` | `docx:document`、`docx:document:readonly`、`offline_access` |
 | `publish` | `docx:document`、`docx:document.block:convert`、`docx:document:create`、`docx:document:write_only`、`docx:document:readonly`、`docs:document.media:upload`、`docs:document.comment:read`、`board:whiteboard:node:create`、`offline_access` |
 | `edit` | `docx:document`、`docx:document:write_only`、`docx:document:readonly`、`docs:document.media:upload`、`docs:document.comment:read`、`board:whiteboard:node:create`、`offline_access` |
+| `table-edit`（删行、合并与拆分、列宽） | `docx:document`、`docx:document:readonly`、`docs:document.comment:read`、`offline_access` |
 | `create-doc` | `docx:document`、`offline_access` |
 | 任一操作的目标是 wiki 链接 | 另加 `wiki:wiki:readonly` |
 

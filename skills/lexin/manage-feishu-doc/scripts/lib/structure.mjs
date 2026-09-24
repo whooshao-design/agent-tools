@@ -2,7 +2,6 @@
 // 按顺序对齐后就知道每个单元对应哪些块 id。切分规则来自 lexin 租户实测（references/api-facts.md「块结构」）。
 import { createHash } from "node:crypto";
 
-export const MERMAID_PLACEHOLDER_PATTERN = /^\[\[feishu-mermaid:(\d+)\]\]$/;
 
 const sha256 = (value) => createHash("sha256").update(value, "utf8").digest("hex");
 
@@ -14,17 +13,19 @@ const LIST_ITEM = /^( {0,3})([-*+]|\d{1,9}[.)])\s+/;
 const TASK_ITEM = /^ {0,3}[-*+]\s+\[[ xX]\]\s+/;
 const QUOTE = /^ {0,3}>/;
 const TABLE_SEPARATOR = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
-const IMAGE = /!\[[^\]]*\]\((?:<[^>]+>|[^)\s]+)(?:\s+"[^"]*")?\)/g;
+const IMAGE = /!\[[^\]]*\]\((<[^>]+>|[^)\s]+)(?:\s+"[^"]*")?\)/g;
 const XML_BLOCK = /^<([a-z][\w-]*)[\s>/]/i;
 const DIAGRAM_TAGS = ["readonly-block", "whiteboard", "pre"];
 
 const blank = (line) => line.trim() === "";
+// 行内代码里的 ![x](y) 只是文字：替换成等长空格后再找图片，位置不变
+const maskCode = (text) => text.replace(/(`+)[\s\S]*?\1/g, (whole) => " ".repeat(whole.length));
 
 // 一段文字里夹着图片时，飞书会拆成「段落 / 图 / 段落」三个顶层元素
 function paragraphTags(text) {
   const tags = [];
   let position = 0;
-  for (const match of text.matchAll(IMAGE)) {
+  for (const match of maskCode(text).matchAll(IMAGE)) {
     if (text.slice(position, match.index).trim()) tags.push("p");
     tags.push("img");
     position = match.index + match[0].length;
@@ -56,16 +57,20 @@ function listSegments(lines) {
 
 function unitHash(kind, markdown, { diagrams, imageHashes }) {
   if (kind === "diagram") {
-    const index = Number(markdown.trim().match(MERMAID_PLACEHOLDER_PATTERN)[1]);
-    return sha256(`mermaid\n${diagrams.find((item) => item.index === index)?.code ?? ""}`);
+    return sha256(`mermaid\n${diagrams.find((item) => item.placeholder === markdown.trim())?.code ?? ""}`);
   }
   // 图片按文件内容计入，换了图但路径没变也算改动
-  const images = [...markdown.matchAll(IMAGE)].map((match) => imageHashes[match[0]] ?? "").join("|");
+  // 图片哈希按路径（@./相对路径）取：说明文字发布前可能被转义，路径不会
+  const images = [...maskCode(markdown).matchAll(IMAGE)]
+    .map((match) => imageHashes[match[1].replace(/^<(.*)>$/, "$1")] ?? "")
+    .join("|");
   return sha256(`${kind}\n${markdown}\n${images}`);
 }
 
 // body 是 preparePublishMarkdown 处理过的正文（提示块已是 <callout>，mermaid 已是占位段落）
+// 只有这一次生成的占位（diagrams[].placeholder）才是图；正文里形如占位的文字按普通段落处理
 export function splitUnits(body, { diagrams = [], imageHashes = {} } = {}) {
+  const placeholders = new Set(diagrams.map((diagram) => diagram.placeholder));
   const lines = body.replace(/\r\n/g, "\n").split("\n");
   const units = [];
   const push = (kind, start, end, tags, extra = {}) => {
@@ -94,7 +99,7 @@ export function splitUnits(body, { diagrams = [], imageHashes = {} } = {}) {
       i += 1;
       continue;
     }
-    if (MERMAID_PLACEHOLDER_PATTERN.test(line.trim())) {
+    if (placeholders.has(line.trim())) {
       push("diagram", i, i + 1, [DIAGRAM_TAGS]);
       i += 1;
       continue;
@@ -160,7 +165,7 @@ export function splitUnits(body, { diagrams = [], imageHashes = {} } = {}) {
     while (j < lines.length && !blank(lines[j])) {
       const next = lines[j];
       if (SETEXT.test(next)) break;
-      if (ATX.test(next) || FENCE.test(next) || QUOTE.test(next) || HR.test(next) || MERMAID_PLACEHOLDER_PATTERN.test(next.trim())) break;
+      if (ATX.test(next) || FENCE.test(next) || QUOTE.test(next) || HR.test(next) || placeholders.has(next.trim())) break;
       if (/^ {0,3}[-*+]\s+\S/.test(next) || /^ {0,3}1[.)]\s+\S/.test(next)) break;
       j += 1;
     }
@@ -287,7 +292,21 @@ export function alignUnits(units, elements) {
   };
 }
 
-// 飞书上被人改过的单元：块不见了，或块所在顶层元素的内容哈希变了；另外报告不属于任何单元的新块
+// 顶层块在飞书上的先后位置：列表每一项各占一个位置（同一列表的项不共用位置）
+export function blockOrder(elements) {
+  const position = new Map();
+  elements.flatMap((element) => element.blocks).forEach((block, index) => position.set(block.id, index));
+  return position;
+}
+
+// 正文的块与内容快照（参数是 parseTopLevel 的结果，小组件的哈希可先并入源码）：docs_ai 没有乐观锁，
+// 写之前再读一次比对，读到快照之后有人改过就不写。含全部子块 id：子块被人按原文重建（评论可能挂在新块上）也算改动
+export function documentShape(elements) {
+  return elements.map((element) => `${element.allIds.join(",")}:${element.hash}`).join("|");
+}
+
+// 飞书上被人改过的单元：块不见了，或块所在顶层元素的内容哈希变了；另外报告不属于任何单元的新块，
+// 以及保留下来的块先后顺序变了（有人在飞书上拖动过段落，按位置重新对齐会错位）
 export function remoteChanges(units, elements) {
   const byTopId = new Map();
   elements.forEach((element) => element.topIds.forEach((id) => byTopId.set(id, element)));
@@ -305,8 +324,13 @@ export function remoteChanges(units, elements) {
     const hash = sha256(current.map((element) => element.hash).join("|"));
     if (missing || hash !== unit.feishuHash) changed.push(index);
   });
-  const inserted = elements.filter((element) => element.topIds.length > 0 && element.topIds.every((id) => !known.has(id)));
-  return { changed, inserted };
+  // 按顶层块找本地没有的块：原有列表里新加的一项也算
+  const inserted = elements.flatMap((element) => element.blocks).filter((block) => !known.has(block.id));
+  // 按旧的块序列逐块核对当前位置是否递增：同一列表内部换了顺序也算
+  const position = blockOrder(elements);
+  const found = units.flatMap((unit) => unit.blockIds).map((id) => position.get(id)).filter((value) => value !== undefined);
+  const reordered = found.some((value, index) => index > 0 && value < found[index - 1]);
+  return { changed, inserted, reordered };
 }
 
 // 按单元哈希做 LCS，返回没对上的「间隙」：旧单元区间、新单元区间、插入锚点（前一个保留单元的最后一块）

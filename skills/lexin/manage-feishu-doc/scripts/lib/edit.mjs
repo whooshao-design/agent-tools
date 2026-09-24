@@ -5,7 +5,7 @@ import { basename, dirname, resolve } from "node:path";
 
 import { preparePublishMarkdown } from "./markdown.mjs";
 import { fetchContent, listOpenComments, replaceBlocks, replaceDiagramPlaceholders } from "./publish.mjs";
-import { parseTopLevel } from "./structure.mjs";
+import { documentShape, parseTopLevel } from "./structure.mjs";
 
 // 这些块读出来无法用 Markdown 原样写回，替换或删除前要用户确认
 const PROTECTED_TAGS = new Set([
@@ -175,6 +175,12 @@ export async function editDocument(transport, documentToken, options) {
   };
   if (blockers.length > 0 || options.dryRun) return { status: blockers.length > 0 ? "blocked" : "dry_run", ...preview, blockers };
 
+  // docs_ai 没有乐观锁：读取之后有人改了正文就不写，免得按旧位置删掉别人刚写的内容
+  const { content: fresh } = await fetchContent(transport, documentToken, "xml", "with-ids");
+  if (documentShape(parseTopLevel(fresh)) !== documentShape(elements)) {
+    fail("读取之后飞书上又有人改动了正文，这次没有写入：重新运行 edit（先 --dry-run 看新的范围）", "REMOTE_CHANGED_DURING_EDIT");
+  }
+
   const results = await replaceBlocks(transport, documentToken, {
     ids: removed.map((block) => block.id),
     readonly: new Set(removed.filter((block) => block.tag === "readonly-block").map((block) => block.id)),
@@ -185,7 +191,7 @@ export async function editDocument(transport, documentToken, options) {
   const warnings = results.flatMap((data) => data.warnings ?? []);
   const diagrams = fragment ? await replaceDiagramPlaceholders(transport, documentToken, fragment.diagrams) : [];
   const after = await fetchContent(transport, documentToken, "xml", "with-ids");
-  const leftovers = (after.content.match(/\[\[feishu-mermaid:\d+\]\]/g) ?? []).length;
+  const leftovers = (fragment?.diagrams ?? []).filter((diagram) => after.content.includes(diagram.placeholder)).length;
   const problems = results.some((data) => data.result !== "success") || warnings.length > 0 || leftovers > 0 || diagrams.some((item) => item.status !== "widget");
   return {
     status: problems ? "updated_with_issues" : "updated",
