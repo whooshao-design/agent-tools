@@ -14,6 +14,7 @@
 | `debug-systematic` | 系统化调试方法论：复现→定位→根因→验证 |
 | `convert-epub-to-markdown` | EPUB 转 Markdown，保留原件与图片，自动选择全文或分卷并校验正文 |
 | `skill-authoring` | 按仓库约定创建/维护 skill 的元技能 |
+| `recall-agent-sessions` | 跨 Claude Code 与 Codex 只读检索本机历史会话，并为指定会话生成交接摘要 |
 
 ## skills/dev-workflow — 研发阶段主线与编排
 
@@ -84,6 +85,7 @@
 |---|---|---|
 | `handle-stable-hawk-approval` | 安全处理 stable 测试环境米霍克和流程引擎审批 | `mysql_readonly`, `dubbo_test` |
 | `query-hawk-field-reference` | 查询米霍克字段被乐包、策略节点和规则引用的关系 | `browser_session` |
+| `parse-experian-ser` | 只读拉取并解析旧 Experian SER 规则包，输出可读的决策流程与规则脚本 | `bastion` |
 | `query-oa-gateway-interface` | 查询前端 URL 映射的后端接口和代码链路 | `browser_session` |
 | `start-local-frontend` | 米霍克 OA 前端本地启动、whistle 网关切预发布/项目环境（IP 动态发现）与页面访问 | `browser_session` |
 
