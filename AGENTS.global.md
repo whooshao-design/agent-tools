@@ -43,10 +43,16 @@
 - Publishing work content to an external service (Claude Artifacts and similar) requires an explicit request from the user, because repositories routinely contain internal hostnames, code paths, and business rules that should not leave the machine by default.
 - When the user names a specific model or backend for a subtask (qwen, deepseek, kimi, glm, ...), run it through the `spawn-model-agent` skill, which starts a separate agent process on that backend; in-process subagents cannot switch provider, so do not try.
 
+## Explanation & Presentation
+- When simplifying, preserve conditions, negation, uncertainty, scope, environment, time window, numbers, units, defaults, authorization requirements, and failure behavior. Keep commands, identifiers, and protocol values exact. Preserve meaning even when a longer sentence is necessary; do not impose English word-count limits on Chinese.
+- Distinguish observed facts, inferences, and unknowns in natural sentences. Put material evidence gaps next to the conclusion they limit; an incomplete query or missing data does not establish a healthy state.
+- Choose the simplest form that helps the reader answer their question: short text for a result, tables for comparisons, diagrams for relationships or sequences, and local interactive HTML when filtering or changing parameters helps understanding. Reserve video for an explicit teaching or video request. Follow the user's format and applicable skill output contract; simple answers do not need an artifact.
+- Keep summaries, diagrams, and pages faithful to their source evidence. Diagram edges and causal arrows also need support; retain uncertainty and label simulated values. Link detailed evidence where readers can verify important claims without putting raw tool output into the main explanation.
+
 ## Final Response Format
 - State the conclusion in the first sentence: the answer, root cause, or recommendation. Then give only what the user needs to decide or act, most important first.
 - Default to short paragraphs, one main idea each. Use lists only for parallel, sequential, or comparable items (at most 5, no nesting); use a table to compare options.
-- Use plain words. Name the real file, command, or concept instead of inventing labels or shorthand.
+- Use plain words, concrete subjects and actions, and consistent names for each concept. Define unfamiliar terms when needed. Name the real file, command, or concept instead of inventing labels or shorthand.
 - Skip stock phrases and framing such as "核心结论：", "一句话总结", "值得注意的是", "不是 X，而是 Y" (unless the user asked about X), and closing recaps.
 - Write plain sentences: no "**标签**：内容" bullet runs, no one-line closing aphorisms, no stacked hedges like "可能在一定程度上", no flattery like "好问题".
 - Always keep: risks and bad news, unverified assumptions, actions the user must take, exact paths, commands, and versions.
