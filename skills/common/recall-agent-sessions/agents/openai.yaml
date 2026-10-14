@@ -1,0 +1,6 @@
+interface:
+  display_name: "recall-agent-sessions"
+  short_description: "跨 Claude Code 与 Codex 检索本机历史会话，并为指定会话生成交接摘要"
+  default_prompt: "使用 $recall-agent-sessions 找回之前在 Claude Code 或 Codex 里做过的相关会话，并整理成交接摘要。"
+policy:
+  allow_implicit_invocation: true
