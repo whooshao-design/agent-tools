@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from bastion_mcp.ssh_manager import SSHManager
+from bastion_mcp.ssh_manager import SSHManager, validate_command
 
 
 class _SecurityOptions:
@@ -73,3 +73,18 @@ class SSHManagerRsaAlgorithmTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ValidateCommandTest(unittest.TestCase):
+    def test_binary_read_commands_are_allowed(self):
+        for cmd in (
+            "tail -c +1 /a/b.ser | head -c 120000 | base64",
+            "md5sum /a/b.ser && sha1sum /a/b.ser",
+            "stat -c %s /a/b.ser",
+            "od -An -tx1 -N16 /a/b.ser",
+        ):
+            self.assertIsNone(validate_command(cmd), cmd)
+
+    def test_unlisted_commands_are_still_rejected(self):
+        self.assertEqual(validate_command("base64 /a | xxd"), "xxd")
+        self.assertEqual(validate_command("cp /a /b"), "cp")

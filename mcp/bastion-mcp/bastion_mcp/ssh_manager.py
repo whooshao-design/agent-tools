@@ -16,7 +16,9 @@ logger = logging.getLogger(__name__)
 ALLOWED_COMMANDS = {
     "cd", "grep", "ls", "ll", "cat", "head", "tail",
     "find", "echo", "pwd", "whoami", "hostname", "zcat", "awk",
-    "sort", "wc", "uniq", "egrep", "id", "ps"
+    "sort", "wc", "uniq", "egrep", "id", "ps",
+    # 二进制文件只读拉取与校验：base64 分块输出，md5sum/sha1sum/stat 核对
+    "base64", "md5sum", "sha1sum", "stat", "od"
 }
 DEFAULT_ALLOWED_SUDO_USERS = {"java_admin"}
 SAFE_JSTAT_OPTIONS = {"-gcutil", "-gccause"}

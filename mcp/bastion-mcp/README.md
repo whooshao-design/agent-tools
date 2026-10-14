@@ -181,8 +181,10 @@ sudo /bin/su - java_admin -c 'whoami; pwd; id'
 仅允许以下命令，支持 `&&` 和 `|` 组合：
 
 ```
-awk  cat  cd  echo  egrep  find  grep  head  hostname  id  ll  ls  ps  pwd  sort  tail  uniq  wc  whoami  zcat
+awk  base64  cat  cd  echo  egrep  find  grep  head  hostname  id  ll  ls  md5sum  od  ps  pwd  sha1sum  sort  stat  tail  uniq  wc  whoami  zcat
 ```
+
+二进制文件按只读方式拉取：`tail -c +N FILE | head -c SIZE | base64` 分块输出，本地解码后与 `md5sum FILE`、`stat -c %s FILE` 核对。重定向写入仍被只读护栏拦截。
 
 另有参数级白名单的 JVM 只读诊断命令：`jstat -gcutil|-gccause` 和 `jcmd VM.flags|VM.command_line|VM.version|GC.heap_info|Thread.print`。
 
