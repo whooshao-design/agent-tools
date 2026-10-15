@@ -60,6 +60,9 @@ async def connect_bastion(
         config = _load_config(profile)
     except ValueError as e:
         return f"错误：{e}"
+    if ssh_mgr:
+        # 释放上一次连接（含失败残留）的 transport 与保活线程
+        ssh_mgr.disconnect()
     ssh_mgr = SSHManager(config)
     # 密码优先级：工具参数 > 环境变量 BASTION_PASSWORD > config.json
     final_password = password or os.environ.get("BASTION_PASSWORD", "") or config.get("password", "")

@@ -18,7 +18,9 @@ ALLOWED_COMMANDS = {
     "find", "echo", "pwd", "whoami", "hostname", "zcat", "awk",
     "sort", "wc", "uniq", "egrep", "id", "ps",
     # 二进制文件只读拉取与校验：base64 分块输出，md5sum/sha1sum/stat 核对
-    "base64", "md5sum", "sha1sum", "stat", "od"
+    "base64", "md5sum", "sha1sum", "stat", "od",
+    # 目标机连通性测试（用户 2026-10-15 明确授权放开）
+    "curl"
 }
 DEFAULT_ALLOWED_SUDO_USERS = {"java_admin"}
 SAFE_JSTAT_OPTIONS = {"-gcutil", "-gccause"}
@@ -50,19 +52,53 @@ def _requires_legacy_ssh_rsa(remote_version: str) -> bool:
     )
 
 
+# 连接被 aTrust 隧道/堡垒机网关提前关闭时的有限重试：仅限尚未发送密码/验证码的尝试
+_EARLY_CLOSE_MAX_ATTEMPTS = 3
+_EARLY_CLOSE_BACKOFF_SECONDS = (1, 3)
+_EARLY_CLOSE_RETRY_BUDGET_SECONDS = 20
+
+
+class _GatewayClosed(Exception):
+    """TCP 已建立，但对端（aTrust 网关/堡垒机）在握手、认证或开 shell 时关闭了连接。"""
+
+    def __init__(self, stage: str, detail: str):
+        super().__init__(f"{stage}: {detail}")
+        self.stage = stage
+        self.detail = detail
+
+
+def _is_early_close(exc: BaseException) -> bool:
+    """paramiko 在对端提前断开时抛出的异常：未收到 banner、EOF、连接被重置。"""
+    if isinstance(exc, (EOFError, ConnectionResetError, BrokenPipeError, ConnectionAbortedError)):
+        return True
+    if isinstance(exc, paramiko.SSHException):
+        message = str(exc).lower()
+        return any(k in message for k in ("banner", "eof", "connection reset", "connection closed"))
+    return False
+
+
+def _channel_dead(ch) -> bool:
+    return bool(getattr(ch, "closed", False) or getattr(ch, "eof_received", False))
+
+
+def _last_line(text: str) -> str:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return lines[-1] if lines else ""
+
+
 def _is_auth_prompt(text: str, keywords: tuple[str, ...]) -> bool:
     """判断 text 是否为认证输入提示。
-    同时满足：1) 包含认证关键词  2) 看起来在等待用户输入（包含提示语或以冒号结尾）"""
-    if not any(k in text for k in keywords):
+    只看最后一个非空行（光标所在的等待输入行），同时满足：
+    1) 包含认证关键词  2) 看起来在等待用户输入（包含提示语或以冒号结尾）。
+    避免 banner/菜单/报错中前面某行提到 password、另一行出现 Enter 时被误判。"""
+    line = _last_line(text)
+    if not any(k in line for k in keywords):
         return False
     # 检查是否有输入提示指示符
-    if any(ind in text for ind in _INPUT_PROMPT_INDICATORS):
+    if any(ind in line for ind in _INPUT_PROMPT_INDICATORS):
         return True
     # 检查是否以冒号结尾（中英文冒号），常见的输入等待标志
-    stripped = text.rstrip()
-    if stripped and stripped[-1] in (":", "："):
-        return True
-    return False
+    return line[-1] in (":", "：")
 
 
 def _split_outside_quotes(text: str, separators: list[str]) -> list[str]:
@@ -341,18 +377,85 @@ class SSHManager:
         self._stop_keepalive = threading.Event()
         self._password: str = ""
         self._otp: str = ""
+        self._credentials_sent = False
+        self._authenticated = False
 
     def connect(self, password: str = "", otp: str = "",
                 keepalive_ip: str = "") -> str:
-        """连接堡垒机并启动保活"""
+        """连接堡垒机并启动保活。
+        仅当 TCP 已连上但对端在握手/认证/开 shell 时提前关闭、且本次尝试尚未发送密码或验证码时，
+        才做有限次退避重试；DNS/TCP 失败和真实的认证提示都直接返回。"""
+        host = self.config["bastion_host"]
+        port = self.config["bastion_port"]
+        deadline = time.monotonic() + _EARLY_CLOSE_RETRY_BUDGET_SECONDS
+        attempt = 0
+        while True:
+            attempt += 1
+            self._credentials_sent = False
+            try:
+                return self._connect_once(password, otp, keepalive_ip)
+            except _GatewayClosed as e:
+                self.disconnect()
+                delay = (
+                    _EARLY_CLOSE_BACKOFF_SECONDS[attempt - 1]
+                    if attempt < _EARLY_CLOSE_MAX_ATTEMPTS else None
+                )
+                retryable = (
+                    not self._credentials_sent
+                    and delay is not None
+                    and time.monotonic() + delay < deadline
+                )
+                if not retryable:
+                    note = (
+                        "；本次已发送过密码/验证码，为避免重复消耗验证码未自动重试"
+                        if self._credentials_sent else ""
+                    )
+                    return (
+                        f"错误：TCP 已连上 {host}:{port}，但连接在{e.stage}阶段被对端关闭"
+                        f"（{e.detail}），共尝试 {attempt} 次{note}。"
+                        "aTrust 隧道或堡垒机网关断开（非凭据问题），"
+                        "请检查 aTrust 是否在线/重新登录 aTrust，再重试"
+                    )
+                logger.warning(
+                    f"第 {attempt} 次连接在{e.stage}阶段被对端关闭（{e.detail}），{delay}s 后重试"
+                )
+                time.sleep(delay)
+
+    def _transport_active(self) -> bool:
+        return self.transport is not None and self.transport.is_active()
+
+    def _connect_once(self, password: str, otp: str, keepalive_ip: str) -> str:
+        host = self.config["bastion_host"]
+        port = self.config["bastion_port"]
+        connect_timeout = self.config.get("connect_timeout", 15)
+
+        logger.info(f"连接 {host}:{port} ...")
+        try:
+            sock = socket.create_connection((host, port), timeout=connect_timeout)
+        except socket.gaierror as e:
+            return f"错误：无法解析堡垒机地址 {host}（DNS 失败：{e}），请检查 aTrust/wsl-vpnkit 及 DNS 是否可用"
+        except OSError as e:
+            return f"错误：TCP 连接 {host}:{port} 失败（{e}），请检查 aTrust 是否在线及网络/wsl-vpnkit 是否正常"
+
+        try:
+            return self._handshake_and_login(sock, password, otp, keepalive_ip)
+        except _GatewayClosed:
+            raise
+        except Exception as e:
+            closed = _is_early_close(e) or not self._transport_active()
+            self.disconnect()
+            if closed:
+                stage = "认证后打开 shell" if self._authenticated else "SSH 握手/认证"
+                raise _GatewayClosed(stage, f"{type(e).__name__}: {e}") from e
+            raise
+
+    def _handshake_and_login(self, sock, password: str, otp: str,
+                             keepalive_ip: str) -> str:
         host = self.config["bastion_host"]
         port = self.config["bastion_port"]
         username = self.config["username"]
         pem_path = self.config["pem_path"]
-        connect_timeout = self.config.get("connect_timeout", 15)
-
-        logger.info(f"连接 {host}:{port} ...")
-        sock = socket.create_connection((host, port), timeout=connect_timeout)
+        self._authenticated = False
         self.transport = paramiko.Transport(sock)
 
         # 在 start_client 之前设置服务器密钥类型
@@ -391,9 +494,12 @@ class SSHManager:
                 continue
 
         if not authed:
+            if not self._transport_active():
+                raise _GatewayClosed("认证", "密钥认证过程中 SSH 连接已断开")
             if not password:
                 return "错误：密钥认证失败且未提供密码，请传入 password 和 otp"
             logger.info("密钥认证失败，使用密码+验证码认证...")
+            self._credentials_sent = True
             self.transport.auth_interactive(
                 username, make_auth_handler(password=password, otp=otp)
             )
@@ -401,6 +507,7 @@ class SSHManager:
 
         if not self.transport.is_authenticated():
             return "错误：认证失败"
+        self._authenticated = True
 
         # 保存密码和安全码，供 shell 二次认证使用
         self._password = password
@@ -415,6 +522,8 @@ class SSHManager:
         # 验证连接：真正进入目标机器并执行 whoami
         verify_error, whoami_result = self._verify_connection(kip)
         if verify_error:
+            if not self._transport_active():
+                raise _GatewayClosed("验证目标机", verify_error)
             return verify_error
 
         return f"已连接堡垒机 {host}:{port}，保活目标 {kip}，验证成功(whoami={whoami_result})"
@@ -437,8 +546,12 @@ class SSHManager:
         # 第一步：检测密码提示
         if _is_auth_prompt(clean, _PASSWORD_KEYWORDS):
             if not self._password:
-                return False, "错误：堡垒机 shell 要求输入密码，但未提供 password 参数"
+                return False, (
+                    "错误：堡垒机 shell 要求输入密码，但未提供 password 参数"
+                    f"（提示行：{_last_line(clean)!r}）"
+                )
             logger.info("检测到 shell 二次密码认证，自动输入密码")
+            self._credentials_sent = True
             out = send_cmd(ch, self._password, timeout=10)
             clean = strip_ansi(out)
             # 检测密码是否被拒绝
@@ -448,8 +561,12 @@ class SSHManager:
         # 第二步：检测安全码提示
         if _is_auth_prompt(clean, _OTP_KEYWORDS):
             if not self._otp:
-                return False, "错误：堡垒机 shell 要求输入安全码（OTP），请提供 otp 参数"
+                return False, (
+                    "错误：堡垒机 shell 要求输入安全码（OTP），请提供 otp 参数"
+                    f"（提示行：{_last_line(clean)!r}）"
+                )
             logger.info("检测到安全码提示，自动输入安全码")
+            self._credentials_sent = True
             out = send_cmd(ch, self._otp, timeout=10)
             clean = strip_ansi(out)
             # 检测安全码是否被拒绝
@@ -472,10 +589,17 @@ class SSHManager:
         ch.get_pty(term="xterm", width=200, height=50)
         ch.invoke_shell()
         initial = recv_until_idle(ch, timeout=shell_timeout)
+        if not initial.strip() and _channel_dead(ch):
+            ch.close()
+            raise _GatewayClosed("打开 shell", "shell channel 未输出任何内容即被关闭")
 
         ok, msg = self._handle_shell_auth(ch, initial)
         if not ok:
+            # 提示出现后 channel 随即关闭，说明是断线前的残留输出，不是在等待输入
+            dead = _channel_dead(ch)
             ch.close()
+            if dead:
+                raise _GatewayClosed("打开 shell", f"shell channel 已关闭（{msg}）")
             return msg
 
         send_cmd(ch, f"go {keepalive_ip}", timeout=15)
