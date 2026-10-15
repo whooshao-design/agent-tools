@@ -2,7 +2,7 @@
 name: configure-hippo
 description: 安全新增、修改并在明确授权后发布 Hippo 配置，并支持在明确授权后为应用新建 namespace；支持标准 Hippo、stable/测试/项目环境以及墨西哥、印尼海外站点的独立域名；默认使用预发布 fql_pre 且只保存草稿、不发布；stable/测试环境保存后自动按 key 发布。Use when 用户要求在 Hippo 配置中心新增 key、修改配置值、更新预发布或 stable 配置、修改墨西哥或印尼海外配置、把本地文件写入 namespace、给某个 appId 新建 namespace、给 namespace 授修改权或发布权，或明确授权“修改并发布”；内置变更前检查、并发草稿保护、非目标项保护、key 粒度发布、新建 namespace 与授权的二次确认和 active release 校验。
 metadata:
-  version: 1.9.6
+  version: 1.9.7
 ---
 
 # configure-hippo

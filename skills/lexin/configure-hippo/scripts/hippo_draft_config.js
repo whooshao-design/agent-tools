@@ -11,6 +11,7 @@ const {
   buildBrowserEnv,
   chromiumArgsFor,
 } = require('../../get-browser-session/scripts/browser_network');
+const { launchLockedContext } = require('../../get-browser-session/scripts/browser_session');
 
 const SITE_BASE_URLS = {
   standard: 'http://hippo.oa.fenqile.com',
@@ -1062,7 +1063,7 @@ async function openHippo(runtime) {
   env.LD_LIBRARY_PATH = [runtime.runtimeLibDir, process.env.LD_LIBRARY_PATH].filter(Boolean).join(':');
   let context;
   try {
-    context = await chromium.launchPersistentContext(runtime.profile, {
+    context = await launchLockedContext(chromium, runtime.profile, {
       executablePath: runtime.chromePath,
       headless: true,
       env,

@@ -11,7 +11,7 @@ const {
 } = require('../scripts/webshell_log_check');
 const { normalizeQuery } = require('../scripts/log_query');
 
-test('forensics command only reads allowed current and rotated logs with explicit bounds', () => {
+test('forensics command reads current and rotated logs with explicit bounds', () => {
   const query = normalizeQuery({
     files: 'error.log,info.log',
     'trace-id': 'TRACE-1',
@@ -21,7 +21,8 @@ test('forensics command only reads allowed current and rotated logs with explici
   });
   const command = buildForensicsCommand({ app: 'server_demo' }, query);
   assert.match(command, /gzip -cd/);
-  assert.ok(command.includes('"$logDir/${stem}"_*.log.gz'));
+  assert.ok(command.includes('"${stem}"_*.log.gz'));
+  assert.ok(command.includes('case "$base" in /*) path="$base"'));
   assert.match(command, /maxBytes=65536/);
   assert.match(command, /__EVENT_BEGIN__\|truncated=1/);
   assert.doesNotMatch(command, /rm |tee |chmod |kill /);

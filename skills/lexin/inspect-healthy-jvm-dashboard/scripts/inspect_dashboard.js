@@ -4,6 +4,7 @@ const os = require('os');
 const path = require('path');
 const { createRequire } = require('module');
 const { spawnSync } = require('child_process');
+const { launchLockedContext } = require('../../get-browser-session/scripts/browser_session');
 
 const BASE_URL = 'https://healthy.lexincloud.com';
 const DEFAULT_BOARD = '11147';
@@ -156,7 +157,7 @@ function loadPlaywright(toolDir) {
 
 async function openContext(profile, toolDir) {
   const chromium = loadPlaywright(toolDir);
-  return chromium.launchPersistentContext(profile, {
+  return launchLockedContext(chromium, profile, {
     executablePath: path.join(toolDir, 'browsers/chrome-linux64/chrome'),
     headless: true,
     env: {

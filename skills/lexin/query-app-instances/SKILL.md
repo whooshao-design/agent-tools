@@ -2,7 +2,7 @@
 name: query-app-instances
 description: 通过乐效只读查询应用在各环境的虚拟机和容器实例地址。Use when 用户要求查应用服务器 IP、容器/Pod 地址、某应用线上/灰度/预发布/OA/稳定实例清单、需要为日志排查或部署验证定位机器；未指定应用名时从当前目录 app.properties 的 application.name 推断，未指定环境时默认预发布 pre。
 metadata:
-  version: 1.1.1
+  version: 1.2.0
 ---
 
 # query-app-instances

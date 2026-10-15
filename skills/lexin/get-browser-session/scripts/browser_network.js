@@ -27,6 +27,8 @@ const PROXY_ENV_KEYS = [
   'all_proxy',
 ];
 const WEBSHELL_HOSTS = new Set(['webshell.oa.fenqile.com', 'webshell.lexincloud.com']);
+// Stable/test WebShell gateway served by Lexiao as plain HTTP on an intranet IP (login_pod_addr origin).
+const STABLE_WEBSHELL_ORIGINS = new Set(['http://10.9.210.4:8080']);
 const SENSITIVE_QUERY_PATTERN = /ticket|token|auth|session|cookie|code/i;
 
 function urlOf(value) {
@@ -52,7 +54,8 @@ function isInternalUrl(value) {
 
 function isWebShellUrl(value) {
   const parsed = urlOf(value);
-  return Boolean(parsed && WEBSHELL_HOSTS.has(parsed.hostname.toLowerCase()));
+  return Boolean(parsed && (WEBSHELL_HOSTS.has(parsed.hostname.toLowerCase())
+    || STABLE_WEBSHELL_ORIGINS.has(parsed.origin)));
 }
 
 function mergeNoProxy(current, additions = INTERNAL_NO_PROXY) {
@@ -112,8 +115,10 @@ function validateWebShellUrl(value, target = {}) {
     };
   }
 
-  if (parsed.protocol !== 'https:') errors.push('URL_SCHEME_NOT_HTTPS');
-  if (!WEBSHELL_HOSTS.has(parsed.hostname.toLowerCase())) errors.push('URL_HOST_NOT_ALLOWED');
+  if (!STABLE_WEBSHELL_ORIGINS.has(parsed.origin)) {
+    if (parsed.protocol !== 'https:') errors.push('URL_SCHEME_NOT_HTTPS');
+    if (!WEBSHELL_HOSTS.has(parsed.hostname.toLowerCase())) errors.push('URL_HOST_NOT_ALLOWED');
+  }
 
   const values = {
     namespace: parsed.searchParams.get('ns') || '',

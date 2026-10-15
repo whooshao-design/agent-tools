@@ -77,11 +77,6 @@ SSHManager = bastion_ssh.SSHManager
 APP_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 VERSION_RE = re.compile(r"^[A-Za-z0-9_.@:+-]+$")
 PID_RE = re.compile(r"^[1-9][0-9]{0,8}$")
-# 兼容后缀轮转和时间戳位于扩展名前的轮转，仍只允许日志文件名。
-LOG_RE = re.compile(
-    r"^(?:debug|error|warn|info|stdout)"
-    r"(?:\.log(?:[.\w-]+)?|_\d{8}(?:\d{2}){0,3}(?:\.\d+)?\.log)(?:\.gz)?$"
-)
 HEALTH_PATH_RE = re.compile(r"^/[A-Za-z0-9_./?=&:%+-]*$")
 SENSITIVE_HEALTH_SEGMENTS = {
     "actuator/env",
@@ -293,13 +288,15 @@ def validate_keyword(keyword: str) -> str:
 
 
 def validate_log_file(file_name: str, default: str = "error.log") -> str:
+    """任意文件均可读：相对路径基于日志目录，绝对路径原样使用；只拒绝控制字符。"""
     name = file_name or default
-    if "/" in name or not LOG_RE.fullmatch(name):
-        raise ValueError(
-            "file_name must be debug/error/warn/info/stdout logs or their rotations "
-            "(e.g. info.log.1, info_2026091010.0.log, optionally .gz); paths are not allowed"
-        )
+    if any(ch in name for ch in "\n\r\0"):
+        raise ValueError("file_name must not contain control characters")
     return name
+
+
+def _join_log_path(base_dir: str, file_name: str) -> str:
+    return file_name if file_name.startswith("/") else str(PurePosixPath(base_dir) / file_name)
 
 
 def validate_health_path(path: str) -> str:
@@ -317,7 +314,7 @@ def app_log_dir(app_name: str) -> str:
 
 
 def app_log_path(app_name: str, file_name: str = "error.log") -> str:
-    return str(PurePosixPath(app_log_dir(app_name)) / validate_log_file(file_name))
+    return _join_log_path(app_log_dir(app_name), validate_log_file(file_name))
 
 
 def version_log_dir(app_name: str, version_tag: str) -> str:
@@ -325,7 +322,7 @@ def version_log_dir(app_name: str, version_tag: str) -> str:
 
 
 def version_log_path(app_name: str, version_tag: str, file_name: str = "stdout.log") -> str:
-    return str(PurePosixPath(version_log_dir(app_name, version_tag)) / validate_log_file(file_name, "stdout.log"))
+    return _join_log_path(version_log_dir(app_name, version_tag), validate_log_file(file_name, "stdout.log"))
 
 
 def q(value: str) -> str:

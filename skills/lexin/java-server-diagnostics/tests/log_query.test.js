@@ -50,7 +50,8 @@ test('result byte and line bounds report truncation', () => {
 
 test('only fixed log file names are accepted', () => {
   assert.deepEqual(parseLogFiles('error.log,info.log'), ['error.log', 'info.log']);
-  assert.throws(() => parseLogFiles('../../etc/passwd'), /unsupported log file/);
+  assert.deepEqual(parseLogFiles('deploy.log,deploy/deploy_*.log,/etc/hosts'), ['deploy.log', 'deploy/deploy_*.log', '/etc/hosts']);
+  assert.throws(() => parseLogFiles('info.log\nerror.log'), /whitespace or control/);
 });
 
 test('invalid time ranges and excessive limits are rejected', () => {

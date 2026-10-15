@@ -2,7 +2,7 @@
 name: lexiao-hippo-publish-authorize
 description: 在乐效需求/版本里登记「hippo 发布授权」，标记本次发布需要一并发布哪些应用的 hippo namespace，并回读校验登记结果。Use when 用户要求在乐效版本里标记需要发布的 hippo、配置 hippo 发布授权、查看某需求已登记哪些 hippo namespace，或在发版前核对配置发布清单是否遗漏应用。
 metadata:
-  version: 1.1.0
+  version: 1.1.1
 ---
 
 # lexiao-hippo-publish-authorize

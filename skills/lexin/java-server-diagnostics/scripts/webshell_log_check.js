@@ -12,6 +12,7 @@ const {
 const {
   DEFAULT_LOGIN_PATTERN,
   DEFAULT_PORTAL_PATTERN,
+  launchLockedContext,
   waitForStableSession,
 } = require('../../get-browser-session/scripts/browser_session');
 const { asBoolean, normalizeQuery } = require('./log_query');
@@ -90,7 +91,7 @@ Log query:
   --include-startup           Also inspect stdout/info startup markers in quick mode
   --from="YYYY-MM-DD HH:mm:ss" --to="YYYY-MM-DD HH:mm:ss"
   --trace-id=<id> --rule-id=<id> --keyword=<literal>
-  --files=error.log,info.log  Fixed allowlist only
+  --files=error.log,info.log  Any file: relative to the app log dir, absolute path, or glob (e.g. deploy/deploy_*.log)
   --context=2                 Event context before and after, max 20
   --include-rotated           Include .log and .log.gz rotations
   --max-lines=500 --max-bytes=1048576
@@ -258,7 +259,7 @@ function parseSummary(text) {
 async function openContext(args) {
   const ldLibraryPath = [RUNTIME_LIB_DIR, process.env.LD_LIBRARY_PATH].filter(Boolean).join(':');
   const network = buildBrowserEnv(args.url, process.env);
-  const context = await chromium.launchPersistentContext(profileDir(args), {
+  const context = await launchLockedContext(chromium, profileDir(args), {
     executablePath: args.chrome || CHROME_PATH,
     headless: !args.headed,
     viewport: { width: Number(args.width || 1800), height: Number(args.height || 1200) },
@@ -398,13 +399,16 @@ function buildForensicsCommand(args, query) {
     'read_log() { case "$1" in *.gz) gzip -cd -- "$1" 2>/dev/null ;; *) cat -- "$1" 2>/dev/null ;; esac; }',
     'list_files() {',
     '  for base in $files; do',
-    '    stem=${base%.log}',
+    '    case "$base" in /*) path="$base" ;; *) path="$logDir/$base" ;; esac',
+    '    stem=${path%.log}',
     '    if [ "$includeRotated" = "1" ]; then',
-    '      for candidate in "$logDir/$base" "$logDir/${stem}"_*.log "$logDir/${stem}"_*.log.gz "$logDir/$base".* "$logDir/$base".*.gz; do',
+    '      for candidate in $path "${stem}"_*.log "${stem}"_*.log.gz "$path".* "$path".*.gz; do',
     '        [ -f "$candidate" ] && printf "%s\\n" "$candidate"',
     '      done',
-    '    elif [ -f "$logDir/$base" ]; then',
-    '      printf "%s\\n" "$logDir/$base"',
+    '    else',
+    '      for candidate in $path; do',
+    '        [ -f "$candidate" ] && printf "%s\\n" "$candidate"',
+    '      done',
     '    fi',
     '  done | awk \'!seen[$0]++\'',
     '}',

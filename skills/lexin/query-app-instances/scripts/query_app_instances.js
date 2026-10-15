@@ -8,6 +8,8 @@ const {
   chromiumArgsFor,
   validateWebShellUrl,
 } = require('../../get-browser-session/scripts/browser_network');
+const { launchLockedContext } = require('../../get-browser-session/scripts/browser_session');
+const sessionCache = require('../../get-browser-session/scripts/session_cache');
 
 const TOOL_DIR = path.join(os.homedir(), 'tools/lexiao-browser');
 const CHROME_PATH = path.join(TOOL_DIR, 'browsers/chrome-linux64/chrome');
@@ -211,7 +213,7 @@ function inferAppNameFromCwd(cwd) {
 async function openContext(profile, args) {
   const ldLibraryPath = [RUNTIME_LIB_DIR, process.env.LD_LIBRARY_PATH].filter(Boolean).join(':');
   const network = buildBrowserEnv(LEXIAO_URL, process.env);
-  const context = await chromium.launchPersistentContext(profile, {
+  const context = await launchLockedContext(chromium, profile, {
     executablePath: args.chrome || CHROME_PATH,
     headless: !args.headed,
     env: { ...network.env, LD_LIBRARY_PATH: ldLibraryPath },
@@ -220,7 +222,26 @@ async function openContext(profile, args) {
   return { context, networkPolicy: network.networkPolicy };
 }
 
+// Calls the API straight from Node with the cookie snapshot the browser path saved last time.
+class DirectClient {
+  constructor(cookieHeader) {
+    this.cookieHeader = cookieHeader;
+  }
+}
+
 async function fetchJson(page, url, options = {}) {
+  if (page instanceof DirectClient) {
+    const result = await sessionCache.fetchWithCookies(page.cookieHeader, url, {
+      ...options,
+      referer: 'https://lexiao.oa.fenqile.com/',
+    });
+    if (sessionCache.looksUnauthenticated(result)) {
+      throw new Error(`cached Lexiao session rejected: HTTP ${result.status}`);
+    }
+    let json = null;
+    try { json = JSON.parse(result.text); } catch (_) {}
+    return { ...result, json, text: json ? undefined : result.text.slice(0, 1000) };
+  }
   return page.evaluate(async ({ url, options }) => {
     const response = await fetch(url, { credentials: 'include', ...options });
     const text = await response.text();
@@ -586,65 +607,97 @@ async function main() {
     throw new Error(`Unsupported --type: ${args.type}`);
   }
 
+  const result = await collectWithCachedSession(args, selectedType, limit)
+    || await collectWithBrowser(args, selectedType, limit);
+  const { app, allEnvs, envs, instances, profile, networkPolicy, sessionSource } = result;
+  const output = {
+    queried_at: new Date().toISOString(),
+    profile,
+    network_policy: networkPolicy,
+    session_source: sessionSource,
+    defaults: {
+      env: DEFAULT_ENV,
+      app_inferred: !args.app && !args['app-id'],
+    },
+    app,
+    available_envs: allEnvs,
+    envs,
+    type: selectedType,
+    instances,
+    counts: {
+      vm: instances.vm.length,
+      pod: instances.pod.length,
+      total: instances.vm.length + instances.pod.length,
+    },
+    source_urls: {
+      app_page: `https://lexiao.oa.fenqile.com/#/editApp?app_id=${app.fid}&type=machine`,
+      envs: `${API_BASE}/oa/publish/appmachine/listAppMachineEnvs.json`,
+      vm: `${API_BASE}/oa/publish/appMachine/getAppMachineDistinct.json`,
+      pod: `${API_BASE}/oa/publish/devops/pod/getAppPodInfo.json`,
+    },
+  };
+
+  if (args.json || args.format === 'json') {
+    console.log(JSON.stringify(output, null, 2));
+  } else {
+    printTable(output, args);
+  }
+}
+
+async function collectInstances(page, args, selectedType, limit, beforeQuery) {
+  const app = await resolveApp(page, args);
+  if (beforeQuery) await beforeQuery(app);
+
+  const allEnvs = await queryEnvs(page, app.fid);
+  const envs = pickEnvs(allEnvs, args.env || DEFAULT_ENV);
+  if (!envs.length) {
+    throw new Error(`No requested env found. requested=${args.env || DEFAULT_ENV}, available=${allEnvs.map((item) => item.env).join(',')}`);
+  }
+
+  const jdkVersions = selectedType !== 'pod' ? await queryJdkVersions(page, app.app_name || app.name) : new Map();
+  const instances = { vm: [], pod: [] };
+  for (const env of envs) {
+    if (selectedType === 'all' || selectedType === 'vm') {
+      const rows = await queryVm(page, app.fid, env, limit);
+      instances.vm.push(...rows.map((item) => normalizeVm(item, jdkVersions)));
+    }
+    if (selectedType === 'all' || selectedType === 'pod') {
+      const rows = await queryPod(page, app.fid, env, limit);
+      instances.pod.push(...rows.map(normalizePod));
+    }
+  }
+  return { app, allEnvs, envs, instances };
+}
+
+// Cache hit: no Chromium, so concurrent sessions do not queue on the profile lock.
+// Any failure falls back to the browser path, which re-validates and refreshes the snapshot.
+async function collectWithCachedSession(args, selectedType, limit) {
+  const profiles = args.profile ? [expandHome(args.profile)] : DEFAULT_PROFILES;
+  for (const profile of profiles) {
+    const cookieHeader = sessionCache.readCookieHeader(profile, API_BASE);
+    if (!cookieHeader) continue;
+    try {
+      const result = await collectInstances(new DirectClient(cookieHeader), args, selectedType, limit);
+      return { ...result, profile, networkPolicy: 'direct-only', sessionSource: 'cache' };
+    } catch (_) {
+      sessionCache.invalidate(profile, API_BASE);
+    }
+  }
+  return null;
+}
+
+async function collectWithBrowser(args, selectedType, limit) {
   const { context, page, profile, networkPolicy } = await openLoggedInPage(args);
   try {
-    const app = await resolveApp(page, args);
-    await page.goto(`https://lexiao.oa.fenqile.com/#/editApp?app_id=${app.fid}&type=machine`, {
-      waitUntil: 'domcontentloaded',
-      timeout: 60000,
+    const result = await collectInstances(page, args, selectedType, limit, async (app) => {
+      await page.goto(`https://lexiao.oa.fenqile.com/#/editApp?app_id=${app.fid}&type=machine`, {
+        waitUntil: 'domcontentloaded',
+        timeout: 60000,
+      });
+      await page.waitForTimeout(800);
     });
-    await page.waitForTimeout(800);
-
-    const allEnvs = await queryEnvs(page, app.fid);
-    const envs = pickEnvs(allEnvs, args.env || DEFAULT_ENV);
-    if (!envs.length) {
-      throw new Error(`No requested env found. requested=${args.env || DEFAULT_ENV}, available=${allEnvs.map((item) => item.env).join(',')}`);
-    }
-
-    const jdkVersions = selectedType !== 'pod' ? await queryJdkVersions(page, app.app_name || app.name) : new Map();
-    const instances = { vm: [], pod: [] };
-    for (const env of envs) {
-      if (selectedType === 'all' || selectedType === 'vm') {
-        const rows = await queryVm(page, app.fid, env, limit);
-        instances.vm.push(...rows.map((item) => normalizeVm(item, jdkVersions)));
-      }
-      if (selectedType === 'all' || selectedType === 'pod') {
-        const rows = await queryPod(page, app.fid, env, limit);
-        instances.pod.push(...rows.map(normalizePod));
-      }
-    }
-
-    const output = {
-      queried_at: new Date().toISOString(),
-      profile,
-      network_policy: networkPolicy,
-      defaults: {
-        env: DEFAULT_ENV,
-        app_inferred: !args.app && !args['app-id'],
-      },
-      app,
-      available_envs: allEnvs,
-      envs,
-      type: selectedType,
-      instances,
-      counts: {
-        vm: instances.vm.length,
-        pod: instances.pod.length,
-        total: instances.vm.length + instances.pod.length,
-      },
-      source_urls: {
-        app_page: `https://lexiao.oa.fenqile.com/#/editApp?app_id=${app.fid}&type=machine`,
-        envs: `${API_BASE}/oa/publish/appmachine/listAppMachineEnvs.json`,
-        vm: `${API_BASE}/oa/publish/appMachine/getAppMachineDistinct.json`,
-        pod: `${API_BASE}/oa/publish/devops/pod/getAppPodInfo.json`,
-      },
-    };
-
-    if (args.json || args.format === 'json') {
-      console.log(JSON.stringify(output, null, 2));
-    } else {
-      printTable(output, args);
-    }
+    await sessionCache.saveContextCookies(context, profile, API_BASE);
+    return { ...result, profile, networkPolicy, sessionSource: 'browser' };
   } finally {
     await context.close();
   }

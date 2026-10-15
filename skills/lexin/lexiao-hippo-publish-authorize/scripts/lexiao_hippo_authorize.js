@@ -7,6 +7,7 @@
  */
 const path = require('path');
 const fs = require('fs');
+const { launchLockedContext } = require('../../get-browser-session/scripts/browser_session');
 
 const TOOL_DIR = '/home/joney/tools/lexiao-browser';
 const CHROME_PATH = path.join(TOOL_DIR, 'browsers/chrome-linux64/chrome');
@@ -30,7 +31,7 @@ function parseArgs(argv) {
 async function openContext(profile) {
   const { chromium } = require(path.join(TOOL_DIR, 'node_modules/playwright-core'));
   const ldLibraryPath = [RUNTIME_LIB_DIR, process.env.LD_LIBRARY_PATH].filter(Boolean).join(':');
-  return chromium.launchPersistentContext(profile, {
+  return launchLockedContext(chromium, profile, {
     executablePath: CHROME_PATH,
     headless: true,
     env: { ...process.env, LD_LIBRARY_PATH: ldLibraryPath },

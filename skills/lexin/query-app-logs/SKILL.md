@@ -2,7 +2,7 @@
 name: query-app-logs
 description: 统一只读查询 Java 应用日志：VM/KVM 服务器日志走 java_app_diag MCP，容器 Pod 日志走 container_log_check/webshell_log_check 脚本，超出服务器保存期或需要跨机器按 traceId 汇总时走日志平台 log.oa.fenqile.com（热数据 90 天）。Use when 用户要求查某应用的日志、按 traceId/关键字/时间段找日志、看几天到几个月前的历史日志、服务器日志已轮转找不到、或明确说用日志平台；应用名必须明确。
 metadata:
-  version: 1.0.1
+  version: 1.1.0
 ---
 
 # query-app-logs
@@ -73,7 +73,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/java-server-diagnostics/sc
   --profile=/home/joney/.local/state/agent-tools/browser-profiles/main
 ```
 
-先读输出的 `targetSource/loginUrlSource/access/accessAttempts/errorCode/warningCode`，再看 `summary` 或 `forensics`；`warningCode=RESULT_TRUNCATED` 时缩小时间窗或提高受控上限重查；自动登录失败时把返回的乐效 `manualUrl` 交给用户在浏览器打开。日志文件只允许 `error.log/info.log/warn.log/debug.log/stdout.log`。
+先读输出的 `targetSource/loginUrlSource/access/accessAttempts/errorCode/warningCode`，再看 `summary` 或 `forensics`；`warningCode=RESULT_TRUNCATED` 时缩小时间窗或提高受控上限重查；自动登录失败时把返回的乐效 `manualUrl` 交给用户在浏览器打开。`--files` 可读任意文件：相对路径基于 `/home/product/logs/<app>_logs/`（如 `deploy.log`、`deploy/deploy_*.log`，支持通配符），也可传绝对路径，路径中不能有空白字符；路径 A 的 MCP `file_name` 同样不限文件。
 
 ## 路径 C：日志平台
 

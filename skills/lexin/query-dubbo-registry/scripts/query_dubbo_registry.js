@@ -5,6 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { createRequire } = require('module');
+const { launchLockedContext } = require('../../get-browser-session/scripts/browser_session');
 
 // bianque 服务治理平台。站点划分沿用 test-dubbo-api 的约定。
 const BASE_URLS = {
@@ -119,7 +120,7 @@ async function extractCookieFromProfile(args, baseUrl) {
   }
   const chromium = createRequire(paths.playwrightPackage)('playwright').chromium;
   const ldLibraryPath = [paths.runtimeLibDir, process.env.LD_LIBRARY_PATH].filter(Boolean).join(':');
-  const context = await chromium.launchPersistentContext(paths.profileDir, {
+  const context = await launchLockedContext(chromium, paths.profileDir, {
     executablePath: paths.chromePath,
     headless: true,
     env: { ...process.env, LD_LIBRARY_PATH: ldLibraryPath },

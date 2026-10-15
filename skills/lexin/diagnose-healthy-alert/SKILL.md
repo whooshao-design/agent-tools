@@ -2,7 +2,7 @@
 name: diagnose-healthy-alert
 description: 从雷神告警排查告警原因。Use when 用户给出 Healthy/雷神告警 ID 或 alert-show-detail 链接、要求排查告警原因、判断告警是真实故障还是误报或规则过敏、需要把告警关联到触发指标、埋点代码和应用日志。
 metadata:
-  version: 1.1.2
+  version: 1.1.3
 ---
 
 # diagnose-healthy-alert

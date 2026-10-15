@@ -2,7 +2,7 @@
 name: register-healthy-metrics
 description: 注册、查询和复查 Healthy/雷神/Nightingale 指标。Use when 用户要求检查雷神指标是否存在、批量注册 stable 或线上雷神指标、按 metric 列表或应用维度展开指标清单、调用 /api/n9e/metric-manage 做先查后注册、或确认指标注册中的 desc/app/business_line 填写规则。
 metadata:
-  version: 1.0.1
+  version: 1.0.2
 ---
 
 # register-healthy-metrics

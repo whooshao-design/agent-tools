@@ -16,6 +16,7 @@ const {
   resolvePaths,
 } = require(path.join(BROWSER_SESSION_DIR, 'browser_session.js'));
 const { buildBrowserEnv, chromiumArgsFor } = require(path.join(BROWSER_SESSION_DIR, 'browser_network.js'));
+const sessionCache = require(path.join(BROWSER_SESSION_DIR, 'session_cache.js'));
 
 const PLATFORM_BASE = 'https://log.oa.fenqile.com';
 const PAGE_URL = `${PLATFORM_BASE}/#/dashboard`;
@@ -205,7 +206,35 @@ async function openContext(paths, chromium) {
   });
 }
 
+// Calls the API from Node with the cookie snapshot saved by the last successful browser run.
+class DirectClient {
+  constructor(profileDir) {
+    this.profileDir = profileDir;
+  }
+}
+
+async function requestDirect(client, url, options) {
+  const cookieHeader = sessionCache.readCookieHeader(client.profileDir, url);
+  if (!cookieHeader) throw new PlatformError(`no cached session for ${new URL(url).host}`);
+  const result = await sessionCache.fetchWithCookies(cookieHeader, url, {
+    method: options.method || 'GET',
+    body: options.data ? JSON.stringify(options.data) : undefined,
+    headers: options.data ? { 'content-type': 'application/json' } : {},
+    timeoutMs: options.timeout || 90000,
+    referer: `${PLATFORM_BASE}/`,
+  });
+  if (sessionCache.looksUnauthenticated(result)) {
+    throw new PlatformError(`cached session rejected by ${new URL(url).host} (HTTP ${result.status})`);
+  }
+  try {
+    return JSON.parse(result.text);
+  } catch (_) {
+    throw new PlatformError(`non-JSON response from ${url}`);
+  }
+}
+
 async function requestJson(context, url, options = {}) {
+  if (context instanceof DirectClient) return requestDirect(context, url, options);
   const response = await context.request.fetch(url, {
     method: options.method || 'GET',
     data: options.data,
@@ -309,74 +338,103 @@ async function main(argv) {
   }
 
   const paths = resolvePaths(args, PAGE_URL);
-  const chromium = loadPlaywright(paths);
-  const release = await acquireProfileLock(paths.profileDir, { timeoutMs: 60000 });
-  let context;
+  const userNameOverride = args['user-name'] || process.env.LOG_PLATFORM_USER_NAME;
   const startedAt = Date.now();
+  const result = await collectWithCachedSession(paths, query, userNameOverride, startedAt)
+    || await collectWithBrowser(paths, query, userNameOverride, startedAt);
+  const { rows, pagesFetched, totalNum, totalPage, cost, hotDueDay, warnings, sessionSource } = result;
+  const output = {
+    app: query.app,
+    from: formatTime(query.from),
+    to: formatTime(query.to),
+    type: query.type,
+    env: query.env,
+    filters: {
+      traceId: query.traceId,
+      ip: query.ip,
+      service: query.service,
+      method: query.method,
+      uid: query.uid,
+      keywords: query.keywords,
+      keywordMode: query.keywordMode,
+    },
+    order: query.order,
+    pageSize: query.pageSize,
+    pagesFetched,
+    totalNum,
+    totalPage,
+    hotDueDay,
+    rowCount: rows.length,
+    rows: rows.map((row) => normalizeRow(row, query.maxBody)),
+    warnings,
+    cost,
+    sessionSource,
+    elapsedMs: Date.now() - startedAt,
+  };
+  if (args.output) {
+    const target = expandHome(args.output);
+    fs.writeFileSync(target, JSON.stringify({ ...output, rows: rows.map((row) => normalizeRow(row, Number.MAX_SAFE_INTEGER)) }, null, 2));
+    output.resultFile = target;
+  }
+  console.log(JSON.stringify(output, null, 2));
+  return 0;
+}
+
+async function collectRows(client, query, userNameOverride, startedAt) {
+  query.userName = await resolveUserName(client, userNameOverride);
+  const hotDueDay = await fetchHotDueDay(client);
+  const warnings = [];
+  if (hotDueDay && query.from < startedAt - hotDueDay * 86400000) {
+    warnings.push(`start time is older than the hot retention (${hotDueDay} days); the platform switches to the cold history table, `
+      + 'which was returning "table doesn\'t exist" on 2026-09-16 -- expect an error or an empty result');
+  }
+
+  const rows = [];
+  const pagesFetched = [];
+  let totalNum = null;
+  let totalPage = null;
+  let cost = '';
+  let nextPage = query.page;
+  while (true) {
+    const result = await fetchPage(client, buildPayload({ ...query, page: nextPage }));
+    pagesFetched.push(nextPage);
+    rows.push(...result.rows);
+    totalNum = Number.isFinite(result.totalNum) ? result.totalNum : totalNum;
+    totalPage = Number.isFinite(result.totalPage) ? result.totalPage : totalPage;
+    cost = result.cost;
+    nextPage += 1;
+    if (!shouldFetchNextPage({ pagesFetched: pagesFetched.length, maxPages: query.maxPages, lastRowCount: result.rows.length, nextPage, totalPage })) break;
+  }
+  if (Number.isFinite(totalNum) && totalNum > rows.length) {
+    warnings.push(`only ${rows.length} of ${totalNum} matching rows were fetched; narrow the window/filters or raise --max-pages`);
+  }
+  return { rows, pagesFetched, totalNum, totalPage, cost, hotDueDay, warnings };
+}
+
+// Cache hit: no Chromium and no profile lock. Any failure (stale cookies or a real API error)
+// falls back to the browser path, which reports real errors and refreshes the snapshot.
+async function collectWithCachedSession(paths, query, userNameOverride, startedAt) {
+  if (!sessionCache.readCookieHeader(paths.profileDir, PLATFORM_BASE)) return null;
+  try {
+    const result = await collectRows(new DirectClient(paths.profileDir), { ...query }, userNameOverride, startedAt);
+    return { ...result, sessionSource: 'cache' };
+  } catch (_) {
+    sessionCache.invalidate(paths.profileDir, PLATFORM_BASE);
+    sessionCache.invalidate(paths.profileDir, SESSION_URL);
+    return null;
+  }
+}
+
+async function collectWithBrowser(paths, query, userNameOverride, startedAt) {
+  const chromium = loadPlaywright(paths);
+  const release = await acquireProfileLock(paths.profileDir, { timeoutMs: 300000 });
+  let context;
   try {
     context = await openContext(paths, chromium);
-    query.userName = await resolveUserName(context, args['user-name'] || process.env.LOG_PLATFORM_USER_NAME);
-    const hotDueDay = await fetchHotDueDay(context);
-    const warnings = [];
-    if (hotDueDay && query.from < startedAt - hotDueDay * 86400000) {
-      warnings.push(`start time is older than the hot retention (${hotDueDay} days); the platform switches to the cold history table, `
-        + 'which was returning "table doesn\'t exist" on 2026-09-16 -- expect an error or an empty result');
-    }
-
-    const rows = [];
-    const pagesFetched = [];
-    let totalNum = null;
-    let totalPage = null;
-    let cost = '';
-    let nextPage = query.page;
-    while (true) {
-      const result = await fetchPage(context, buildPayload({ ...query, page: nextPage }));
-      pagesFetched.push(nextPage);
-      rows.push(...result.rows);
-      totalNum = Number.isFinite(result.totalNum) ? result.totalNum : totalNum;
-      totalPage = Number.isFinite(result.totalPage) ? result.totalPage : totalPage;
-      cost = result.cost;
-      nextPage += 1;
-      if (!shouldFetchNextPage({ pagesFetched: pagesFetched.length, maxPages: query.maxPages, lastRowCount: result.rows.length, nextPage, totalPage })) break;
-    }
-    if (Number.isFinite(totalNum) && totalNum > rows.length) {
-      warnings.push(`only ${rows.length} of ${totalNum} matching rows were fetched; narrow the window/filters or raise --max-pages`);
-    }
-
-    const output = {
-      app: query.app,
-      from: formatTime(query.from),
-      to: formatTime(query.to),
-      type: query.type,
-      env: query.env,
-      filters: {
-        traceId: query.traceId,
-        ip: query.ip,
-        service: query.service,
-        method: query.method,
-        uid: query.uid,
-        keywords: query.keywords,
-        keywordMode: query.keywordMode,
-      },
-      order: query.order,
-      pageSize: query.pageSize,
-      pagesFetched,
-      totalNum,
-      totalPage,
-      hotDueDay,
-      rowCount: rows.length,
-      rows: rows.map((row) => normalizeRow(row, query.maxBody)),
-      warnings,
-      cost,
-      elapsedMs: Date.now() - startedAt,
-    };
-    if (args.output) {
-      const target = expandHome(args.output);
-      fs.writeFileSync(target, JSON.stringify({ ...output, rows: rows.map((row) => normalizeRow(row, Number.MAX_SAFE_INTEGER)) }, null, 2));
-      output.resultFile = target;
-    }
-    console.log(JSON.stringify(output, null, 2));
-    return 0;
+    const result = await collectRows(context, query, userNameOverride, startedAt);
+    await sessionCache.saveContextCookies(context, paths.profileDir, PLATFORM_BASE);
+    await sessionCache.saveContextCookies(context, paths.profileDir, SESSION_URL);
+    return { ...result, sessionSource: 'browser' };
   } finally {
     if (context) await context.close().catch(() => {});
     release();

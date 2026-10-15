@@ -205,7 +205,7 @@ async def check_app_error_log(
     env: str = "",
     profile: str = "",
 ) -> str:
-    """默认日志快检：自动连接堡垒机，可自动收敛唯一应用名，只读取共享 error.log 摘要和尾部。"""
+    """仅限 VM/KVM 机器（经堡垒机 go 到 IP）；容器 Pod 不适用，Pod 日志用 query-app-logs 路径 B（container_log_check.js）。默认日志快检：自动连接堡垒机，可自动收敛唯一应用名，只读取共享 error.log 摘要和尾部。"""
     try:
         line_count = bounded_int(lines, 120, 1, 500)
         char_limit = bounded_int(max_chars, 24000, 1000, 50000)
@@ -401,7 +401,7 @@ async def local_health_get(
 
 @mcp.tool()
 async def list_log_files(ip: str, app_name: str, timeout: int = 30, env: str = "", profile: str = "") -> str:
-    """列出 /home/product/logs/{app_name}_logs/ 下的共享应用日志文件。"""
+    """仅限 VM/KVM 机器（经堡垒机 go 到 IP）；容器 Pod 不适用，Pod 日志用 query-app-logs 路径 B（container_log_check.js）。列出 /home/product/logs/{app_name}_logs/ 下的共享应用日志文件。"""
     try:
         command = f"ls {q(app_log_dir(app_name))}/"
     except ValueError as exc:
@@ -419,7 +419,7 @@ async def tail_app_log(
     env: str = "",
     profile: str = "",
 ) -> str:
-    """查看共享应用日志尾部。支持 debug/error/warn/info/stdout 及轮转文件（含 info_2026091010.0.log、.gz）。"""
+    """仅限 VM/KVM 机器（经堡垒机 go 到 IP）；容器 Pod 不适用，Pod 日志用 query-app-logs 路径 B（container_log_check.js）。查看日志尾部。file_name 可为日志目录下任意相对路径（如 deploy.log、deploy/deploy_2026101410.log）或绝对路径，.gz 自动解压。"""
     try:
         path = app_log_path(app_name, file_name)
         line_count = bounded_int(lines, 200, 1, 1000)
@@ -444,7 +444,7 @@ async def grep_app_log(
     env: str = "",
     profile: str = "",
 ) -> str:
-    """按关键字查询共享日志（含 warn.log、info_2026091010.0.log 及 .gz）。自动连接堡垒机，仅执行只读 grep/zcat/tail。"""
+    """仅限 VM/KVM 机器（经堡垒机 go 到 IP）；容器 Pod 不适用，Pod 日志用 query-app-logs 路径 B（container_log_check.js）。按关键字查询日志；file_name 可为日志目录下任意相对路径或绝对路径，.gz 自动解压。自动连接堡垒机，仅执行只读 grep/zcat/tail。"""
     try:
         path = app_log_path(app_name, file_name)
         safe_keyword = validate_keyword(keyword)
@@ -461,7 +461,7 @@ async def grep_app_log(
 
 @mcp.tool()
 async def recent_error_summary(ip: str, app_name: str, timeout: int = 30, env: str = "", profile: str = "") -> str:
-    """提取共享 error.log 里最近的 ERROR/Exception/Caused by 关键行。"""
+    """仅限 VM/KVM 机器（经堡垒机 go 到 IP）；容器 Pod 不适用，Pod 日志用 query-app-logs 路径 B（container_log_check.js）。提取共享 error.log 里最近的 ERROR/Exception/Caused by 关键行。"""
     try:
         path = app_log_path(app_name, "error.log")
     except ValueError as exc:

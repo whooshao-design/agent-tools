@@ -3,6 +3,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { createRequire } = require('module');
+const { launchLockedContext } = require('../../get-browser-session/scripts/browser_session');
 
 const BASE_URLS = {
   stable: 'https://stable-eye.oa.fenqile.com',
@@ -196,7 +197,7 @@ async function extractAuthFromProfile(args, baseUrl, alertId) {
   const paths = resolvePaths(args);
   const chromium = loadPlaywright(paths);
   const ldLibraryPath = [paths.runtimeLibDir, process.env.LD_LIBRARY_PATH].filter(Boolean).join(':');
-  const context = await chromium.launchPersistentContext(paths.profileDir, {
+  const context = await launchLockedContext(chromium, paths.profileDir, {
     executablePath: paths.chromePath,
     headless: true,
     env: { ...process.env, LD_LIBRARY_PATH: ldLibraryPath },

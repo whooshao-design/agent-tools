@@ -2,7 +2,7 @@
 name: get-browser-session
 description: 获取、检查、续期和复用 WSL Playwright/Chromium 浏览器登录态与网页 session（底层会话层，供其他 skill 复用）。Use when 需要访问要求登录的内网页面、检查或定时续期浏览器 profile 登录态、打开浏览器让用户完成 SSO/OTP 登录、复用已保存 profile 做页面自动化，或按默认脱敏方式查看 session Cookie/localStorage token。
 metadata:
-  version: 1.7.3
+  version: 1.8.0
 ---
 
 # Get Browser Session
@@ -108,7 +108,9 @@ Persistent browser state belongs outside Codex, Claude and skill source director
 
 WebShell defaults to the isolated profile `~/.local/state/agent-tools/browser-profiles/webshell`. To refresh it, run `--ensure --url=<login_pod_addr> --success-text=none` and complete SSO in the opened browser.
 
-`browser_session` script and MCP calls using the same profile are serialized with a cross-process lock. Other scripts and independently opened Chromium instances are outside this lock; if Chrome still reports the profile is already in use, close the competing WSL Chromium process or rerun the whole flow with a different explicit `--profile`.
+Chromium allows only one process per user-data-dir (`SingletonLock`), whether the caller reads or writes. Every lexin script that launches the shared profiles therefore goes through `launchLockedContext` (or `acquireProfileLock`) in `browser_session.js`: a second session queues on `<profile>.agent-tools.lock` for up to 5 minutes (`BROWSER_PROFILE_LOCK_TIMEOUT_MS`) instead of failing with `ProcessSingleton`, and the lock is released when the context closes. New scripts must launch through `launchLockedContext`, not `chromium.launchPersistentContext` directly. Independently opened Chromium instances are outside this lock; if Chrome still reports the profile is already in use, close the competing WSL Chromium process or rerun with a different explicit `--profile`.
+
+Scripts that only need cookies use `scripts/session_cache.js` so most calls skip Chromium entirely: after a successful browser run they snapshot the cookies for the API origin to `~/.local/state/agent-tools/session-cache/` (`0600`, one file per profile + origin, 6-hour lifetime), and the next run calls the API from Node with that Cookie header. A 3xx/401/403 or HTML response invalidates the snapshot and falls back to the browser path, which re-validates and refreshes it. Currently used by `query-app-instances`, `query-app-logs` (`log_platform_query.js`) and `test-dubbo-api` (`bianque_browser_request.js`; there only a clear login rejection falls back, so a possibly-writing Dubbo call is never sent twice). Their output reports `session_source`/`sessionSource` = `cache` or `browser`. Set `AGENT_TOOLS_SESSION_CACHE_DISABLE=1` to force the browser path; delete the directory to clear all snapshots.
 
 ## Session Lifecycle And Renewal
 

@@ -2,7 +2,7 @@
 name: inspect-healthy-jvm-dashboard
 description: "Use when 需要只读查看、理解或对比 Healthy/雷神 JVM、JVM 内存、G1 GC 监控看板，例如 https://healthy.lexincloud.com/show/dashboard/11147 或 /dashboards/14333；自动复用浏览器登录态，回读大盘配置，整理变量、面板、PromQL、页面快照、明显配置问题，并可按 app/env 拉取实例级 JVM 指标摘要。"
 metadata:
-  version: 1.1.2
+  version: 1.1.3
 ---
 
 # inspect-healthy-jvm-dashboard

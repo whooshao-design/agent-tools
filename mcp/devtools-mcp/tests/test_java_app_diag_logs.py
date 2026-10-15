@@ -22,10 +22,17 @@ class LogFileValidationTest(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertEqual(core.validate_log_file(name), name)
 
-    def test_paths_unrelated_files_and_shell_fragments_are_rejected(self):
-        for name in ("../error.log", "/tmp/error.log", "application.properties", "audit.log",
-                     "info_abc.log", "info.log;id", "info.log$(id)", "info.log\nerror.log"):
-            with self.subTest(name=name), self.assertRaises(ValueError):
+    def test_any_file_relative_or_absolute_is_allowed(self):
+        for name in ("deploy.log", "deploy/deploy_2026101410.log", "audit.log", "/etc/hosts"):
+            with self.subTest(name=name):
+                self.assertEqual(core.validate_log_file(name), name)
+        self.assertEqual(core.app_log_path("test_app", "deploy/deploy_2026101410.log"),
+                         "/home/product/logs/test_app_logs/deploy/deploy_2026101410.log")
+        self.assertEqual(core.app_log_path("test_app", "/etc/hosts"), "/etc/hosts")
+
+    def test_control_characters_are_rejected(self):
+        for name in ("info.log\nerror.log", "info.log\r", "info.log\0"):
+            with self.subTest(name=repr(name)), self.assertRaises(ValueError):
                 core.validate_log_file(name)
 
 
@@ -49,7 +56,7 @@ class LogReadCommandTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_invalid_file_never_reaches_bastion(self):
         with patch.object(server, "_execute", new_callable=AsyncMock) as execute:
-            result = await server.grep_app_log("192.0.2.1", "test_app", "trace-id", file_name="../error.log")
+            result = await server.grep_app_log("192.0.2.1", "test_app", "trace-id", file_name="error.log\nid")
         self.assertIn("file_name", result)
         execute.assert_not_awaited()
 

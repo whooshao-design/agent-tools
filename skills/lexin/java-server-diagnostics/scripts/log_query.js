@@ -1,6 +1,5 @@
 'use strict';
 
-const ALLOWED_LOG_FILES = new Set(['error.log', 'info.log', 'warn.log', 'debug.log', 'stdout.log']);
 const TIMESTAMP_PATTERN = /(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})/;
 
 function asBoolean(value, defaultValue = false) {
@@ -35,8 +34,9 @@ function parseLogFiles(value, defaults = ['error.log']) {
     .map((item) => item.trim())
     .filter(Boolean);
   if (!files.length) throw new Error('at least one log file is required');
+  // 任意文件均可读：相对路径基于应用日志目录，绝对路径原样使用，支持 shell 通配符；只拒绝空白与控制字符。
   for (const file of files) {
-    if (!ALLOWED_LOG_FILES.has(file)) throw new Error(`unsupported log file: ${file}`);
+    if (/[\s\u0000]/.test(file)) throw new Error(`log file must not contain whitespace or control characters: ${file}`);
   }
   return Array.from(new Set(files));
 }
@@ -176,7 +176,6 @@ function queryLogText(text, args = {}, source = 'kubectl') {
 }
 
 module.exports = {
-  ALLOWED_LOG_FILES,
   asBoolean,
   groupLogEvents,
   normalizeQuery,

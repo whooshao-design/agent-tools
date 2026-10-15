@@ -104,6 +104,16 @@ test('WebShell URL is rejected when container is absent or Pod mismatches', () =
   assert.ok(mismatch.errors.includes('URL_TARGET_MISMATCH_PODNAME'));
 });
 
+test('stable WebShell gateway origin is accepted over http; other http origins are not', () => {
+  const stable = validateWebShellUrl('http://10.9.210.4:8080/?ns=fenqile-stable-gzydjdidc&pod=server-demo-1&container=server-demo&cluster=stable-cluster&command=/bin/bash');
+  assert.equal(stable.valid, true, JSON.stringify(stable.errors));
+  const otherPort = validateWebShellUrl('http://10.9.210.4:9090/?ns=ns&pod=pod&container=c&cluster=cl&command=/bin/bash');
+  assert.ok(otherPort.errors.includes('URL_SCHEME_NOT_HTTPS'));
+  assert.ok(otherPort.errors.includes('URL_HOST_NOT_ALLOWED'));
+  const httpProd = validateWebShellUrl('http://webshell.oa.fenqile.com/?ns=ns&pod=pod&container=c&cluster=cl&command=/bin/bash');
+  assert.ok(httpProd.errors.includes('URL_SCHEME_NOT_HTTPS'));
+});
+
 test('legacy arg URL remains usable but is explicitly marked unverifiable', () => {
   const result = validateWebShellUrl('https://webshell.oa.fenqile.com/?arg=opaque');
   assert.equal(result.valid, true);

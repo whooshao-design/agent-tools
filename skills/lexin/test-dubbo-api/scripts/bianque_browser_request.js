@@ -3,6 +3,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { createRequire } = require('module');
+const { launchLockedContext } = require('../../get-browser-session/scripts/browser_session');
+const sessionCache = require('../../get-browser-session/scripts/session_cache');
 
 function expandHome(value) {
   if (!value) return value;
@@ -77,9 +79,34 @@ async function main() {
   const version = args.version || '2.0.0';
   const params = args.params || '[]';
   const timeoutMs = Number(args['timeout-ms'] || 120000);
+  const form = { env: bianqueEnv, service, ip, port, group, version, method, params, comment: '', stringFlag: 'false' };
+  const requestUrl = `${baseUrl}/serviceEmulator/request`;
+
+  // Cache hit: post straight from Node and skip Chromium (and the profile lock) entirely.
+  // The Dubbo method may write, so only a clear login rejection (request never ran) falls back to
+  // the browser; timeouts and HTTP errors are reported instead of being re-sent.
+  const cookieHeader = sessionCache.readCookieHeader(paths.profileDir, requestUrl);
+  if (cookieHeader) {
+    const result = await sessionCache.fetchWithCookies(cookieHeader, requestUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+      body: new URLSearchParams(form).toString(),
+      timeoutMs,
+      referer: `${baseUrl}/`,
+    });
+    if (!sessionCache.looksUnauthenticated(result)) {
+      if (!result.ok) {
+        throw new Error(`Bianque request failed: HTTP ${result.status} ${result.text.slice(0, 500)}`);
+      }
+      console.log(result.text);
+      return;
+    }
+    sessionCache.invalidate(paths.profileDir, requestUrl);
+  }
+
   const ldLibraryPath = [paths.runtimeLibDir, process.env.LD_LIBRARY_PATH].filter(Boolean).join(':');
 
-  const context = await chromium.launchPersistentContext(paths.profileDir, {
+  const context = await launchLockedContext(chromium, paths.profileDir, {
     executablePath: paths.chromePath,
     headless: !args.headed,
     env: {
@@ -96,22 +123,11 @@ async function main() {
     const route = `${baseUrl}/#/serviceEmulator/${encodeURIComponent(routeEnv)}/${encodeURIComponent(service)}/${encodeURIComponent(ip)}/${encodeURIComponent(port)}/${encodeURIComponent(group)}/${encodeURIComponent(version)}`;
     await page.goto(route, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
     await page.waitForLoadState('networkidle', { timeout: Math.min(timeoutMs, 20000) }).catch(() => {});
-    const result = await page.evaluate(async ({ bianqueEnv, service, method, ip, port, group, version, params, timeoutMs }) => {
+    const result = await page.evaluate(async ({ form, timeoutMs }) => {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
-        const body = new URLSearchParams({
-          env: bianqueEnv,
-          service,
-          ip,
-          port,
-          group,
-          version,
-          method,
-          params,
-          comment: '',
-          stringFlag: 'false',
-        });
+        const body = new URLSearchParams(form);
         const response = await fetch('/serviceEmulator/request', {
           method: 'POST',
           credentials: 'include',
@@ -127,11 +143,12 @@ async function main() {
       } finally {
         clearTimeout(timer);
       }
-    }, { bianqueEnv, service, method, ip, port, group, version, params, timeoutMs });
+    }, { form, timeoutMs });
 
     if (!result.ok) {
       throw new Error(`Bianque request failed: HTTP ${result.status} ${result.text.slice(0, 500)}`);
     }
+    await sessionCache.saveContextCookies(context, paths.profileDir, requestUrl);
     console.log(result.text);
   } finally {
     await context.close();

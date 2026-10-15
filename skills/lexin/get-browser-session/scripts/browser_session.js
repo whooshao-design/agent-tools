@@ -501,6 +501,34 @@ async function acquireProfileLock(profileDir, options = {}) {
   }
 }
 
+// Chromium refuses a second process on the same user-data-dir (SingletonLock) and fails fast.
+// Queue on the agent-tools lock instead, and release it when the context closes.
+async function launchLockedContext(chromium, profileDir, launchOptions, lockOptions = {}) {
+  const release = await acquireProfileLock(profileDir, {
+    timeoutMs: boundedNumber(
+      lockOptions.timeoutMs ?? (process.env.BROWSER_PROFILE_LOCK_TIMEOUT_MS || undefined),
+      300000, 0, 1800000,
+    ),
+    pollMs: lockOptions.pollMs ?? 250,
+  });
+  let context;
+  try {
+    context = await chromium.launchPersistentContext(profileDir, launchOptions);
+  } catch (error) {
+    release();
+    throw error;
+  }
+  const close = context.close.bind(context);
+  context.close = async (...args) => {
+    try {
+      return await close(...args);
+    } finally {
+      release();
+    }
+  };
+  return context;
+}
+
 async function collectSessionHealth(context, targetUrl, expiryThresholdSeconds = 900) {
   const cookies = await context.cookies([targetUrl]);
   const auth = summarizeAuthCookies(await context.cookies());
@@ -962,6 +990,7 @@ module.exports = {
   cookieMatchesDomain,
   diffAuthCookies,
   inspectWslgHealth,
+  launchLockedContext,
   main,
   parseArgs,
   resolvePaths,

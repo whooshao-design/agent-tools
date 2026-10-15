@@ -3,6 +3,7 @@ const os = require('os');
 const path = require('path');
 const fs = require('fs');
 const { createRequire } = require('module');
+const { launchLockedContext } = require('../../get-browser-session/scripts/browser_session');
 
 const TOOL_DIR = path.join(os.homedir(), 'tools/lexiao-browser');
 const DEFAULT_PROFILE = process.env.BROWSER_SESSION_PROFILE
@@ -60,7 +61,7 @@ function requireArg(args, name) {
 
 async function openContext(profile) {
   const ldLibraryPath = [RUNTIME_LIB_DIR, process.env.LD_LIBRARY_PATH].filter(Boolean).join(':');
-  return chromium.launchPersistentContext(profileDir(profile), {
+  return launchLockedContext(chromium, profileDir(profile), {
     executablePath: CHROME_PATH,
     headless: true,
     env: { ...process.env, LD_LIBRARY_PATH: ldLibraryPath },

@@ -18,6 +18,7 @@ const {
   buildBrowserEnv,
   chromiumArgsFor,
 } = require('../../get-browser-session/scripts/browser_network');
+const { launchLockedContext } = require('../../get-browser-session/scripts/browser_session');
 
 const DEFAULT_PROFILE = '/home/joney/.local/state/agent-tools/browser-profiles/healthy';
 const DEFAULT_TOOL_DIR = path.join(os.homedir(), 'tools/lexiao-browser');
@@ -108,7 +109,7 @@ async function openHippoPage(target) {
   env.LD_LIBRARY_PATH = [target.runtimeLibDir, process.env.LD_LIBRARY_PATH].filter(Boolean).join(':');
   let context;
   try {
-    context = await chromium.launchPersistentContext(target.profile, {
+    context = await launchLockedContext(chromium, target.profile, {
       executablePath: target.chromePath,
       headless: true,
       env,

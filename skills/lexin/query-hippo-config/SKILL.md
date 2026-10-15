@@ -2,7 +2,7 @@
 name: query-hippo-config
 description: 通过 Hippo 配置中心只读查看应用配置和实际生效 release，支持标准 Hippo、stable/测试/项目环境以及墨西哥、印尼海外站点的独立域名，应用名或 namespace 不明确时可按关键字定位。Use when 用户要求查看 Hippo 配置、只给出应用关键字或业务语义要求定位配置项落在哪个应用和 namespace、线上/预发/灰度/OA/stable 配置、墨西哥或印尼海外配置、代码分支依赖的配置 key、应用默认配置、namespace 配置项，或需要根据代码里的 ConfigService/getAppConfig/@HippoConfigProperty 判断真实配置走向；默认环境为 prod/fql_prod，最终必须输出查询接口 URL 和配置结果。
 metadata:
-  version: 1.5.3
+  version: 1.5.4
 ---
 
 # query-hippo-config
