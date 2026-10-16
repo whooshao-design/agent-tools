@@ -2,7 +2,7 @@
 name: recall-agent-sessions
 description: Use when 用户要找回以前在 Claude Code 或 Codex 会话里做过的事，例如"上次查 xx 查到哪了""之前那个结论是什么""在 codex 里改过的那个文件"，或要把某个历史会话交接到当前 agent 继续做；只读检索本机两边的会话记录，并为指定会话生成交接摘要。不用于检索 MEMORY.md 规则或代码仓库内容。
 metadata:
-  version: 1.0.0
+  version: 1.1.0
 ---
 
 # recall-agent-sessions
@@ -28,6 +28,7 @@ S=/home/joney/projects/ai/agent-tools/skills/common/recall-agent-sessions/script
 python3 $S search "告警 超时" --cwd hawk          # 关键词须在同一条消息里全部出现
 python3 $S search "rc_flow_version" --all-kinds   # 同时搜执行过的命令和改动过的文件
 python3 $S list --agent codex --since 7           # 最近 7 天的 Codex 会话
+python3 $S list --since 7 --limit 200 --json       # 机器可读：UTC 起止时间、全部提问、最后一条回复
 python3 $S handoff 01a11f3b                       # 会话 ID 或唯一前缀
 ```
 

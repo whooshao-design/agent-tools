@@ -81,5 +81,18 @@ class RecallAgentSessionsTest(unittest.TestCase):
         self.assertEqual([(k, t) for _, k, t in s.events], [("user", "重新init"), ("command", "ls"), ("assistant", "done")])
 
 
+    def test_session_record_keeps_utc_times_prompts_and_last_reply(self):
+        path = write_jsonl(self.dir / "rec.jsonl", [
+            {"type": "user", "cwd": "/repo", "timestamp": "2026-10-12T01:00:00Z", "message": {"content": "第一问"}},
+            {"type": "assistant", "timestamp": "2026-10-12T01:01:00Z", "message": {"content": [{"type": "text", "text": "中间"}]}},
+            {"type": "user", "timestamp": "2026-10-12T02:00:00Z", "message": {"content": "第二问很长很长"}},
+            {"type": "assistant", "timestamp": "2026-10-12T02:01:00Z", "message": {"content": [{"type": "text", "text": "最终结论"}]}},
+        ])
+        rec = ras.session_record(ras.parse_claude(path), prompt_chars=4, last_chars=2)
+        self.assertEqual((rec["start"], rec["end"]), ("2026-10-12T01:00:00Z", "2026-10-12T02:01:00Z"))
+        self.assertEqual(rec["prompts"], [{"time": "2026-10-12T01:00:00Z", "text": "第一问"}, {"time": "2026-10-12T02:00:00Z", "text": "第二问…"}])
+        self.assertEqual((rec["last_reply"], rec["last_reply_time"]), ("最终", "2026-10-12T02:01:00Z"))
+
+
 if __name__ == "__main__":
     unittest.main()

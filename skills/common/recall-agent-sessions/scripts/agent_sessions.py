@@ -213,11 +213,29 @@ def header(s):
             f"  首个提问: {short(s.first_prompt(), 120)}")
 
 
+def session_record(s, prompt_chars, last_chars):
+    """Machine-readable summary; start/end keep the transcript's ISO-8601 UTC timestamps."""
+    replies = [(ts, t) for ts, k, t in s.events if k == "assistant"]
+    return {
+        "agent": s.agent, "id": s.id, "source": s.source, "cwd": s.cwd, "branch": s.branch,
+        "start": s.start, "end": s.end, "path": str(s.path),
+        "prompts": [{"time": ts, "text": short(t, prompt_chars)} for ts, k, t in s.events if k == "user"],
+        "last_reply": replies[-1][1][:last_chars] if replies else "",
+        "last_reply_time": replies[-1][0] if replies else "",
+    }
+
+
 def cmd_list(args):
+    records = []
     for n, s in enumerate(load_sessions(args)):
         if n >= args.limit:
             break
-        print(header(s), "\n")
+        if args.json:
+            records.append(session_record(s, args.prompt_chars, args.last_chars))
+        else:
+            print(header(s), "\n")
+    if args.json:
+        print(json.dumps(records, ensure_ascii=False, indent=2))
 
 
 def snippet(text, pattern, width=90):
@@ -310,6 +328,9 @@ def main():
 
     p = sub.add_parser("list", help="按最近修改时间列出会话")
     filters(p)
+    p.add_argument("--json", action="store_true", help="输出 JSON：含 UTC 起止时间、带时间的全部提问与最后一条回复")
+    p.add_argument("--prompt-chars", type=int, default=300, help="--json 时每条提问的截断长度")
+    p.add_argument("--last-chars", type=int, default=3000, help="--json 时最后一条回复的截断长度")
     p.set_defaults(func=cmd_list)
 
     p = sub.add_parser("search", help="按关键词检索会话内容")
