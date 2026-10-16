@@ -138,6 +138,12 @@
 | `mcp/bastion-mcp/` | 堡垒机 SSH 只读通道 MCP（`config.json` 本地化，不入 git） |
 | `mcp/third-party-mcp/` | 第三方通用 MCP wrapper/remote 配置：Context7 最新库文档、GitHub 只读上下文、MarkItDown 文档转 Markdown、Sonatype 依赖情报 |
 
+## tools/
+
+| 位置 | 说明 |
+|---|---|
+| `tools/mdview/` | 本地 Markdown/HTML 查看器：离线 mermaid、复制富文本、改动自动刷新；选中文字留评论，agent 用 `mdview comments <文件>` 读取并标记已处理 |
+
 ## 安装
 
 双端只读复查入口：`python3 bin/toolchain_audit.py`（摘要）或加 `--json`（脱敏明细）。

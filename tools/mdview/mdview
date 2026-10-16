@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# mdview 启动入口；~/.local/bin/mdview 是指向本文件的符号链接
+exec node "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/server.mjs" "$@"

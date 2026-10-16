@@ -1,0 +1,8 @@
+[Unit]
+Description=mdview 本地文档查看器（端口常驻，进程按需启动）
+
+[Socket]
+ListenStream=127.0.0.1:8321
+
+[Install]
+WantedBy=sockets.target

@@ -24,6 +24,7 @@ agent-tools/
 │   ├── devtools-mcp/    # 研发工具链 MCP（16 个 server；查询为主，部分工具可写）
 │   ├── bastion-mcp/     # 堡垒机 SSH 通道 MCP（config.json 本地化）
 │   └── third-party-mcp/ # 第三方通用 MCP wrapper/remote 配置（Context7、GitHub、Lark、MarkItDown、Sonatype）
+├── tools/mdview/        # 本地 Markdown/HTML 查看器（含文档评论，`mdview comments` 供 agent 读写），见其 README
 ├── bin/                 # with-env、toolchain_audit.py（双端只读盘点）、skill_routing_eval.py / skill_behavior_eval.py（skill 评测）
 ├── env/                 # 公共凭证 credentials.env（gitignore）与模板 credentials.env.example
 ├── evals/               # skill 评测：cases/<skill>.json 触发/路由用例与行为压力用例（README 说明三层）
@@ -70,6 +71,7 @@ python3 -m unittest discover -s hooks/tests              # SubagentStop 结果�
 python3 -m unittest discover -s mcp/devtools-mcp/tests   # devtools_mcp（测试自行把包目录加入 sys.path）
 (cd mcp/bastion-mcp && python3 -m unittest discover -s tests)   # 需已安装 mcp、paramiko
 node --test 'skills/**/*.test.js' 'skills/**/*.test.mjs' # skill 脚本的 JS 测试
+node --test tools/mdview/tests/*.test.mjs                # mdview 评论存储与 CLI
 python3 -m unittest discover -s skills/lexin/get-browser-session/tests -p 'test_*.py'   # 需要 node
 ```
 

@@ -1,0 +1,757 @@
+<!doctype html>
+<html lang="zh"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>mdview</title>
+<link rel="stylesheet" href="/vendor/hljs.css">
+<style>
+:root{--bg:#fff;--fg:#1f2328;--muted:#59636e;--line:#d1d9e0;--code:#f6f8fa;--link:#0969da;--side:#f8fafc;--hl:#ddf4ff}
+@media (prefers-color-scheme:dark){:root{--bg:#0d1117;--fg:#e6edf3;--muted:#9198a1;--line:#3d444d;--code:#161b22;--link:#4493f8;--side:#010409;--hl:#193b6b}}
+*{box-sizing:border-box}
+body{margin:0;display:flex;height:100vh;background:var(--bg);color:var(--fg);
+ font:16px/1.7 -apple-system,"Segoe UI","Microsoft YaHei",Roboto,"Noto Sans CJK SC",sans-serif}
+/* 左侧 */
+#side{width:290px;flex:0 0 290px;border-right:1px solid var(--line);background:var(--side);
+ overflow:auto;padding:10px 8px;display:flex;flex-direction:column;gap:8px}
+#rootbar{display:flex;gap:6px;align-items:center;font-size:12px}
+#rootbar button{border:1px solid var(--line);background:var(--bg);color:var(--muted);border-radius:6px;
+ padding:2px 7px;cursor:pointer;flex:0 0 auto}
+#rootbar button:hover{color:var(--fg)}
+#rootpath{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left;
+ color:var(--muted);cursor:pointer;padding:2px 4px;border-radius:5px}
+#rootpath:hover{background:var(--code);color:var(--fg)}
+#q{width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);
+ color:var(--fg);font-size:13px}
+#tree{flex:1;min-height:0;overflow:auto;margin:0 -4px}
+.row{display:block;padding:3px 6px;border-radius:6px;color:var(--fg);text-decoration:none;font-size:13px;
+ white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;line-height:1.6}
+.row:hover{background:var(--code)}
+a.row.on{background:var(--hl);font-weight:600}
+.tw{display:inline-block;width:12px;color:var(--muted);font-size:10px}
+.dir{color:var(--fg)}
+.ic{display:inline-block;width:16px;font-size:9px;font-weight:700;color:var(--muted);letter-spacing:-.5px}
+.ic.h{color:#d29922}
+.kids.hide{display:none}
+.hint{color:var(--muted);font-size:12px;padding:6px}
+/* 中间 */
+#main{flex:1;overflow:auto;padding:0 clamp(16px,2.5vw,44px) 25vh;position:relative}
+#doc{max-width:1180px;margin:0 auto;padding-top:14px}
+body.wide #doc{max-width:none}
+#bar{position:sticky;top:0;z-index:9;display:flex;justify-content:space-between;align-items:center;
+ padding:8px 0 7px;background:var(--bg);border-bottom:1px solid var(--line)}
+#bar .grp{display:flex;gap:6px}
+#bar button{border:1px solid var(--line);background:var(--bg);color:var(--muted);border-radius:6px;
+ padding:3px 9px;font-size:12px;cursor:pointer;white-space:nowrap}
+#bar button:hover{color:var(--fg);border-color:var(--muted)}
+#bar button:disabled{opacity:.5;cursor:default}
+/* 右侧目录 */
+#toc{width:240px;flex:0 0 240px;border-left:1px solid var(--line);background:var(--side);overflow:auto;padding:14px 10px}
+#toc .cap{color:var(--muted);font-size:11px;margin:0 0 6px 6px}
+#toc a{display:block;padding:3px 6px;border-radius:5px;color:var(--muted);text-decoration:none;font-size:12.5px;
+ line-height:1.45;border-left:2px solid transparent}
+#toc a:hover{background:var(--code);color:var(--fg)}
+#toc a.on{color:var(--link);border-left-color:var(--link);background:var(--hl);font-weight:600}
+#toc a.l3{padding-left:18px} #toc a.l4{padding-left:30px;font-size:12px}
+.hide{display:none!important}
+/* 目录选择弹窗 */
+#pick{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:20;display:flex;align-items:center;justify-content:center}
+#pick .box{background:var(--bg);border:1px solid var(--line);border-radius:10px;width:560px;max-width:92vw;
+ max-height:74vh;display:flex;flex-direction:column;padding:14px;gap:8px}
+#pick .cap{font-size:13px;font-weight:600}
+#pickPath{font-size:12px;color:var(--muted);word-break:break-all;background:var(--code);padding:6px 8px;border-radius:6px}
+#pickList{flex:1;overflow:auto;border:1px solid var(--line);border-radius:6px;min-height:180px}
+#pickList a{display:block;padding:5px 10px;font-size:13px;color:var(--fg);text-decoration:none;cursor:pointer}
+#pickList a:hover{background:var(--code)}
+#recent{display:flex;flex-wrap:wrap;gap:6px}
+#recent a{font-size:11px;border:1px solid var(--line);border-radius:99px;padding:2px 9px;color:var(--muted);
+ text-decoration:none;cursor:pointer}
+#recent a:hover{color:var(--fg);background:var(--code)}
+.btns{display:flex;justify-content:flex-end;gap:8px}
+.btns button{border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:6px;
+ padding:5px 14px;font-size:13px;cursor:pointer}
+.btns button.primary{background:var(--link);color:#fff;border-color:var(--link)}
+/* 正文 */
+h1,h2,h3,h4{line-height:1.3;margin:1.6em 0 .6em;font-weight:600;scroll-margin-top:20px}
+h1{font-size:1.9em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h2{font-size:1.45em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.2em}
+a{color:var(--link);text-decoration:none} a:hover{text-decoration:underline}
+code{background:var(--code);padding:.2em .4em;border-radius:6px;font-size:.87em;
+ font-family:"Cascadia Code",Consolas,ui-monospace,monospace}
+pre{background:var(--code);padding:14px 16px;border-radius:8px;overflow:auto;line-height:1.5}
+pre code{background:none;padding:0;font-size:.85em}
+table{border-collapse:collapse;display:block;overflow:auto;max-width:100%;width:max-content;margin:1em 0}
+th,td{border:1px solid var(--line);padding:6px 13px} th{background:var(--code)}
+blockquote{margin:1em 0;padding:0 1em;color:var(--muted);border-left:.25em solid var(--line)}
+img{max-width:100%} hr{border:none;border-top:1px solid var(--line);margin:2em 0}
+li{margin:.25em 0} ul,ol{padding-left:2em}
+.mermaid{background:var(--code);border-radius:8px;padding:16px;text-align:center;overflow:auto;position:relative}
+.mermaid .pic{position:absolute;top:6px;right:8px;opacity:0;transition:opacity .15s;border:1px solid var(--line);
+ background:var(--bg);color:var(--muted);border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer}
+.mermaid:hover .pic{opacity:1}
+.mermaid .pic:hover{color:var(--fg)}
+.mermaid svg{max-width:100%;height:auto}
+.err{color:#c33;font-size:13px;white-space:pre-wrap}
+#banner{position:fixed;top:46px;left:50%;transform:translateX(-50%);z-index:30;background:var(--bg);
+ border:1px solid var(--line);border-radius:8px;padding:8px 14px;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.15);
+ max-width:70vw;line-height:1.5;word-break:break-all}
+#banner.hide{display:none}
+#banner .path{display:inline-block;font-family:Consolas,ui-monospace,monospace;font-size:12px;
+ background:var(--code);padding:3px 7px;border-radius:5px;margin-top:3px;cursor:pointer;user-select:all}
+#banner .path:hover{outline:1px solid var(--link)}
+/* html 预览 */
+.fbar{font-size:12px;color:var(--muted);margin-bottom:8px;display:flex;gap:10px;align-items:center}
+.htmlv{width:100%;height:calc(100vh - 110px);border:1px solid var(--line);border-radius:8px;background:#fff}
+/* 评论 */
+::highlight(mdview-cm){background:#fff1a8;color:inherit}
+::highlight(mdview-cm-on){background:#ffd33d;color:#1f2328}
+@media (prefers-color-scheme:dark){::highlight(mdview-cm){background:#4d3f00}}
+#cmBtn{position:absolute;z-index:15;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:6px;
+ padding:3px 10px;font-size:12px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.15)}
+#cmBox{position:absolute;z-index:16;width:340px;max-width:80vw;background:var(--bg);border:1px solid var(--line);
+ border-radius:8px;padding:10px;box-shadow:0 4px 16px rgba(0,0,0,.18);display:flex;flex-direction:column;gap:8px;font-size:13px}
+#cmBox .q,.cm-q{color:var(--muted);border-left:3px solid #d29922;padding-left:7px;font-size:12px;line-height:1.5;
+ display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;word-break:break-all}
+#cmBox textarea{width:100%;min-height:90px;resize:vertical;border:1px solid var(--line);border-radius:6px;
+ background:var(--bg);color:var(--fg);padding:6px 8px;font:13px/1.5 inherit}
+#cmts{width:300px;flex:0 0 300px;border-left:1px solid var(--line);background:var(--side);overflow:auto;padding:14px 10px}
+#cmts .cap{color:var(--muted);font-size:11px;margin:0 0 8px 4px}
+.cm-item{border:1px solid var(--line);border-radius:8px;padding:8px 9px;margin-bottom:8px;background:var(--bg);
+ font-size:13px;line-height:1.55;cursor:pointer}
+.cm-item:hover{border-color:var(--muted)}
+.cm-item.done{opacity:.65}
+.cm-b{margin:4px 0;white-space:pre-wrap;word-break:break-word}
+.cm-r{background:var(--code);border-radius:6px;padding:5px 7px;margin:4px 0;font-size:12px;white-space:pre-wrap;word-break:break-word}
+.cm-m{display:flex;justify-content:space-between;align-items:center;color:var(--muted);font-size:11px;gap:6px}
+.cm-m button{border:1px solid var(--line);background:var(--bg);color:var(--muted);border-radius:5px;padding:1px 7px;
+ font-size:11px;cursor:pointer}
+.cm-m button:hover{color:var(--fg)}
+.cm-lost{color:#c33}
+@media (max-width:1100px){#toc{display:none}}
+@media print{#side,#toc,#bar,#cmts,#cmBtn,#cmBox{display:none}#main{overflow:visible;padding:0}}
+</style>
+<script src="/vendor/marked.min.js"></script>
+<script src="/vendor/mermaid.min.js"></script>
+<script src="/vendor/highlight.min.js"></script>
+</head><body>
+<nav id="side">
+  <div id="rootbar">
+    <button id="up" title="上一级目录">↑</button>
+    <span id="rootpath" title="点击切换目录">…</span>
+    <button id="switch" title="切换目录">切换</button>
+  </div>
+  <input id="q" placeholder="搜索文件（含子目录）…">
+  <div id="tree"></div>
+</nav>
+<main id="main">
+  <div id="bar">
+    
+    <div class="grp"><button id="tgSide" title="显示/隐藏左侧文件树">文件</button><button id="tgToc" title="显示/隐藏右侧本页目录">目录</button><button id="tgWide" title="正文宽度：定宽 / 撑满">宽屏</button></div>
+    <div class="grp"><button id="tgCopy" title="复制为富文本（Ctrl+V 保留格式 / Ctrl+Shift+V 粘 Markdown）">复制</button><button id="tgWin" title="复制该文件的 Windows 路径，供飞书等上传对话框粘贴">路径</button><button id="rl" title="重新加载当前文档">刷新</button><button id="tgCm" title="选中正文文字即可评论；显示/隐藏评论栏">评论</button><button id="tgEdit" title="用 VS Code 打开当前文件编辑（保存后本页自动刷新）">编辑</button></div>
+  
+  </div>
+  <article id="doc"></article>
+  <button id="cmBtn" class="hide">💬 评论</button>
+  <div id="cmBox" class="hide"><div class="q"></div><textarea placeholder="写下意见（Ctrl+Enter 保存）"></textarea>
+    <div class="btns"><button id="cmCancel">取消</button><button id="cmSave" class="primary">保存</button></div></div>
+</main>
+<aside id="toc"><div class="cap">本页目录</div><div id="tocList"></div></aside>
+<aside id="cmts" class="hide"><div class="cap" id="cmCap">评论</div><div id="cmList"></div></aside>
+<div id="banner" class="hide"></div>
+<div id="pick" class="hide"><div class="box">
+  <div class="cap">切换目录</div>
+  <div id="recent"></div>
+  <div id="pickPath"></div>
+  <div id="pickList"></div>
+  <div class="btns"><button id="pickCancel">取消</button><button id="pickOk" class="primary">在此目录打开</button></div>
+</div></div>
+<script>
+var dark = matchMedia('(prefers-color-scheme:dark)').matches;
+mermaid.initialize({startOnLoad:false, theme: dark?'dark':'default', securityLevel:'loose'});
+hljs.configure({ignoreUnescapedHTML:true, cssSelector:'pre code'});
+
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+marked.use({gfm:true, breaks:false, renderer:{code:function(a,b){
+  var t = (typeof a === 'object') ? a.text : a;
+  var l = ((typeof a === 'object' ? a.lang : b) || '').split(/\s+/)[0];
+  if (l === 'mermaid') return '<pre class="mermaid">' + esc(t) + '</pre>';
+  var cls = l && hljs.getLanguage(l) ? ' class="language-' + esc(l) + '"' : '';
+  return '<pre><code' + cls + '>' + esc(t) + '</code></pre>';
+}}});
+
+var ROOT = '', HOME = '', cur = '', curMd = '', mtime = 0, heads = [], allFiles = null;
+var nodes = {}, expanded = new Set(), pickCur = '';
+var tick = 0, dirStamp = null, lastFocusRefresh = 0;
+
+var isHtml = function(p){ return /\.html?$/i.test(p) };
+// 每个标签页各自持有 ROOT，所有请求都带上；服务端没有"当前目录"，多标签切目录互不影响
+var rq = function(u){ return u + (u.indexOf('?') < 0 ? '?' : '&') + 'root=' + encodeURIComponent(ROOT) };
+var fileUrl = function(p){ return '/file/' + encodeURIComponent(ROOT) + '/' + encodeURI(p) };
+var get = function(u){ return fetch(rq(u)).then(function(r){ return r.json() }) };
+/* ---------- 复制到剪贴板（富文本 + markdown 双格式） ---------- */
+// mermaid 渲染出的 svg → png dataURL：飞书能接住图片，接不住内嵌 svg
+function svgToPng(svg, scale){
+  return new Promise(function(res, rej){
+    var box = svg.getBoundingClientRect();
+    var w = Math.max(1, Math.round(box.width || 800)), h = Math.max(1, Math.round(box.height || 600));
+    var c2 = svg.cloneNode(true);
+    c2.setAttribute('width', w); c2.setAttribute('height', h);
+    if (!c2.getAttribute('viewBox')) c2.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
+    var str = new XMLSerializer().serializeToString(c2);
+    var img = new Image();
+    img.onload = function(){
+      var k = scale || 2, cv = document.createElement('canvas');
+      cv.width = w * k; cv.height = h * k;
+      var ctx = cv.getContext('2d');
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, cv.width, cv.height);
+      ctx.drawImage(img, 0, 0, cv.width, cv.height);
+      try { res(cv.toDataURL('image/png')) } catch(e){ rej(e) }
+    };
+    img.onerror = function(){ rej(new Error('svg 转换失败')) };
+    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(str)));
+  });
+}
+// 站内图片 → dataURL：飞书拿不到 127.0.0.1 的地址
+async function imgToData(url){
+  var r = await fetch(url);
+  var b = await r.blob();
+  if (b.size > 4e6) throw new Error('图片过大');
+  return await new Promise(function(res, rej){
+    var fr = new FileReader(); fr.onload = function(){ res(fr.result) }; fr.onerror = rej; fr.readAsDataURL(b);
+  });
+}
+// 组装可粘贴的 HTML：图转 png、代码块去着色、去掉界面元素
+async function buildRichHtml(){
+  var src = document.getElementById('doc');
+  var clone = src.cloneNode(true);
+  clone.querySelectorAll('.pic, .fbar').forEach(function(n){ n.remove() });
+  var svgs = src.querySelectorAll('.mermaid svg');
+  var slots = clone.querySelectorAll('.mermaid');
+  for (var i = 0; i < slots.length; i++){
+    var p = document.createElement('p');
+    try {
+      var data = await svgToPng(svgs[i], 2);
+      var im = document.createElement('img'); im.src = data;
+      im.style.maxWidth = '100%'; p.appendChild(im);
+    } catch(e){ p.textContent = '［此处为一张流程图，请用图上的「复制图片」按钮单独粘贴］' }
+    slots[i].replaceWith(p);
+  }
+  var imgs = Array.from(clone.querySelectorAll('img[src^="/file/"], img[src^="http://127.0.0.1"]'));
+  for (var j = 0; j < imgs.length; j++){
+    try { imgs[j].src = await imgToData(imgs[j].getAttribute('src')) } catch(e){ imgs[j].remove() }
+  }
+  // 代码块保留 <pre>，去掉 hljs 的着色 span（飞书粘贴后会变成一堆彩色散字）
+  clone.querySelectorAll('pre code').forEach(function(c){ c.textContent = c.textContent });
+  clone.querySelectorAll('[style]').forEach(function(n){ if (n.tagName !== 'IMG') n.removeAttribute('style') });
+  return clone.innerHTML;
+}
+async function copyDoc(){
+  if (!cur) return;
+  var html = await buildRichHtml();
+  var plain = curMd || document.getElementById('doc').innerText;
+  await navigator.clipboard.write([new ClipboardItem({
+    'text/html': new Blob([html], {type: 'text/html'}),
+    'text/plain': new Blob([plain], {type: 'text/plain'}),
+  })]);
+}
+async function copyDiagram(svg){
+  var data = await svgToPng(svg, 2);
+  var blob = await (await fetch(data)).blob();
+  await navigator.clipboard.write([new ClipboardItem({'image/png': blob})]);
+}
+var bannerTimer = null;
+function banner(html, ms){
+  var b = document.getElementById('banner');
+  b.innerHTML = html; b.classList.remove('hide');
+  clearTimeout(bannerTimer);
+  bannerTimer = setTimeout(function(){ b.classList.add('hide') }, ms || 4000);
+}
+function pref(k, d){ try { var v = localStorage.getItem(k); return v === null ? d : v === '1' } catch(e){ return d } }
+function save(k, v){ try { localStorage.setItem(k, v ? '1' : '0') } catch(e){} }
+function jget(k, d){ try { return JSON.parse(localStorage.getItem(k)) || d } catch(e){ return d } }
+function jset(k, v){ try { localStorage.setItem(k, JSON.stringify(v)) } catch(e){} }
+function saveExp(){ jset('mdview.exp:' + ROOT, Array.from(expanded)) }
+
+/* ---------- 文件树（懒加载，默认折叠） ---------- */
+function el(tag, cls){ var e = document.createElement(tag); if (cls) e.className = cls; return e }
+
+async function fill(rel, box, depth){
+  var d = await get('/api/ls?p=' + encodeURIComponent(rel));
+  box.innerHTML = '';
+  if (!d.dirs.length && !d.files.length){ box.appendChild(el('div','hint')).textContent = '（空）'; return }
+  d.dirs.forEach(function(name){
+    var p = rel ? rel + '/' + name : name;
+    var row = el('div', 'row dir'); row.style.paddingLeft = (6 + depth * 13) + 'px';
+    var tw = el('span', 'tw'); tw.textContent = '▸'; row.appendChild(tw);
+    row.appendChild(document.createTextNode(name)); row.title = p;
+    var kids = el('div', 'kids hide');
+    nodes[p] = {row: row, kids: kids, depth: depth + 1};
+    row.onclick = function(){ toggle(p) };
+    box.appendChild(row); box.appendChild(kids);
+    if (expanded.has(p)) toggle(p, true);
+  });
+  d.files.forEach(function(name){
+    var p = rel ? rel + '/' + name : name;
+    var a = el('a', 'row file'); a.href = '#/' + encodeURI(p); a.dataset.p = p; a.title = p;
+    a.style.paddingLeft = (6 + depth * 13 + 12) + 'px';
+    var ic = el('span', 'ic' + (isHtml(name) ? ' h' : '')); ic.textContent = isHtml(name) ? '<>' : 'MD';
+    a.appendChild(ic); a.appendChild(document.createTextNode(name));
+    if (p === cur) a.classList.add('on');
+    box.appendChild(a);
+  });
+}
+
+async function toggle(p, forceOpen){
+  var n = nodes[p]; if (!n) return;
+  var opening = forceOpen || n.kids.classList.contains('hide');
+  if (opening){
+    if (!n.kids.dataset.loaded){ n.kids.dataset.loaded = '1'; await fill(p, n.kids, n.depth) }
+    n.kids.classList.remove('hide'); n.row.querySelector('.tw').textContent = '▾'; expanded.add(p);
+  } else {
+    n.kids.classList.add('hide'); n.row.querySelector('.tw').textContent = '▸'; expanded.delete(p);
+  }
+  saveExp();
+  dirStamp = null;   // 监视集合变了，下一轮重新取基线而不是误判为"有变化"
+}
+
+// 展开到某个文件所在目录
+async function reveal(p){
+  var parts = p.split('/'); parts.pop();
+  var acc = '';
+  for (var i = 0; i < parts.length; i++){
+    acc = acc ? acc + '/' + parts[i] : parts[i];
+    if (!nodes[acc]) return;
+    if (nodes[acc].kids.classList.contains('hide')) await toggle(acc, true);
+  }
+}
+
+async function drawTree(){
+  nodes = {};
+  var box = document.getElementById('tree');
+  box.innerHTML = '<div class="hint">加载中…</div>';
+  await fill('', box, 0);
+}
+
+// 重建文件树：丢掉全量缓存和已加载标记，按当前状态（搜索/树）重画
+function watchQs(){
+  return [''].concat(Array.from(expanded)).map(function(d){ return 'p=' + encodeURIComponent(d) }).join('&');
+}
+async function stampNow(){
+  try { return (await get('/api/dirstat?' + watchQs())).stamp } catch(e){ return null }
+}
+async function refreshTree(){
+  allFiles = null;
+  var q = document.getElementById('q').value.trim().toLowerCase();
+  if (q) await search(q); else await drawTree();
+  dirStamp = await stampNow();
+}
+async function search(qv){
+  var box = document.getElementById('tree');
+  if (!allFiles) allFiles = await get('/api/tree');
+  box.innerHTML = '';
+  var hit = allFiles.filter(function(f){ return f.toLowerCase().indexOf(qv) >= 0 }).slice(0, 400);
+  if (!hit.length){ box.appendChild(el('div','hint')).textContent = '无匹配'; return }
+  hit.forEach(function(f){
+    var a = el('a', 'row file'); a.href = '#/' + encodeURI(f); a.dataset.p = f; a.title = f;
+    var ic = el('span', 'ic' + (isHtml(f) ? ' h' : '')); ic.textContent = isHtml(f) ? '<>' : 'MD';
+    a.appendChild(ic); a.appendChild(document.createTextNode(f));
+    if (f === cur) a.classList.add('on');
+    box.appendChild(a);
+  });
+}
+
+/* ---------- 目录切换 ---------- */
+function pushRecent(p){
+  var r = jget('mdview.recent', []).filter(function(x){ return x !== p });
+  r.unshift(p); jset('mdview.recent', r.slice(0, 8));
+}
+function drawRecent(){
+  var box = document.getElementById('recent'); box.innerHTML = '';
+  var list = jget('mdview.recent', []).slice(0, 6);
+  if (HOME && list.indexOf(HOME) < 0) list.push(HOME);
+  list.forEach(function(p){
+    var a = el('a'); a.textContent = p.replace(HOME, '~'); a.title = p;
+    a.onclick = function(){ openPick(p) };
+    box.appendChild(a);
+  });
+}
+async function openPick(p){
+  document.getElementById('pick').classList.remove('hide');
+  drawRecent();
+  var d;
+  try { d = await get('/api/dirs?p=' + encodeURIComponent(p || ROOT)) }
+  catch(e){ return }
+  pickCur = d.path;
+  document.getElementById('pickPath').textContent = d.path;
+  var list = document.getElementById('pickList'); list.innerHTML = '';
+  if (d.parent !== d.path){
+    var up = el('a'); up.textContent = '📁 ..'; up.onclick = function(){ openPick(d.parent) }; list.appendChild(up);
+  }
+  d.dirs.forEach(function(name){
+    var a = el('a'); a.textContent = '📁 ' + name;
+    a.onclick = function(){ openPick(d.path.replace(/\/$/, '') + '/' + name) };
+    list.appendChild(a);
+  });
+  if (!d.dirs.length){ list.appendChild(el('div','hint')).textContent = '（无子目录）' }
+}
+async function chroot(p){
+  var r = await get('/api/chroot?p=' + encodeURIComponent(p));
+  ROOT = r.root; pushRecent(ROOT);
+  history.replaceState(null, '', '/?root=' + encodeURIComponent(ROOT));
+  document.getElementById('rootpath').textContent = ROOT.replace(HOME, '~');
+  expanded = new Set(jget('mdview.exp:' + ROOT, []));
+  allFiles = null; cur = ''; heads = []; dirStamp = null;
+  document.getElementById('q').value = '';
+  document.getElementById('doc').innerHTML = '<p class="hint">左侧选择文件</p>';
+  document.getElementById('toc').classList.add('hide'); document.body.classList.remove('hastoc');
+  document.title = 'mdview';
+  await drawTree();
+}
+
+/* ---------- 正文渲染 ---------- */
+function dirOf(p){ var i = p.lastIndexOf('/'); return i < 0 ? '' : p.slice(0, i + 1) }
+function join(base, rel){
+  var parts = (base + rel).split('/'), out = [];
+  for (var i = 0; i < parts.length; i++){
+    if (parts[i] === '.' || parts[i] === '') continue;
+    if (parts[i] === '..') out.pop(); else out.push(parts[i]);
+  }
+  return out.join('/');
+}
+function buildToc(doc){
+  var list = document.getElementById('tocList'), used = {};
+  list.innerHTML = ''; heads = [];
+  var hs = doc.querySelectorAll('h1,h2,h3,h4');
+  hs.forEach(function(h){
+    var slug = h.textContent.trim().toLowerCase().replace(/[^\w一-龥]+/g, '-').replace(/^-|-$/g, '') || 'h';
+    if (used[slug]) slug += '-' + (++used[slug]); else used[slug] = 1;
+    h.id = slug;
+    var a = el('a'); a.href = '#'; a.textContent = h.textContent; a.title = h.textContent;
+    a.className = 'l' + h.tagName[1];
+    a.onclick = function(e){ e.preventDefault(); h.scrollIntoView({behavior:'smooth', block:'start'}) };
+    list.appendChild(a); heads.push({el: h, a: a});
+  });
+  var show = hs.length > 1 && pref('mdview.toc', true);
+  document.getElementById('toc').classList.toggle('hide', !show);
+  document.body.classList.toggle('hastoc', show);
+}
+function spy(){
+  if (!heads.length) return;
+  var idx = 0;
+  for (var i = 0; i < heads.length; i++) if (heads[i].el.getBoundingClientRect().top < 120) idx = i;
+  heads.forEach(function(h, i){ h.a.classList.toggle('on', i === idx) });
+}
+
+async function render(p, keep){
+  var main = document.getElementById('main'), top = main.scrollTop, doc = document.getElementById('doc');
+  document.title = p.split('/').pop();
+  if (isHtml(p)){
+    var src = fileUrl(p);
+    doc.innerHTML = '<div class="fbar"><span>' + esc(p) + '</span>' +
+      '<a href="' + src + '" target="_blank">在新标签打开（完整权限）</a></div>' +
+      '<iframe class="htmlv" sandbox="allow-scripts allow-forms allow-popups allow-modals allow-downloads" src="' + src + '"></iframe>';
+    heads = [];
+    document.getElementById('toc').classList.add('hide'); document.body.classList.remove('hastoc');
+  } else {
+    var r = await fetch(rq('/api/raw?p=' + encodeURIComponent(p)));
+    if (!r.ok){ doc.innerHTML = '<p class="err">读取失败: ' + esc(p) + '</p>'; return }
+    curMd = await r.text();
+    doc.innerHTML = marked.parse(curMd);
+    var base = dirOf(p);
+    doc.querySelectorAll('img[src]').forEach(function(im){
+      var s = im.getAttribute('src');
+      if (!/^(https?:|data:|\/)/.test(s)) im.src = fileUrl(join(base, s));
+    });
+    doc.querySelectorAll('a[href]').forEach(function(a){
+      var h = a.getAttribute('href');
+      if (/^(https?:|mailto:|#)/.test(h)) { if (/^https?:/.test(h)) a.target = '_blank'; return }
+      if (/\.(md|markdown|html?)(#.*)?$/i.test(h)) a.href = '#/' + encodeURI(join(base, h.split('#')[0]));
+      else a.href = fileUrl(join(base, h));
+    });
+    doc.querySelectorAll('pre code').forEach(function(c){ try { hljs.highlightElement(c) } catch(e){} });
+    buildToc(doc);
+    try { await mermaid.run({querySelector: '.mermaid'}) } catch(e){}
+    doc.querySelectorAll('.mermaid').forEach(function(box){
+      var svg = box.querySelector('svg'); if (!svg) return;
+      var b = document.createElement('button'); b.className = 'pic'; b.textContent = '复制图片';
+      b.onclick = async function(){
+        try { await copyDiagram(svg); banner('图片已复制，去飞书 Ctrl+V') }
+        catch(e){ banner('复制失败：' + esc(e.message)) }
+      };
+      box.appendChild(b);
+    });
+    main.scrollTop = keep ? top : 0;
+    spy();
+  }
+  hideCm();
+  cur = p;
+  loadComments(true);
+  document.querySelectorAll('#tree a').forEach(function(a){ a.classList.toggle('on', a.dataset.p === p) });
+  if (!document.getElementById('q').value) await reveal(p);
+  document.querySelectorAll('#tree a').forEach(function(a){ a.classList.toggle('on', a.dataset.p === p) });
+  try { mtime = (await get('/api/stat?p=' + encodeURIComponent(p))).mtime } catch(e){}
+}
+
+/* ---------- 评论 ---------- */
+// 评论存在服务端（不写进文档）；高亮用 CSS Custom Highlight API，不改动 DOM，不影响复制和目录
+var comments = [], cmSig = '', cmPending = null, cmActive = '';
+function textIndex(root){
+  var w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {acceptNode: function(n){
+    return n.parentElement && n.parentElement.closest('.pic, .mermaid, style, script') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT }});
+  var nodes = [], s = '', n;
+  while ((n = w.nextNode())){ nodes.push({n: n, at: s.length}); s += n.data }
+  return {s: s, nodes: nodes};
+}
+function pointOffset(idx, container, offset){
+  if (container.nodeType === 3){
+    for (var i = 0; i < idx.nodes.length; i++) if (idx.nodes[i].n === container) return idx.nodes[i].at + offset;
+  }
+  var r = document.createRange(); r.setStart(container, offset); r.collapse(true);
+  for (var j = 0; j < idx.nodes.length; j++) if (r.comparePoint(idx.nodes[j].n, 0) >= 0) return idx.nodes[j].at;
+  return idx.s.length;
+}
+function offsetPoint(idx, off){
+  for (var i = idx.nodes.length - 1; i >= 0; i--) if (idx.nodes[i].at <= off) return {n: idx.nodes[i].n, o: Math.min(off - idx.nodes[i].at, idx.nodes[i].n.data.length)};
+  return null;
+}
+function common(a, b, fromEnd){
+  var k = 0, m = Math.min(a.length, b.length);
+  while (k < m && (fromEnd ? a[a.length-1-k] === b[b.length-1-k] : a[k] === b[k])) k++;
+  return k;
+}
+function rangeFor(idx, c){
+  if (!c.quote) return null;
+  var best = -1, score = -1, at = idx.s.indexOf(c.quote);
+  while (at >= 0){
+    var sc = common(idx.s.slice(Math.max(0, at - 60), at), c.prefix || '', true) + common(idx.s.slice(at + c.quote.length, at + c.quote.length + 60), c.suffix || '', false);
+    if (sc > score){ score = sc; best = at }
+    at = idx.s.indexOf(c.quote, at + 1);
+  }
+  if (best < 0) return null;
+  var a = offsetPoint(idx, best), b = offsetPoint(idx, best + c.quote.length);
+  if (!a || !b) return null;
+  var r = document.createRange(); r.setStart(a.n, a.o); r.setEnd(b.n, b.o);
+  return r;
+}
+function drawHighlights(){
+  if (!window.CSS || !CSS.highlights) return;
+  var doc = document.getElementById('doc'), idx = textIndex(doc), open = [], on = [];
+  comments.forEach(function(c){
+    c._range = rangeFor(idx, c);
+    if (c._range && c.status === 'open') (c.id === cmActive ? on : open).push(c._range);
+  });
+  CSS.highlights.set('mdview-cm', new Highlight(...open));
+  CSS.highlights.set('mdview-cm-on', new Highlight(...on));
+}
+function fmtTime(t){ var d = new Date(t); return isNaN(d) ? '' : (d.getMonth()+1) + '-' + d.getDate() + ' ' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0') }
+function drawPanel(){
+  var list = document.getElementById('cmList'), opened = comments.filter(function(c){ return c.status === 'open' });
+  document.getElementById('cmCap').textContent = '评论：未处理 ' + opened.length + ' / 共 ' + comments.length;
+  document.getElementById('tgCm').textContent = opened.length ? '评论 ' + opened.length : '评论';
+  list.innerHTML = '';
+  if (!comments.length){ list.appendChild(el('div','hint')).textContent = '选中正文中的文字，点「💬 评论」添加'; return }
+  opened.concat(comments.filter(function(c){ return c.status !== 'open' })).forEach(function(c){
+    var box = el('div', 'cm-item' + (c.status === 'open' ? '' : ' done'));
+    var q = el('div', 'cm-q'); q.textContent = c.quote || ('（' + (c.heading || '整篇') + '）'); box.appendChild(q);
+    var b = el('div', 'cm-b'); b.textContent = c.body; box.appendChild(b);
+    if (c.reply){ var r = el('div', 'cm-r'); r.textContent = '↳ ' + c.reply; box.appendChild(r) }
+    var m = el('div', 'cm-m'), info = el('span');
+    info.textContent = (c.status === 'open' ? '未处理' : '已处理') + ' · ' + fmtTime(c.created_at) + (c.line ? ' · 第 ' + c.line + ' 行' : '');
+    if (c.quote && !c._range){ info.textContent += ' · 原文已改动'; info.className = 'cm-lost' }
+    m.appendChild(info);
+    var ops = el('span');
+    var act = function(label, op){ var x = el('button'); x.textContent = label;
+      x.onclick = function(e){ e.stopPropagation(); if (op !== 'delete' || confirm('删除这条评论？')) cmPost(op, {id: c.id}) }; ops.appendChild(x) };
+    if (c.status === 'open'){ act('已处理', 'resolve'); act('删除', 'delete') } else act('重新打开', 'reopen');
+    m.appendChild(ops); box.appendChild(m);
+    box.onclick = function(){ cmActive = c.id; drawHighlights(); if (c._range) scrollToRange(c._range) };
+    list.appendChild(box);
+  });
+}
+function scrollToRange(r){
+  var main = document.getElementById('main'), rect = r.getBoundingClientRect(), mr = main.getBoundingClientRect();
+  main.scrollTo({top: main.scrollTop + rect.top - mr.top - 120, behavior: 'smooth'});
+}
+async function loadComments(force){
+  if (!cur || isHtml(cur)){ comments = []; cmSig = ''; document.getElementById('cmts').classList.add('hide'); return }
+  var d; try { d = await get('/api/comments?p=' + encodeURIComponent(cur)) } catch(e){ return }
+  var sig = JSON.stringify(d.comments);
+  if (!force && sig === cmSig) return;
+  cmSig = sig; comments = d.comments;
+  document.getElementById('cmts').classList.toggle('hide', !pref('mdview.cm', true));
+  drawHighlights(); drawPanel();
+}
+async function cmPost(op, body){
+  try {
+    var r = await fetch(rq('/api/comments?op=' + op + '&p=' + encodeURIComponent(cur)), {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(body)});
+    if (!r.ok) throw new Error(await r.text());
+    var d = await r.json(); cmSig = JSON.stringify(d.comments); comments = d.comments; drawHighlights(); drawPanel();
+    return true;
+  } catch(e){ banner('评论保存失败：' + esc(e.message), 6000); return false }
+}
+function hideCm(){ document.getElementById('cmBtn').classList.add('hide'); document.getElementById('cmBox').classList.add('hide') }
+function onSelect(){
+  var sel = getSelection(), doc = document.getElementById('doc'), btn = document.getElementById('cmBtn');
+  if (!cur || isHtml(cur) || !sel.rangeCount || sel.isCollapsed){ btn.classList.add('hide'); return }
+  var r = sel.getRangeAt(0);
+  if (!doc.contains(r.commonAncestorContainer)){ btn.classList.add('hide'); return }
+  var idx = textIndex(doc), a = pointOffset(idx, r.startContainer, r.startOffset), b = pointOffset(idx, r.endContainer, r.endOffset);
+  var quote = idx.s.slice(a, b);
+  if (!quote.trim()){ btn.classList.add('hide'); return }
+  var heading = '', p = document.createRange(); p.setStart(r.startContainer, r.startOffset); p.collapse(true);
+  doc.querySelectorAll('h1,h2,h3,h4').forEach(function(h){ if (p.comparePoint(h, 0) < 0) heading = h.textContent.trim() });
+  cmPending = {quote: quote.trim().slice(0, 1000), prefix: idx.s.slice(Math.max(0, a - 40), a), suffix: idx.s.slice(b, b + 40), heading: heading};
+  var main = document.getElementById('main'), mr = main.getBoundingClientRect(), rect = r.getBoundingClientRect();
+  btn.style.top = (rect.bottom - mr.top + main.scrollTop + 6) + 'px';
+  btn.style.left = Math.max(8, Math.min(rect.left - mr.left, mr.width - 120)) + 'px';
+  btn.classList.remove('hide');
+}
+function openCmBox(){
+  var btn = document.getElementById('cmBtn'), box = document.getElementById('cmBox');
+  box.querySelector('.q').textContent = cmPending.quote;
+  box.style.top = btn.style.top; box.style.left = btn.style.left;
+  btn.classList.add('hide'); box.classList.remove('hide');
+  var ta = box.querySelector('textarea'); ta.value = ''; ta.focus();
+}
+async function saveCm(){
+  var ta = document.querySelector('#cmBox textarea');
+  if (!cmPending || !ta.value.trim()) return;
+  if (await cmPost('add', Object.assign({body: ta.value}, cmPending))){
+    hideCm(); getSelection().removeAllRanges(); cmPending = null;
+    document.getElementById('cmts').classList.remove('hide'); save('mdview.cm', true);
+  }
+}
+
+function route(){
+  var p = decodeURI(location.hash.replace(/^#\/?/, ''));
+  if (p) render(p, false);
+  else { cur = ''; drawTree(); document.getElementById('doc').innerHTML = '<p class="hint">左侧选择文件</p>' }
+}
+
+/* ---------- 启动 ---------- */
+(async function(){
+  var cfg = await get('/api/config');
+  ROOT = new URLSearchParams(location.search).get('root') || cfg.root; HOME = cfg.home || '';
+  history.replaceState(null, '', '/?root=' + encodeURIComponent(ROOT) + location.hash);
+  document.getElementById('rootpath').textContent = ROOT.replace(HOME, '~');
+  expanded = new Set(jget('mdview.exp:' + ROOT, []));
+  pushRecent(ROOT);
+  document.getElementById('side').classList.toggle('hide', !pref('mdview.side', true));
+  document.body.classList.toggle('wide', pref('mdview.wide', false));
+  await drawTree();
+  dirStamp = await stampNow();   // 基线必须在这里取，否则加载后~5 秒内新增的文件会被当成"本来就有"
+  if (!location.hash && cfg.entry && ROOT === cfg.root) location.hash = '#/' + encodeURI(cfg.entry);
+  route();
+  addEventListener('hashchange', route);
+  addEventListener('focus', function(){ if (Date.now() - lastFocusRefresh > 3000){ lastFocusRefresh = Date.now(); refreshTree() } });
+  document.getElementById('main').addEventListener('scroll', spy, {passive:true});
+  document.getElementById('q').addEventListener('input', function(e){
+    var v = e.target.value.trim().toLowerCase();
+    if (v) search(v); else drawTree();
+  });
+  document.getElementById('tgSide').onclick = function(){
+    var h = document.getElementById('side').classList.toggle('hide'); save('mdview.side', !h);
+  };
+  document.getElementById('tgToc').onclick = function(){
+    var h = document.getElementById('toc').classList.toggle('hide');
+    document.body.classList.toggle('hastoc', !h); save('mdview.toc', !h);
+  };
+  document.getElementById('tgWide').onclick = function(){
+    var w = document.body.classList.toggle('wide'); save('mdview.wide', w);
+  };
+  document.getElementById('tgCopy').onclick = async function(){
+    if (!cur) return;
+    var b = this, old = b.textContent; b.disabled = true; b.textContent = '处理中…';
+    try {
+      if (isHtml(cur)){
+        var raw = await (await fetch(fileUrl(cur))).text();
+        var body = raw.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<style[\s\S]*?<\/style>/gi, '');
+        await navigator.clipboard.write([new ClipboardItem({
+          'text/html': new Blob([body], {type: 'text/html'}),
+          'text/plain': new Blob([body.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')], {type: 'text/plain'}),
+        })]);
+      } else await copyDoc();
+      banner('已复制（Ctrl+V 粘格式 / Ctrl+Shift+V 粘 Markdown 源码）', 8000);
+    } catch(e){ banner('复制失败：' + esc(e.message), 8000) }
+    b.disabled = false; b.textContent = old;
+  };
+  document.getElementById('tgWin').onclick = async function(){
+    if (!cur) return;
+    var b = this, old = b.textContent; b.disabled = true; b.textContent = '准备中…';
+    try {
+      var r = await get('/api/winexport?p=' + encodeURIComponent(cur));
+      if (r.win){
+        banner('<b>路径已复制</b>，在飞书「上传文件」对话框的文件名框里 Ctrl+V：'
+          + '<br><span class="path" data-v="' + esc(r.win) + '">' + esc(r.win) + '</span>'
+          + (r.unc ? '<br><span style="color:var(--muted);font-size:12px">不想产生副本可用原文件（点击复制）：</span>'
+                   + '<br><span class="path" data-v="' + esc(r.unc) + '">' + esc(r.unc) + '</span>' : ''), 30000);
+        document.querySelectorAll('#banner .path').forEach(function(el){
+          el.onclick = async function(){
+            try { await navigator.clipboard.writeText(el.dataset.v); el.style.background = 'var(--hl)';
+                  setTimeout(function(){ el.style.background = '' }, 800) } catch(e){}
+          };
+        });
+      } else banner('失败：' + esc(r.error || '未知错误'), 8000);
+    } catch(e){ banner('失败：' + esc(e.message), 8000) }
+    b.disabled = false; b.textContent = old;
+  };
+  document.getElementById('tgCm').onclick = function(){
+    if (!cur || isHtml(cur)) return;
+    var h = document.getElementById('cmts').classList.toggle('hide'); save('mdview.cm', !h);
+  };
+  document.getElementById('doc').addEventListener('mouseup', function(){ setTimeout(onSelect, 0) });
+  document.getElementById('cmBtn').addEventListener('mousedown', function(e){ e.preventDefault() });
+  document.getElementById('cmBtn').onclick = openCmBox;
+  document.getElementById('cmCancel').onclick = hideCm;
+  document.getElementById('cmSave').onclick = saveCm;
+  document.querySelector('#cmBox textarea').addEventListener('keydown', function(e){
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) saveCm();
+    if (e.key === 'Escape') hideCm();
+  });
+  document.getElementById('tgEdit').onclick = async function(){
+    if (!cur) return;
+    var b = this, old = b.textContent; b.disabled = true; b.textContent = '打开中…';
+    try {
+      var r = await get('/api/edit?p=' + encodeURIComponent(cur));
+      if (r.ok) banner('已在 VS Code 中打开，保存后本页自动刷新', 5000);
+      else banner('打开失败：' + esc(r.error || '未知错误'), 8000);
+    } catch(e){ banner('打开失败：' + esc(e.message), 8000) }
+    b.disabled = false; b.textContent = old;
+  };
+  document.getElementById('rl').onclick = async function(){
+    var b = this, old = b.textContent; b.disabled = true; b.textContent = '刷新中…';
+    await refreshTree();
+    if (cur) await render(cur, true);
+    b.disabled = false; b.textContent = old;
+  };
+  document.getElementById('rootpath').onclick = function(){ openPick(ROOT) };
+  document.getElementById('switch').onclick = function(){ openPick(ROOT) };
+  document.getElementById('up').onclick = function(){ chroot(ROOT.replace(/\/[^/]+\/?$/, '') || '/') };
+  document.getElementById('pickCancel').onclick = function(){ document.getElementById('pick').classList.add('hide') };
+  document.getElementById('pickOk').onclick = function(){
+    document.getElementById('pick').classList.add('hide'); chroot(pickCur);
+  };
+  document.getElementById('pick').onclick = function(e){
+    if (e.target.id === 'pick') document.getElementById('pick').classList.add('hide');
+  };
+  addEventListener('keydown', function(e){
+    if (e.key === 'Escape') document.getElementById('pick').classList.add('hide');
+  });
+  setInterval(async function(){
+    // a. 当前文档内容变了 → 重渲染
+    if (cur) try {
+      var st = await get('/api/stat?p=' + encodeURIComponent(cur));
+      if (st.mtime && st.mtime !== mtime){
+        mtime = st.mtime;
+        if (isHtml(cur)){ var f = document.querySelector('.htmlv'); if (f) f.src = f.src } else render(cur, true);
+      }
+    } catch(e){}
+    // b. 目录里增删改名了 → 重建树；评论（agent 用 CLI 改过）也一并刷新（约每 5 秒查一次）
+    if (++tick % 4 !== 0) return;
+    loadComments(false);
+    var now = await stampNow();
+    if (now === null) return;
+    if (dirStamp !== null && now !== dirStamp) await refreshTree();
+    dirStamp = now;
+  }, 1200);
+})();
+</script></body></html>

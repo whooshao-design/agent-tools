@@ -1,0 +1,8 @@
+[Unit]
+Description=mdview 本地 Markdown/HTML 查看器
+Requires=mdview.socket
+After=mdview.socket
+
+[Service]
+ExecStart=/usr/bin/node %h/projects/ai/agent-tools/tools/mdview/server.mjs %h/docs --no-open --idle 30
+Restart=no
