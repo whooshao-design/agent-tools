@@ -2,7 +2,7 @@
 name: manage-feishu-doc
 description: 经飞书官方 lark-cli 读取、发布、修改并校验 lexin 飞书云文档。Use when 用户提供 lexin.feishu.cn 的 docx、wiki 或 drive/folder 链接，要求读取飞书文档（含 mermaid 小组件与画板源码）、把本地 Markdown（技术方案、操作手册、资料文档）新建发布到飞书或把本地改动增量同步/整篇覆盖过去、在飞书文档里插入替换删除一段或一节、替换一处文字、按技术方案/操作手册/资料文档排版、在飞书文档里放 mermaid 图或图表、发布前检查 Markdown 写法、把 HTML 转成可发布的 Markdown、同步表格数据或删行、合并单元格、调列宽、改写段落或补页内跳转链接、更新托管 JSON 章节、检查飞书登录与权限、在缺权限时申请准确 scope，或列出需要删除的飞书文档交给用户手动删除。
 metadata:
-  version: 2.3.1
+  version: 2.5.0
 ---
 
 # Manage Feishu Doc
@@ -24,7 +24,7 @@ metadata:
 node $S auth-check --operation=<read|write-blocks|write-json|publish|edit|table-edit|create-doc> --target='<链接>'
 ```
 
-`lint` 只读本地文件，不需要登录。其余命令 `ready` 就继续。否则按输出的 `failureClass`、`missingScopes`、`nextAction` 一次性告诉用户，不要先用多个接口试错；需要登录时后台运行 `node $S authorize --operation=<操作>`，把输出里的 `verification_uri_complete` 原样发给用户确认。首次使用先 `/home/joney/projects/ai/agent-tools/mcp/third-party-mcp/lark/bin/lark-cli setup`。细节见 `references/permission-matrix.md`。
+`lint` 只读本地文件，不需要登录。其余命令 `ready` 就继续。否则按输出的 `failureClass`、`missingScopes`、`nextAction` 一次性告诉用户，不要先用多个接口试错；需要登录时后台运行 `node $S authorize --operation=<操作>`：它会在用户的桌面浏览器（WSL 下为 Windows 默认浏览器）自动打开飞书授权页，用户点「授权」后进程自行结束，不需要用户回来告知；只有输出里出现「无法自动打开浏览器」时才把链接发给用户。需要本 skill 操作之外的 scope 时加 `--scopes=<a,b>`。首次使用先 `/home/joney/projects/ai/agent-tools/mcp/third-party-mcp/lark/bin/lark-cli setup`。细节见 `references/permission-matrix.md`。
 
 ## 按任务选命令
 
@@ -40,6 +40,7 @@ node $S auth-check --operation=<read|write-blocks|write-json|publish|edit|table-
 | 直接在飞书文档里插入、替换、删除一段或一节，或替换一处文字 | `edit` | `references/update.md` |
 | 保留样式改段落文字、补标题跳转链接、写托管 JSON 章节 | `update-text`、`link-plan`、`write-json` | `references/update.md` |
 | 把数据源同步进已有表格，删行、合并或拆分单元格、调列宽 | `table-read`、`table-sync`、`table-edit` | `references/tables.md` |
+| 列出云空间目录下的文件（按标题找文档） | `list-folder --target=<目录链接> [--name=<正则>]` | `references/permission-matrix.md` |
 | 清理测试文档或废弃的发布 | `cleanup-list` | 本文「删除文档」 |
 | 本脚本没包装的接口 | `call --method=<M> --path=/open-apis/...` | `references/api-facts.md` |
 

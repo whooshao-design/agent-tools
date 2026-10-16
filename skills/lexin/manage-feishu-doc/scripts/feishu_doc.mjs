@@ -3,6 +3,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { release } from "node:os";
 import { fileURLToPath } from "node:url";
 
 import { blockText, elementsText, listAllBlocks, listChildren, TEXT_CONTAINER_KEYS } from "./lib/blocks.mjs";
@@ -33,6 +34,8 @@ export const OPERATION_SCOPES = Object.freeze({
   "write-blocks": ["docx:document", "docx:document:readonly", "offline_access"],
   // 建空文档只需要 docx:document，不需要任何 drive 权限
   "create-doc": ["docx:document", "offline_access"],
+  // 列目录只要 space:document:retrieve，不申请 drive:drive 这类云空间全量权限
+  "list-folder": ["space:document:retrieve", "offline_access"],
   // docs_ai 写正文 + 块接口放小组件 + 覆盖前查评论；画板权限用于小组件失败时的回退
   publish: [
     "board:whiteboard:node:create",
@@ -438,7 +441,7 @@ export function cellBlockTarget(cellBlockCounts, existingRowSize) {
   return [...tally.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0][0];
 }
 
-async function runStreaming(command, args) {
+async function runStreaming(command, args, onOutput = () => {}) {
   return await new Promise((resolve, reject) => {
     const child = spawn(command, args, { env: process.env, stdio: ["inherit", "pipe", "pipe"] });
     let output = "";
@@ -446,6 +449,7 @@ async function runStreaming(command, args) {
       stream.on("data", (chunk) => {
         destination.write(chunk);
         if (output.length < 200_000) output += chunk.toString("utf8");
+        onOutput(output);
       });
     };
     forward(child.stdout, process.stdout);
@@ -470,31 +474,111 @@ export async function checkAuthorization(operation, target, { status = readAuthS
   return { session, result };
 }
 
-// 设备码登录：lark-cli 打印 verification_uri_complete 后阻塞到用户确认（最长约 10 分钟）。
-// 在 agent 里要放到后台跑，把链接转给用户，确认后进程自然结束。
+// 输出里同时有 verification_uri（要手输验证码）和 verification_uri_complete（带 user_code），取后者；
+// lark-cli 的 JSON 输出会把 & 转义成 \u0026，取出后还原成浏览器可用的链接
+export function extractVerificationUrl(output) {
+  const urls = [...output.matchAll(/https:\/\/[^\s"']+\/oauth\/v1\/device\/verify[^\s"']*/g)].map((match) => match[0].replace(/\\u0026/g, "&"));
+  return urls.find((url) => url.includes("user_code=")) ?? null;
+}
+
+// 取 lark-cli 输出里的 authorization_complete 事件：用户已确认，但 missing 中的 scope 没有授予
+export function loginOutcome(output) {
+  for (const line of output.split("\n").reverse()) {
+    if (!line.includes('"authorization_complete"')) continue;
+    try {
+      const event = JSON.parse(line.trim());
+      if (!event.missing?.length) return null;
+      return { missing: event.missing, hint: event.warning?.hint ?? null };
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+// 在用户自己的桌面浏览器里打开授权页；普通 Linux 不开：组织设备策略会拦截 Linux 浏览器访问飞书。
+// Windows/WSL 用 Start-Process 打开默认浏览器并切到前台；URL 含 &，经 -EncodedCommand 传入避免被 shell 解析
+export function browserCommand(url, platform = process.platform, osRelease = release()) {
+  if (platform === "darwin") return ["open", url];
+  if (platform === "win32" || (platform === "linux" && /microsoft/i.test(osRelease))) {
+    const script = `Start-Process '${url.replace(/'/g, "''")}'`;
+    return [platform === "win32" ? "powershell" : "powershell.exe", "-NoProfile", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")];
+  }
+  return null;
+}
+
+function openInBrowser(url) {
+  const command = browserCommand(url);
+  if (!command) return false;
+  const child = spawn(command[0], command.slice(1), { stdio: "ignore", detached: true });
+  child.on("error", () => process.stderr.write(`无法自动打开浏览器，请手动打开：${url}\n`));
+  child.unref();
+  return true;
+}
+
+// 设备码登录：自动在桌面浏览器打开授权页，lark-cli 阻塞到用户点「授权」（最长约 10 分钟）后自然结束。
+// 在 agent 里放到后台跑；--no-browser 只打印链接，--scopes=a,b 追加本 skill 操作之外的 scope。
 async function authorize(operation, target, options) {
+  const extraScopes = String(options.scopes || "").split(/[\s,]+/).filter(Boolean);
   const { session, result: current } = await checkAuthorization(operation, target);
-  if (current.ready && !options["device-code"]) return current;
+  const missingExtra = extraScopes.filter((scope) => !session.scopes.includes(scope));
+  if (current.ready && missingExtra.length === 0 && !options["device-code"]) return current;
   const args = ["auth", "login", "--json"];
   if (options["device-code"]) {
     args.push("--device-code", options["device-code"]);
   } else {
-    const desired = new Set(["offline_access", ...session.scopes, ...requiredScopes(operation, target)]);
+    const desired = new Set(["offline_access", ...session.scopes, ...requiredScopes(operation, target), ...extraScopes]);
     args.push("--scope", [...desired].sort().join(" "));
     if (options["no-wait"]) args.push("--no-wait");
   }
-  const result = await runStreaming(LARK_CLI, args);
+  let opened = Boolean(options["device-code"] || options["no-browser"]);
+  const result = await runStreaming(LARK_CLI, args, (output) => {
+    if (opened) return;
+    const url = extractVerificationUrl(output);
+    if (!url) return;
+    opened = true;
+    if (openInBrowser(url)) process.stderr.write("已在浏览器打开飞书授权页，点「授权」后这里会自动完成\n");
+  });
+  // 用户已授权但部分 scope 待管理员审核或被禁止时，lark-cli 也以非 0 退出；这不是登录失败
+  const partial = loginOutcome(result.output);
+  if (result.code !== 0 && partial) {
+    return { ready: false, failureClass: "OAUTH_SCOPE_MISSING", missingScopes: partial.missing, nextAction: partial.hint || "授权已完成但这些 scope 未授予；确认应用已开通并发布这些用户身份权限" };
+  }
   if (result.code !== 0) {
     const error = new Error("lark-cli 登录未完成；按输出里的提示处理");
     error.details = { failureClass: "AUTH_REQUIRED", missingScopes: [], nextAction: "重新运行 authorize，并在 10 分钟内让用户打开链接确认" };
     throw error;
   }
-  if (options["no-wait"]) return { ready: false, failureClass: "AUTH_PENDING", nextAction: "把上面的 verification_uri_complete 发给用户，确认后运行 authorize --device-code=<device_code>" };
-  return (await checkAuthorization(operation, target)).result;
+  if (options["no-wait"]) return { ready: false, failureClass: "AUTH_PENDING", nextAction: "用户在浏览器授权后运行 authorize --device-code=<device_code>" };
+  const after = await checkAuthorization(operation, target);
+  const stillMissing = extraScopes.filter((scope) => !after.session.scopes.includes(scope));
+  if (stillMissing.length > 0) {
+    return { ...after.result, ready: false, failureClass: "OAUTH_SCOPE_MISSING", missingScopes: stillMissing, nextAction: "授权已完成但这些 scope 未授予；确认应用已开通并发布这些用户身份权限" };
+  }
+  return after.result;
 }
 
 function responseNode(value) {
   return value?.node ?? value?.data?.node ?? value;
+}
+
+// drive/v1/files 按页返回目录下的直接子项；时间戳是秒级字符串，统一转成 ISO
+export async function listFolder(transport, folderToken, { pageSize = 50, maxPages = 20 } = {}) {
+  const files = [];
+  let pageToken;
+  for (let page = 0; page < maxPages; page++) {
+    const params = { folder_token: folderToken, page_size: pageSize, order_by: "EditedTime", direction: "DESC" };
+    if (pageToken) params.page_token = pageToken;
+    const value = await transport.api("GET", "/open-apis/drive/v1/files", { params });
+    const data = value?.data ?? value;
+    for (const f of data?.files ?? []) {
+      const iso = (sec) => (sec ? new Date(Number(sec) * 1000).toISOString() : null);
+      files.push({ name: f.name, type: f.type, token: f.token, url: f.url, created_at: iso(f.created_time), modified_at: iso(f.modified_time) });
+    }
+    if (!data?.has_more || !data?.next_page_token) return { files, truncated: false };
+    pageToken = data.next_page_token;
+  }
+  return { files, truncated: true };
 }
 
 export async function resolveDocument(transport, target) {
@@ -1178,7 +1262,7 @@ function usage() {
   return {
     usage: [
       "auth-check --operation=read|write-blocks|write-json|publish|edit|create-doc [--target=<url>]",
-      "authorize --operation=<operation> [--target=<url>] [--no-wait | --device-code=<code>]",
+      "authorize --operation=<operation> [--target=<url>] [--scopes=<a,b>] [--no-browser] [--no-wait | --device-code=<code>]",
       "read --target=<url> [--format=markdown|xml|text] [--scope=full|outline|section|range|keyword] [--keyword=<k>] [--start-block-id=<id>] [--end-block-id=<id>] [--with-ids] [--out=<path>]",
       "lint --file=<md> [--out=<mermaid 渲染输出目录>] [--no-render]",
       "publish --file=<md> [--target=<folder-or-wiki-url>] [--doc=<docx-url>] [--overwrite] [--dry-run] [--force] [--accept-comment-loss]",
@@ -1199,6 +1283,7 @@ function usage() {
       "inspect-sections --target=<url> [--section=<id>]",
       "write-json --target=<url> --file=<path>|--stdin --section=<id> [--heading=<text>] [--mode=upsert|append]",
       "create-doc --target=<folder-url> --title=<title>",
+      "list-folder --target=<folder-url> [--name=<正则>]",
       "cleanup-list [--docs=<url,url>] [--file=<md>] [--folder=<folder-url>] [--prune] [--out=<path>]",
       "call --method=GET|POST|PATCH|PUT|DELETE --path=/open-apis/... [--params=<json>] [--file=<body.json>|--stdin] [--operation=read|write-blocks]  或  call --api=<已登记接口名> --file=<{path,params,data}>",
       "parse-target --target=<url-or-token>",
@@ -1428,6 +1513,14 @@ async function main() {
     return printJson({ status: "ok", total: items.length, pending: items.length - deleted.size, deleted: deleted.size, pruned, staleStateFiles, items, checklist });
   }
 
+  if (command === "list-folder") {
+    if (!target || target.kind !== "folder") fail("list-folder 需要 --target 指向 /drive/folder/<token>", "UNSUPPORTED_RESOURCE");
+    if (!(await ensureAuthorized("list-folder", target))) return;
+    const result = await listFolder(transport, target.token);
+    const pattern = options.name ? new RegExp(options.name) : null;
+    const files = pattern ? result.files.filter((f) => pattern.test(f.name)) : result.files;
+    return printJson({ status: "ok", folderToken: target.token, count: files.length, truncated: result.truncated, files });
+  }
   // 逃生口：本脚本没包装的接口直接透传给 lark-cli
   if (command === "call") {
     if (!options.api && (!options.method || !options.path)) fail("call 必须指定 --method 与 --path（/open-apis/...），或已登记的 --api");

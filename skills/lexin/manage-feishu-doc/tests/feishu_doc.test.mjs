@@ -3,6 +3,10 @@ import test from "node:test";
 
 import {
   assessAuthorization,
+  browserCommand,
+  extractVerificationUrl,
+  listFolder,
+  loginOutcome,
   buildHeadingLinkPlan,
   elementsSignature,
   encodeLinkUrl,
@@ -611,4 +615,41 @@ test("readDocument fills text-drawing widgets back in as mermaid fences and leav
   assert.match(result.content, /<readonly-block type="isv"><\/readonly-block>\n$/);
   const text = await readDocument({ call: async () => ({ content: "plain" }) }, "D1", { format: "text" });
   assert.equal(text.content, "plain");
+});
+
+test("extractVerificationUrl restores JSON-escaped ampersands", () => {
+  const output = '{"verification_url": "https://accounts.feishu.cn/oauth/v1/device/verify?flow_id=abc\\u0026user_code=P2JA-JX27"}';
+  assert.equal(extractVerificationUrl(output), "https://accounts.feishu.cn/oauth/v1/device/verify?flow_id=abc&user_code=P2JA-JX27");
+  assert.equal(extractVerificationUrl('{"device_code": "x"}'), null);
+  const both = '{"verification_uri":"https://accounts.feishu.cn/oauth/v1/device/verify?flow_id=f","verification_uri_complete":"https://accounts.feishu.cn/oauth/v1/device/verify?flow_id=f&user_code=AB-CD"}';
+  assert.equal(extractVerificationUrl(both), "https://accounts.feishu.cn/oauth/v1/device/verify?flow_id=f&user_code=AB-CD");
+});
+
+test("browserCommand opens the desktop browser on WSL and macOS but never a plain Linux browser", () => {
+  const url = "https://accounts.feishu.cn/oauth/v1/device/verify?flow_id=f&user_code=AB-CD";
+  const wsl = browserCommand(url, "linux", "6.6.114.1-microsoft-standard-WSL2");
+  assert.deepEqual(wsl.slice(0, 3), ["powershell.exe", "-NoProfile", "-EncodedCommand"]);
+  assert.equal(Buffer.from(wsl[3], "base64").toString("utf16le"), `Start-Process '${url}'`);
+  assert.deepEqual(browserCommand(url, "darwin", "24.0.0"), ["open", url]);
+  assert.equal(browserCommand(url, "linux", "6.8.0-45-generic"), null);
+});
+
+test("loginOutcome reports scopes still pending after the user confirmed", () => {
+  const event = { event: "authorization_complete", missing: ["space:document:retrieve"], warning: { hint: "[待审核] space:document:retrieve" } };
+  assert.deepEqual(loginOutcome(`noise\n${JSON.stringify(event)}\n`), { missing: ["space:document:retrieve"], hint: "[待审核] space:document:retrieve" });
+  assert.equal(loginOutcome(JSON.stringify({ event: "authorization_complete", missing: [] })), null);
+  assert.equal(loginOutcome("device authorization failed"), null);
+});
+
+test("listFolder pages through drive files and converts timestamps", async () => {
+  const calls = [];
+  const pages = [
+    { data: { files: [{ name: "周工作汇报 2026年10月16日", type: "docx", token: "a", url: "u1", created_time: "1792134671", modified_time: "1792134673" }], has_more: true, next_page_token: "p2" } },
+    { data: { files: [{ name: "旧", type: "docx", token: "b", url: "u2", created_time: "1791529871", modified_time: "1791529871" }], has_more: false } },
+  ];
+  const transport = { api: async (method, path, { params }) => { calls.push([method, path, params.page_token]); return pages.shift(); } };
+  const result = await listFolder(transport, "F");
+  assert.deepEqual(calls, [["GET", "/open-apis/drive/v1/files", undefined], ["GET", "/open-apis/drive/v1/files", "p2"]]);
+  assert.equal(result.truncated, false);
+  assert.deepEqual(result.files.map((f) => [f.token, f.created_at]), [["a", "2026-10-16T07:11:11.000Z"], ["b", "2026-10-09T07:11:11.000Z"]]);
 });

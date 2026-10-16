@@ -32,6 +32,32 @@ fi
 
 export LARK_CLI_NO_PROXY="${LARK_CLI_NO_PROXY:-1}"
 
+# WSL 里公司 DNS 把 accounts.feishu.cn 指向安全网关，网关证书由 Windows 根证书库下发的 LSA Root CA 签发，
+# WSL 不信任它，设备码登录会报 x509。只给 lark-cli 进程追加这张按 SHA1 固定的根证书，不改系统证书库。
+LSA_ROOT_SHA1="5c95a79c48a0c9b0e05599fcfb7aa8d0b6d5eefd"
+SYSTEM_CA_BUNDLE="/etc/ssl/certs/ca-certificates.crt"
+build_lark_ca_bundle() {
+    local bundle="$1" win_tmp win_file pem
+    command -v certutil.exe >/dev/null 2>&1 || return 1
+    win_tmp="$(cmd.exe /c 'echo %TEMP%' 2>/dev/null | tr -d '\r')" || return 1
+    win_file="$(wslpath "$win_tmp")/lark-lsa-root-$$.cer"
+    certutil.exe -f -store Root "$LSA_ROOT_SHA1" "$win_tmp\\lark-lsa-root-$$.cer" >/dev/null 2>&1 || { rm -f "$win_file"; return 1; }
+    pem="$(openssl x509 -inform DER -in "$win_file" 2>/dev/null)"
+    rm -f "$win_file"
+    [[ -n "$pem" ]] || return 1
+    mkdir -p "$(dirname "$bundle")"
+    { cat "$SYSTEM_CA_BUNDLE"; printf '%s\n' "$pem"; } > "$bundle.tmp.$$" && mv "$bundle.tmp.$$" "$bundle"
+}
+if [[ -z "${SSL_CERT_FILE:-}" && -f "$SYSTEM_CA_BUNDLE" ]] && grep -qi microsoft /proc/sys/kernel/osrelease 2>/dev/null; then
+    LARK_CA_BUNDLE="$CACHE_ROOT/lark-ca-bundle.pem"
+    if [[ ! -s "$LARK_CA_BUNDLE" || "$SYSTEM_CA_BUNDLE" -nt "$LARK_CA_BUNDLE" ]]; then
+        build_lark_ca_bundle "$LARK_CA_BUNDLE" || true
+    fi
+    if [[ -s "$LARK_CA_BUNDLE" ]]; then
+        export SSL_CERT_FILE="$LARK_CA_BUNDLE"
+    fi
+fi
+
 if [[ "${1:-}" == "setup" ]]; then
     load_agent_tools_env "$REPO_DIR" --required
     for key in LARK_APP_ID LARK_APP_SECRET; do

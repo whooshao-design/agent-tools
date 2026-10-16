@@ -14,13 +14,13 @@
 | `create-doc` | `docx:document`、`offline_access` |
 | 任一操作的目标是 wiki 链接 | 另加 `wiki:wiki:readonly` |
 
-`auth:user.id:read` 可留在授权集合里，不是文档读写的业务权限。本 skill 刻意不申请删除权限（`space:document:delete`、`drive:drive`）和列目录权限（`space:document:retrieve`）：要删文档时用 `cleanup-list` 列出清单，由用户在飞书里手动删除。不要申请 `drive:drive:readonly` 这类云空间全量权限：范围过大，且应用没开通时会让整个授权失败（20027）。
+`auth:user.id:read` 可留在授权集合里，不是文档读写的业务权限。本 skill 刻意不申请删除权限（`space:document:delete`、`drive:drive`）；列目录只用 `space:document:retrieve`（`list-folder` 操作，2026-10-16 起已授权）：要删文档时用 `cleanup-list` 列出清单，由用户在飞书里手动删除。不要申请 `drive:drive:readonly` 这类云空间全量权限：范围过大，且应用没开通时会让整个授权失败（20027）。
 
 ## 登录流程
 
 1. 首次使用绑定应用：`mcp/third-party-mcp/lark/bin/lark-cli setup`（从 `env/credentials.env` 读 `LARK_APP_ID`/`LARK_APP_SECRET`，密钥经标准输入传入）。
 2. `node <脚本> auth-check --operation=<操作> [--target=<链接>]`：一次性返回缺失的 scope；refresh token 不到 24 小时过期时给出 `warning`。
-3. 需要登录或补 scope：`node <脚本> authorize --operation=<操作>`。它会把当前 scope 与目标操作所需 scope 合并后发起设备码登录，先打印 `verification_uri_complete`，然后阻塞到用户确认（最长约 10 分钟）。在 agent 里要**放到后台运行**，把链接原样发给用户，让用户在自己的浏览器或手机飞书里确认；确认后进程结束，再跑一次 `auth-check`。也可以 `authorize --no-wait` 先拿链接和 `device_code`，用户确认后 `authorize --device-code=<code>` 收尾。不在聊天里索要密码、验证码、Cookie 或 token。
+3. 需要登录或补 scope：`node <脚本> authorize --operation=<操作>`。它会把当前 scope 与目标操作所需 scope 合并后发起设备码登录，在 WSL / macOS 上自动用桌面浏览器打开授权页（普通 Linux 不开，`--no-browser` 关闭），然后阻塞到用户确认（最长约 10 分钟）。在 agent 里要**放到后台运行**，告诉用户去浏览器点「授权」；确认后进程结束，再跑一次 `auth-check`。`--scopes=<a,b>` 追加额外 scope，授权后仍缺会返回 `OAUTH_SCOPE_MISSING`。WSL 下 `accounts.feishu.cn` 经公司安全网关，证书由 Windows 根证书库的 LSA Root CA 签发；`lark-cli` wrapper 会把这张按 SHA1 固定的根证书追加进 `~/.local/share/agent-tools/cli-cache/lark-ca-bundle.pem` 并只对 lark-cli 设置 `SSL_CERT_FILE`。也可以 `authorize --no-wait` 先拿链接和 `device_code`，用户确认后 `authorize --device-code=<code>` 收尾。不在聊天里索要密码、验证码、Cookie 或 token。
 4. access token 2 小时，lark-cli 调用前自动续期（过期后 `auth status` 显示 `needs_refresh`，仍然可用）；refresh token 7 天，超过 7 天没用要重新 `authorize`。
 
 ## 失败分类与处理
