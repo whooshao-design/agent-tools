@@ -1,0 +1,6 @@
+interface:
+  display_name: "okr-weekly-progress"
+  short_description: "汇总本周工作并按 KR 写入乐空间 OKR 草稿"
+  default_prompt: "使用 $okr-weekly-progress 生成本周 OKR 周报汇总"
+policy:
+  allow_implicit_invocation: true

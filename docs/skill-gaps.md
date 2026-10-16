@@ -27,6 +27,8 @@
 
 | 日期 | 缺口 | 处理 |
 |---|---|---|
+| 2026-10-16 | 没有乐空间 OKR 只读/草稿写入工具，O/KR 与草稿要临时写 Playwright 脚本读取 | 新建 `okr-weekly-progress`：`lib/leco.mjs` 在页面上下文读 `get_obj_list_adjust`/`get_obj_detail`，write 整组读改写草稿 |
+| 2026-10-16 | `manage-feishu-doc` 不能列目录或按标题搜索；设备码授权在 WSL 下因 `accounts.feishu.cn` 证书（LSA Root CA）x509 失败 | 新增 `list-folder`（`space:document:retrieve`）；lark-cli wrapper 追加按 SHA1 固定的 LSA Root CA；authorize 自动打开浏览器 |
 | 2026-09-24 | markitdown MCP 进程加载 onnxruntime 遥测，每个进程留下 `/tmp/mat-debug-<pid>.log` | launcher 默认设置 `ORT_DISABLE_TELEMETRY=1` |
 | 2026-09-24 | `healthy_query_metrics` 每次调用在 `/tmp` 根目录留一个 `healthy-metrics-*` 目录 | 结果集中到 `/tmp/agent-work/healthy-metrics/`，超过 24 小时的由下次调用清理 |
 | 2026-09-24 | `healthy_dashboard_config.js` 每次回读/写入在 `/tmp` 根目录留一个 `healthy-dashboard-<id>-*` 备份目录 | 集中到 `/tmp/agent-work/healthy-dashboard/`，超过 7 天的由下次调用清理（healthy-dashboard-config 1.1.3） |

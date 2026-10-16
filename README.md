@@ -120,6 +120,7 @@
 | `register-healthy-metrics` | 查询、注册和复查 Healthy/雷神指标 | `browser_session` |
 | `diagnose-healthy-alert` | 从雷神告警排查原因：事件、规则、指标回放、埋点代码到日志的证据链 | `browser_session` |
 | `inspect-app-call-topology` | 复用 Healthy 登录态，支持多应用合并查询 FSOF/Dubbo 上下游流量与同窗口服务归属；异常下钻默认关闭，按需开启；按应用生成主报告 | `browser_session` |
+| `okr-weekly-progress` | 汇总飞书周报、本机会话与提交，按乐空间 OKR 的 KR 归类生成本地周报（mdview 评审），确认后整组读改写只存草稿；每周五 13:40 systemd 定时生成 | `okr_weekly.mjs`、`install_timer.py` |
 
 ## skills/cicd — 构建与发布
 
