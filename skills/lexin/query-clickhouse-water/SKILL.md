@@ -1,8 +1,8 @@
 ---
 name: query-clickhouse-water
-description: 只读查询 ClickHouse 流水；DecisionWaterHawkCK 默认走 bastion_dba，其他 CK 实例默认走乐信云 HTTP，支持用户显式指定通道。Use when 用户要求查询预发布/灰度/线上/stable/测试 ClickHouse 流水、决策/规则/trace cost 流水，验证流水口径或优化查询 SQL；输出执行 SQL 和查询结果。
+description: 只读查询 ClickHouse 流水；DecisionWaterHawkCK 默认走 bastion_dba、通道不可用时自动降级乐信云 HTTP，其他 CK 实例默认走乐信云 HTTP，支持用户显式指定通道。Use when 用户要求查询预发布/灰度/线上/stable/测试 ClickHouse 流水、决策/规则/trace cost 流水，验证流水口径或优化查询 SQL；输出执行 SQL 和查询结果。
 metadata:
-  version: 1.3.0
+  version: 1.4.0
 ---
 
 # query-clickhouse-water
@@ -11,14 +11,14 @@ metadata:
 
 通过 ClickHouse 查询业务流水、核对查询口径、对已有 ClickHouse SQL 做轻量优化。它不固化某一次分析里的业务口径，不默认加入特定乐包、节点、环境、来源、去重键或同比窗口；这些条件必须来自用户问题、已有上下文或本次查询前的明确确认。
 
-先确认实例，再选通道和环境域名。`DecisionWaterHawkCK` 默认走 `bastion_dba`，其他 CK 实例默认走乐信云 HTTP；用户显式指定通道时覆盖默认值。通道失败时报告原因，不自动切换。登录态复用 `get-browser-session`，MCP 优先、脚本兜底；ClickHouse HTTP 查询使用本技能脚本。
+先确认实例，再选通道和环境域名。`DecisionWaterHawkCK` 默认走 `bastion_dba`，其他 CK 实例默认走乐信云 HTTP；用户显式指定通道时覆盖默认值。唯一的自动切换是 `DecisionWaterHawkCK` 默认 DBA 通道不可用时降级到 HTTP（见“DBA 失败降级”）；其他失败报告原因，不自动切换。登录态复用 `get-browser-session`，MCP 优先、脚本兜底；ClickHouse HTTP 查询使用本技能脚本。
 
 ## 通道与环境路由
 
 | 条件 | 通道 |
 |---|---|
 | 用户显式指定 HTTP 或 `bastion_dba` | 使用指定通道；仍需确认该通道实际连接的目标实例 |
-| 未指定通道，实例为 `DecisionWaterHawkCK` | `bastion_dba` |
+| 未指定通道，实例为 `DecisionWaterHawkCK` | `bastion_dba`；通道不可用时降级乐信云 HTTP |
 | 未指定通道，其他 CK 实例 | 乐信云 HTTP |
 
 - 预发布/灰度/线上：HTTP 页面统一为 `https://lxcloud.lexincloud.com/#/details_clickhouse/query_clickhouse`；不能用 stable 域名替代。`pre`、`gray`、`prod`/`online` 仅选择入口，不自动添加 `Fenv` 等过滤条件；同一入口不代表业务口径相同。
@@ -42,7 +42,16 @@ metadata:
 1. 调用 `mcp__bastion_dba__connection_status`；已连接时复用当前连接。
 2. 未连接时调用 `mcp__bastion_dba__connect_bastion()`，不要传 `profile`，也不要改用通用 `bastion(profile="online")`。`bastion_dba` 是独立 DBA 通道，本身没有预发布、灰度、线上 profile。
 3. PEM 认证可用时不传密码或 OTP。只有连接结果明确要求认证时才处理缺失认证；不要重复重试同一失败连接，也不要把凭据写入文件或最终回复。
-4. 连接成功后调用 `mcp__bastion_dba__clickhouse_query` 执行只读 SQL。MCP 不可用时，再按用户提供的堡垒机/ClickHouse 连接信息通过只读账号使用 `clickhouse-client`。
+4. 连接成功后调用 `mcp__bastion_dba__clickhouse_query` 执行只读 SQL。
+
+### DBA 失败降级
+
+仅当实例为 `DecisionWaterHawkCK`、通道是默认选中（用户没有显式指定 `bastion_dba`）且 DBA 通道本身不可用时，自动改走乐信云 HTTP：
+
+- 触发条件：MCP 不可用、`connect_bastion` 失败（如 aTrust/网关断开、SSH 握手失败）、查询时连接中断或超时。SQL 语法错误、关键字被拦截、权限不足、结果为空都不是通道不可用，不降级。
+- 执行：对同一环境用脚本加 `--transport http --instance DecisionWaterHawkCK`。HTTP 只接受 `SELECT`/`SHOW`，`DESCRIBE` 改成 `SHOW CREATE TABLE`；其余业务口径保持不变，不能等价改写的 SQL 报告限制。
+- 回复：写明 DBA 失败原因、已降级到 HTTP 以及实际执行的 HTTP SQL。HTTP 也失败时两条失败都要报告，不再换其他通道。
+- 不反向降级：HTTP 实例失败不改走 DBA；用户显式指定 `bastion_dba` 时失败只报告。
 
 ## 核心约束
 

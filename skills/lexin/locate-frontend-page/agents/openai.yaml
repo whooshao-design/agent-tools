@@ -1,0 +1,6 @@
+interface:
+  display_name: "locate-frontend-page"
+  short_description: "从 Dubbo 接口、网关 URL 或 MySQL 表反查线上前端页面地址"
+  default_prompt: "使用 $locate-frontend-page 查这个接口对应的前端页面地址"
+policy:
+  allow_implicit_invocation: true

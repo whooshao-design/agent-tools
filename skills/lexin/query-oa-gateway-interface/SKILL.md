@@ -2,7 +2,7 @@
 name: query-oa-gateway-interface
 description: 查询 OA 网关 URL 与后端接口映射，并回代码仓库追踪实现链路。Use when 用户给出前端请求地址、rc_oa_gateway 路径、mihawk/gateway OA 页面请求，要求查询对应的 FSOF/Dubbo interface、method、version、真实后端应用、实现类、VO 参数、DAO 或 SQL；适用于“页面请求对应后端接口”“前端地址映射后端”“query_page_list 网关规则查询”“当前仓库搜不到接口时定位应用”等只读排查。
 metadata:
-  version: 1.2.1
+  version: 1.2.2
 ---
 
 # query-oa-gateway-interface
@@ -18,6 +18,11 @@ MCP 优先、浏览器会话兜底。优先使用 `browser_session` MCP 访问 `
 传入 `method`、`headers`、UTF-8 表单体的 `bodyBase64`，运行
 `node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js --request --url=<下述查询端点>`。
 先读该 skill 的请求参数约定；浏览器管理 Cookie，不导出凭据，也不把该入口用于真实业务写接口。
+`headers` 必须带 `Origin: https://gateway.oa.fenqile.com` 和 `Referer: https://gateway.oa.fenqile.com/`；缺少时即使会话为 READY，
+网关也返回 `retcode=16051006`“您还没登录或者登录已过期”（2026-10-16 实测），这不是登录态失效，不要反复刷新登录。
+按后端接口反查前端 URL 时，`url` 留空、`interface_name` 传全限定接口名。
+
+反方向（后端接口、网关 URL 或 MySQL 表 → 线上前端页面地址）用 `locate-frontend-page`。
 
 ## 核心约束
 

@@ -4,7 +4,7 @@
 
 - 预发布/灰度/线上：`https://lxcloud.lexincloud.com/#/details_clickhouse/query_clickhouse`。
 - stable/测试：`https://stable-lxcloud.oa.fenqile.com/#/details_clickhouse/query_clickhouse`，流水实例使用 `ABTestCK`。
-- `DecisionWaterHawkCK` 默认使用 `bastion_dba`，其他 CK 实例默认使用 HTTP。用户显式指定通道时覆盖默认值；失败不自动换通道。
+- `DecisionWaterHawkCK` 默认使用 `bastion_dba`，其他 CK 实例默认使用 HTTP。用户显式指定通道时覆盖默认值。只有 `DecisionWaterHawkCK` 默认 DBA 通道不可用时自动降级到 HTTP（条件见 SKILL.md“DBA 失败降级”），其他失败不自动换通道。
 - 页面 Hash URL 是前端入口，SQL 请求发往同域 `/v1/clickhouse/` 接口。`--env pre|gray|prod` 使用同一域名，不会自动添加环境过滤条件。
 
 ## 推荐脚本
@@ -28,7 +28,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/query-clickhouse-water/scr
   --env stable --query 'SELECT count() AS matched_rows FROM risk_control_base_db.t_strategy_node_decision_water WHERE 1 = 0 LIMIT 1'
 ```
 
-复杂 SQL 用 `--sql-file <本地文件>`，与 `--query` 互斥；每次只执行一条 SQL。支持 `--profile` 和会话层已有的 profile 环境变量。脚本只实现 HTTP；`DecisionWaterHawkCK` 默认会在联网前提示改用 DBA MCP，只有用户显式指定 HTTP 时才额外传 `--transport http`。
+复杂 SQL 用 `--sql-file <本地文件>`，与 `--query` 互斥；每次只执行一条 SQL。支持 `--profile` 和会话层已有的 profile 环境变量。脚本只实现 HTTP；`DecisionWaterHawkCK` 默认会在联网前提示改用 DBA MCP，用户显式指定 HTTP 或 DBA 通道不可用触发降级时，额外传 `--transport http`。
 
 ## 接口契约
 
@@ -55,3 +55,5 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/query-clickhouse-water/scr
 - stable 实测无 `FROM database.table` 的 `SELECT 1` 会被平台校验拒绝；链路验证也应引用已确认的全限定表名，可用恒假条件避免扫描明细。
 - 页面可能缓存一个无权限的实例并弹出角色申请提示；这不等于 OA 登录过期，也不代表目标实例无权限。脚本显式传 `clickhouse_type`，不采用缓存选择，不申请或修改角色。
 - 明细 `SELECT` 应包含绝对时间范围、显式字段和合理 `LIMIT`；接口不支持的 SQL 只有在保持业务口径时才改写。脚本不会自行补 `Fenv`、`Forigin`、去重条件或时间范围。
+- 线上 `DecisionWaterHawkCK` 的 `LIMIT` 上限为 100，超过返回内层 403“limit 行数最大限制为100行”（2026-10-16 实测）；返回恰好 100 行时视为可能截断，需收窄时间窗口或分段查询。
+- 同一会话里 `exec_query` 偶发 `TypeError: Failed to fetch`（列库正常），间隔几秒重跑同一条只读 SQL 即可恢复（2026-10-16 实测）；这是网络层失败，不是零行。

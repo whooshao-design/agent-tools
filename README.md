@@ -87,6 +87,7 @@
 | `query-hawk-field-reference` | 查询米霍克字段被乐包、策略节点和规则引用的关系 | `browser_session` |
 | `parse-experian-ser` | 只读拉取并解析旧 Experian SER 规则包，输出可读的决策流程与规则脚本 | `bastion` |
 | `query-oa-gateway-interface` | 查询前端 URL 映射的后端接口和代码链路 | `browser_session` |
+| `locate-frontend-page` | 从 Dubbo 接口、网关 URL 或 MySQL 表反查线上前端页面地址 | `browser_session` |
 | `start-local-frontend` | 米霍克 OA 前端本地启动、whistle 网关切预发布/项目环境（IP 动态发现）与页面访问 | `browser_session` |
 
 ### 接口调用

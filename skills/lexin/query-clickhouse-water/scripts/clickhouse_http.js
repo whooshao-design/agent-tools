@@ -87,7 +87,7 @@ function queryOptions(args) {
   }
   if (env === 'stable' && instance !== 'ABTestCK') throw new Error('stable/测试流水使用 ABTestCK。');
   if (selectTransport(instance, args.transport) !== 'http') {
-    throw new Error('本脚本仅执行 HTTP；DecisionWaterHawkCK 默认使用 bastion_dba MCP。仅在用户显式指定 HTTP 时传 --transport http。');
+    throw new Error('本脚本仅执行 HTTP；DecisionWaterHawkCK 默认使用 bastion_dba MCP。用户显式指定 HTTP 或 DBA 通道不可用降级时传 --transport http。');
   }
   if (action === 'tables' && (typeof args.database !== 'string' || !args.database.trim())) {
     throw new Error('列出表需要 --database。');
