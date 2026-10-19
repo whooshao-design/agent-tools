@@ -2,7 +2,7 @@
 name: dev-review-solution
 description: Use when 已有可评审的技术方案，需要在编码前基于需求、代码和约束做独立技术评审，识别阻断问题与风险，并给出通过、有条件通过、修改后复审、退回重设计或材料不足的明确结论。
 metadata:
-  version: 3.2.2
+  version: 3.5.0
 ---
 
 # dev-review-solution
@@ -85,7 +85,8 @@ metadata:
 - 第 3 章是否按技术机制或状态变化组织；`CHG-*`、仓库、文件或配置 key 是否错误地控制正文叙事
 - 同级章节是否使用同一划分维度，`DEC-*` 是否唯一承载跨变更决策，横切维度是否写回对应机制而非形成重复事实源
 - `AC → 设计正文 → CHG → 验证信号 → 发布/回滚` 是否闭环；`traceability.md` 的 CHG 集合是否覆盖目标设计的实际行为变化，且不存在孤儿变更；追踪引用的章节号是否都存在于 `solution.md`
-- 读者测试是否按 `reader-test-protocol.md` §5 判定通过（全文读者七问、截断读者前五问、成立的探针问题已处置）；主图是否存在或豁免理由成立，`diagrams/results.md` 是否全部通过
+- 读者测试是否按 `reader-test-protocol.md` §5 判定通过（全文读者七问、截断读者前五问、核心机制探针、成立的探针问题已处置）；主图是否存在或豁免理由成立，`diagrams/results.md` 是否全部通过
+- 核心机制是否单列一节并足以照着实现（变更范围、前后对照示例、流程图加实现对照表、边界情况、不变量）；正文里满足图触发条件的内容是否有图或写明不画的理由。是否有 2.4 变更总览，图和第 3 章表格是否标出新增、修改与现有，且与 CHG 矩阵一致。这三项影响实施、评估和验证，缺失时按结构/可读性 finding 处理，不属于文风偏好
 - 30 秒、5 分钟、标题、双读者、唯一归属和范围隔离测试是否通过；篇幅阈值是否只被当作结构复核信号
 - 全称断言是否可复现：按 `solution-structure-contract.md` §5 附则，“唯一 / 全仓 0 命中 / 完整枚举 / 无其它 X”这类断言必须附可复跑检索命令、检索范围与命中计数。**未附命令的全称断言一律按 `Unknown` 处理，不得作为任何 finding 的关闭依据，也不得作为其它结论的支撑事实**
 
@@ -140,6 +141,8 @@ metadata:
 
 ### 8. 收敛后续动作与复审范围
 
+结论为 `修改后复审` 或 `材料不足` 时，编排器按委派契约 §3 归类后直接推进修订与复审，不把“是否修改”交给用户；需要用户决定的只有契约 §3 列出的事项。派发下一轮前，编排器确认修订版本已重做读者测试、信封里的版本号取自产物文件本身、上一轮的 `resolution.md` 和新旧 diff 已就绪。
+
 - 明确需要修改的方案章节和关闭条件
 - 标明哪些风险已接受、由什么前提约束
 - 判断下一轮是完整复审还是定点复审；定点复审只缩小领域重查范围，不省略方案身份校验、全局结构/追踪一致性检查和变更影响非回归检查
@@ -147,6 +150,27 @@ metadata:
 - 新 `S` 的差异、影响范围或未变部分无法可靠证明时，必须完整复审
 - 记录进入 `dev-derive-test-cases` 前必须满足的条件，并交出完整 `(R,S,B)`、评审轮次/结论以及已授权风险及其绑定
 - 编排器把报告正文和 `delegation-result-v1` 分别保存并计算指纹，生成不可变 `approval-record-v1`；handoff 只引用该记录的 ref 与 fingerprint
+
+## 编排脚本
+
+冻结、快照和审批记录用共享脚本生成，不手写。版本号从产物文件头读取，`--prior-round` 会带上上一轮的报告、findings、审批记录、`resolution.md`，并按上一版归档目录 `versions/<版本>/` 生成 diff：
+
+```bash
+RR=/home/joney/projects/ai/agent-tools/skills/dev-workflow/scripts/review_round.py
+REQ=/home/joney/docs/requirements-development/<requirement-name>
+python3 $RR --req-dir $REQ --round <N> freeze --artifact R=requirements:summary.md \
+  --artifact S=solution-design:solution.md,traceability.md \
+  --artifact reader_test=solution-design:reader-test/agent-v<M>.md,reader-test/answer-key-v<M>.md \
+  --repo <代码仓库> [--repo <前端仓库>]
+python3 $RR --req-dir $REQ --round <N> envelope --task-id <id> --scope "<本轮范围>" [--prior-round <N-1>] [--evidence <路径>]
+python3 $RR --req-dir $REQ --round <N> snapshot before
+# 派发 agent-tools-solution-reviewer，提示词只给信封路径；停止后：
+python3 $RR --req-dir $REQ --round <N> snapshot after
+python3 $RR --req-dir $REQ --round <N> persist --transcript <subagent 记录> --findings <编排器归类后的 findings.json> \
+  --reviewer-ref <spawn 返回的实例 ID> --model <模型> --trust-limit "<信任限制>"
+```
+
+`freeze` 报出机械检查失败时先修产物再派发；`persist` 在结构、指纹回显、写入证明或工具面任一不通过时退出码非 0，审批记录的结论为空。
 
 ## 评审原则
 

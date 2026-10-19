@@ -2,7 +2,7 @@
 name: dev-design-solution
 description: Use when 需求边界和验收标准已基本明确，需要写技术方案、出方案或做方案设计：基于代码上下文产出可评审、可实施、可验证的技术方案，比较存在实质取舍的实现路径并收敛设计决策。
 metadata:
-  version: 4.1.2
+  version: 4.4.0
 ---
 
 # dev-design-solution
@@ -89,11 +89,17 @@ metadata:
 
 写正文前先按 `readability-and-writing.md` 的七个读者问题和 `design-dimensions.md` 的横切矩阵建立覆盖地图。完整性由覆盖地图保证，不需要把检查项全部扩写为章节。
 
+同时确定核心机制：回答"本方案若做错，哪段逻辑会直接违背需求"。核心机制的正确性要在代码里查透再写，包括所有写入同一数据的入口、现有方法实际处理的形态和边界数据；查证中发现的风险优先改设计消除，而不是登记为风险。
+
 ### 5. 先写给人看的部分
 
-按 `solution-template.md` 的顺序写 `solution.md`：头部一行、相关文档、摘要、背景与目标、方案概览（一句话方案、主图、关键决策、成立理由）、详细设计、替代方案、影响、发布验证回滚、风险与未决。
+按 `solution-template.md` 的顺序写 `solution.md`：头部一行、相关文档、摘要、背景与目标、方案概览（一句话方案、主图、关键决策、成立理由、变更总览）、详细设计、替代方案、影响、发布验证回滚、风险与未决。
 
-摘要不超过 150 字，只压缩正文已有结论。主图按 `visualization-routing.md` 的触发条件和 profile 默认图型决定，不画要写豁免理由。第 3 章按选中 profile 使用 guide → reference 顺序：先用机制导读和代表性场景建立心智模型，再说明参与者、契约、状态、时序、不变量、失败、兼容和边界；标题使用技术机制或状态变化。正文只展开本次变化、违反直觉、高风险、存在争议、影响正确性或缺少细节会导致不同实现的内容。
+摘要不超过 150 字，只压缩正文已有结论。主图按 `visualization-routing.md` 的触发条件和 profile 默认图型决定，不画要写豁免理由。第 3 章按选中 profile 使用 guide → reference 顺序：先用机制导读和代表性场景建立心智模型，再说明参与者、契约、状态、时序、不变量、失败、兼容和边界；标题使用技术机制或状态变化。核心机制单列一节并写得最深，按 `readability-and-writing.md` 4.1 给出变更范围表、前后对照示例、流程图加实现对照表、边界情况表和不变量。其余正文只展开本次变化、违反直觉、高风险、存在争议、影响正确性或缺少细节会导致不同实现的内容。
+
+表达形式按 `writing-principles.md` 第 3 节选：流程和调用顺序画图，映射、决策、阶段、风险用表，数据或脚本的前后变化给示例，段落只写理由。代码名集中在 1.3 的术语对照表和核心机制的实现对照表里，正文用中文名；不写伪代码。
+
+区分新增、修改与现有，让评估者一眼看出本次动了什么：2.4 变更总览表列出全部新增、修改、删除的对象；第 2、3 章的图按 `visualization-routing.md` 第 4 节着色；第 3 章的步骤表和实现对照表加"变更"列。同一对象在总览、图、表和 CHG 矩阵中的标识一致，规则见 `readability-and-writing.md` 4.2。
 
 ### 6. 再写追踪文件
 
@@ -101,11 +107,11 @@ metadata:
 
 ### 7. 校验图与指标
 
-运行 `node /home/joney/projects/ai/agent-tools/skills/dev-workflow/dev-design-solution/scripts/check_mermaid.js solution-design/solution.md solution-design/diagrams`，全部通过后再交付；改不好的图换成等宽文本块。运行 `python3 /home/joney/projects/ai/agent-tools/skills/dev-workflow/dev-design-solution/scripts/doc_metrics.py solution-design/solution.md --traceability solution-design/traceability.md`，逐条处理它给出的提示，尤其是摘要长度、主图缺失、表格多于散文、修订痕迹和追踪引用失联。
+运行 `node /home/joney/projects/ai/agent-tools/skills/dev-workflow/dev-design-solution/scripts/check_mermaid.js solution-design/solution.md solution-design/diagrams`，全部通过后再交付；改不好的图换成等宽文本块。打开渲染出的 PNG 看一遍，并按 `visualization-routing.md` 第 1 节逐行核对：满足触发条件却没画的地方补图或写理由。运行 `python3 /home/joney/projects/ai/agent-tools/skills/dev-workflow/dev-design-solution/scripts/doc_metrics.py solution-design/solution.md --traceability solution-design/traceability.md`，逐条处理它给出的提示，尤其是摘要长度、主图缺失、长段落、正文代码名过密、缺术语对照表、缺变更总览或图中无变更标识、修订痕迹和追踪引用失联。
 
 ### 8. 输出前自检与读者测试
 
-按 `readability-and-writing.md` 第 7 节执行自检。然后按 `reader-test-protocol.md` 先写答案键 `reader-test/answer-key-v<N>.md`，交由编排器派发与设计方不同模型的 agent 读者只读 `solution.md` 作答，比对结果写入 `reader-test/agent-v<N>.md`。按协议 §5 判定不通过（全文读者七问、截断读者前五问、成立的探针问题）时先修方案再进入正式评审。
+按 `readability-and-writing.md` 第 7 节执行自检。然后按 `reader-test-protocol.md` 先写答案键 `reader-test/answer-key-v<N>.md`，交由编排器派发与设计方不同模型的 agent 读者只读 `solution.md` 作答，比对结果写入 `reader-test/agent-v<N>.md`。按协议 §5 判定不通过（全文读者七问、截断读者前五问、核心机制探针、成立的探针问题）时先修方案再进入正式评审。
 
 方案必须能交给 `dev-review-solution` 独立评审：reviewer 不读 `traceability.md` 也能理解机制、影响和上线验证，深读时能从两个文件定位精确契约、边界、证据及所有 CHG。
 
@@ -113,7 +119,9 @@ metadata:
 
 按 findings 修订时只改设计内容，并在 `solution-review/rounds/round-<N>/resolution.md` 逐条记录处置、修改的章节、是否新增全称断言及其证据编号。正文不写"关闭 F-xx""v9 订正"这类痕迹，也不写解释给 reviewer 听的句子；关闭 finding 时优先删除或收窄不成立的断言，确需新增全称断言时在证据清单附可复跑检索命令。
 
-递增版本，在 `traceability.md` 的版本表加一行。编排器生成上一版与当前版两个文件的 diff 及触达标题列表，随冻结输入下发下一轮。定点复审仍需提供新旧方案差异和影响范围，并执行全局结构、追踪与非回归检查。
+成立需修的 finding 由设计方直接修订，不先询问用户是否修改；只有接受风险、改变范围或验收标准、在产品行为不同的修复方案间选择时才交给用户。
+
+递增版本，在 `traceability.md` 的版本表加一行。每个送审版本都要按第 8 步重做读者测试，生成 `reader-test/agent-v<N>.md`；读者测试后又按探针改了正文时，在比对报告里列出这些改动。编排器生成上一版与当前版两个文件的 diff 及触达标题列表，随冻结输入下发下一轮。定点复审仍需提供新旧方案差异和影响范围，并执行全局结构、追踪与非回归检查。
 
 ## 输出模式
 

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Fetch TAPD Story"
+  short_description: "抓取 TAPD 需求字段、描述、评论和图片到本地 Markdown"
+  default_prompt: "使用 $fetch-tapd-story 下载这个 TAPD 需求。"
+policy:
+  allow_implicit_invocation: true

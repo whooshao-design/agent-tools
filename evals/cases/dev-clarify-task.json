@@ -13,6 +13,10 @@
       {
         "prompt": "需求描述很口语，帮我改写成可验收的标准并列出开放问题",
         "top_k": 3
+      },
+      {
+        "prompt": "帮我从这个 TAPD 需求对齐一下需求再出需求文档：https://www.tapd.cn/tapd_fe/20061171/story/detail/1120061171001426731",
+        "top_k": 3
       }
     ],
     "negative": [

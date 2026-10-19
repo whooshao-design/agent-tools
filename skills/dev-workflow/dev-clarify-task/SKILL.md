@@ -1,8 +1,8 @@
 ---
 name: dev-clarify-task
-description: Use when 需求模糊、边界未收敛、需要先别写代码并明确范围、非目标、验收标准或关键依赖，把口语化描述改写成可验收标准并列出开放问题，再决定进入方案设计还是编码。
+description: Use when 需求模糊、边界未收敛、需要先别写代码并明确范围、非目标、验收标准或关键依赖，把口语化描述或 TAPD 需求单改写成可验收标准并列出开放问题，再决定进入方案设计还是编码；用户直接描述需求或给出 TAPD 需求链接、要求对齐需求并输出需求文档时，都从这里开始。
 metadata:
-  version: 1.7.1
+  version: 1.8.0
 ---
 
 # dev-clarify-task
@@ -17,9 +17,10 @@ metadata:
 
 如需把需求澄清结果落盘，默认放到 `/home/joney/docs/requirements-development/<requirement-name>/requirements/`，建议文件名使用 `summary.md`。
 
-- `<requirement-name>` 使用简短、稳定、可读的需求名目录标识
+- `<requirement-name>` 使用第 5 步确定的需求名称（小驼峰）；名称确定前的临时目录在确定后整体改名
 - 用户明确指定路径时，优先使用用户路径
 - 只需在对话中给出结果时，可不创建文件
+- 外部原始需求（如 TAPD 原文与图片）放同目录的 `source/` 子目录，原样保存，不在上面改写
 - 正式产物和结构化对话结果都按 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/artifact-identity.md` 生成稳定需求身份 `R`
 - agent 实质编写或改写需求内容时，把实际运行时身份记入 `R.producer_agent_refs[]`；纯用户/外部原始需求可为空列表
 
@@ -36,6 +37,15 @@ metadata:
 - 用户已经要求直接做技术方案评估或多方案对比，此时转 `dev-design-solution`
 
 ## Workflow
+
+### 0. 获取原始需求
+原始需求有两种来源，先确定是哪一种：
+- **用户直接描述**：对话内容就是原始需求，直接进入第 1 步。
+- **TAPD 需求链接**（`www.tapd.cn` 的 `/story/detail/` 或 `/prong/stories/view/`）：先按 `fetch-tapd-story` 抓取，`--out-dir` 传 `<产物目录>/source/`；需求名称未定时目录先用 `tapd-<7位ID>`。读完 `TAPD-<ID>.md` 并逐张查看 `images/`，评论里的范围调整（如"其他功能先行"）同样算需求输入。抓取返回 `LOGIN_REQUIRED` 时告诉用户将弹出登录窗口，再用 `--headed` 重跑。
+
+两种来源可以叠加：用户在 TAPD 原文之外补充或否定的内容，以用户为准，并在摘要里注明与原文不一致之处。
+
+需求涉及现有系统时，复述和提问前先读相关代码，确认现状行为；能从代码查证的事实不拿来问用户，问题只留给需要业务决策的点。
 
 ### 1. 复述任务
 - 先用一句话复述当前理解
@@ -64,7 +74,14 @@ metadata:
 - 待业务确认项
 - 影响实现选择的关键假设
 
-### 5. 输出可执行摘要
+### 5. 确定需求名称与代码分支
+范围收敛后，和验收标准一起确认两个标识，后续目录、分支和交接都用它们：
+- **需求名称**：英文小驼峰（`^[a-z][a-zA-Z0-9]*$`），用 2-5 个单词概括本次交付的能力，如 `decommissionApplications`、`grayPublishRemoveEqualityCheck`；同时作为产物目录名 `<requirement-name>`。
+- **代码分支**：`rel_<需求名称>_<tapdId>`，`tapdId` 为 TAPD 需求的 7 位短 ID，如 `rel_decommissionApplications_1427149`。需求来自用户描述且没有 TAPD 单时，向用户要 TAPD ID；用户确认没有时把分支记为待定，不编造 ID。
+
+给出建议名称让用户确认或改名。已知目标仓库时，用 `git branch -a --list '*rel_<需求名称>_*'` 检查同名分支，已存在就提示用户是复用还是换名。本步只确定名称，不创建分支；分支在进入开发时由 `dev-build-change` 按此名称创建或切换。
+
+### 6. 输出可执行摘要
 给出一份轻量结论，供后续设计或开发直接使用。
 
 ## 常见借口与反驳
@@ -90,10 +107,12 @@ metadata:
 
 ## 输出物
 
-表达遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/writing-principles.md`：头部一行、相关文档、摘要在前，段落优先，表格只承载映射，ID 跟在自然语言名称后。
+表达遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/writing-principles.md`：头部一行、相关文档、摘要在前，按内容选表达形式（流程用图、映射和清单用表、前后变化用示例、理由用段落），ID 跟在自然语言名称后。
 
 默认输出一份轻量需求澄清结果，建议包含：
 - 需求身份：`R` 的引用、版本/内容指纹、一句话摘要和 `producer_agent_refs[]`；对话模式可使用消息引用
+- 需求来源：用户描述，或 TAPD 链接、原文落盘路径与抓取时间
+- 需求名称与代码分支：写在文档头部一行；分支待定时注明原因
 - 任务目标：一句话说明这次要解决什么问题
 - In Scope：本次包含的能力边界
 - Out of Scope：本次不包含的内容

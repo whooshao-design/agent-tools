@@ -12,6 +12,8 @@
 | 分支逻辑 | 3 个以上分支或分支再分支 | `flowchart` | 条件表 |
 | 分阶段切换 | 3 个以上阶段且跨系统并存 | 阶段图 | 阶段表，多数情况表更清楚 |
 | 数据模型 | 实体关系变化 | `erDiagram` | 字段表 |
+| 数据、脚本、报文变换 | 字段或文本在处理前后不同 | 不画图，用前后对照示例（代码块或对照表） | — |
+| 算法或处理步骤 | 4 步以上或含分支，且是核心机制 | `flowchart`（中文节点），配"节点 → 代码位置"的实现对照表；不写伪代码 | 编号列表 |
 | 线性 3 到 4 步 | 不画：重述编号列表的图只是装饰 | — | 编号列表 |
 
 一张图只回答一个问题。回答两个问题的图拆成两张。
@@ -47,7 +49,13 @@
 ## 4. 格式
 
 - mermaid 只用稳定子集：`flowchart` / `graph`、`sequenceDiagram`（含 `autonumber`、`Note`、`alt`/`loop`、激活）、`stateDiagram` / `stateDiagram-v2`、`erDiagram`、`classDiagram`。不用 beta 图型、`%%{init}%%` 指令和主题配置。flowchart、带 autonumber/alt/loop 的 sequenceDiagram、stateDiagram-v2、erDiagram、classDiagram 在飞书文本绘图小组件里都实测能出图（2026-09-18、2026-09-23）；飞书侧的其他限制见 `manage-feishu-doc` 的 `references/diagrams.md`。
-- 节点文本避免全角冒号和箭头符号，mermaid 8.13 会报词法错误；用逗号或空格分隔。
+- 节点文本避免全角冒号和箭头符号，mermaid 8.13 会报词法错误；用逗号或空格分隔。节点文本用中文概念名，不放 `$`、引号、括号这类代码片段，精确写法放旁边的表。
+- 时序图里参与者对自己的调用（`A->>A`）标签会压在生命线上，改用 `Note over A: ...`。判断菱形的文字控制在 10 字内，过长时菱形会被撑得很大。
+- 第 2、3 章的图区分新增、修改和现有（规则见 `readability-and-writing.md` 4.2），配色固定，图后一句"绿色为新增，橙色为修改，灰色为现有"：
+  - `flowchart` 在末尾声明三个类并给节点归类：
+    `classDef new fill:#d9f2d9,stroke:#2e7d32,color:#1b3d1b`、`classDef mod fill:#ffe9c7,stroke:#e08a00,color:#4a2e00`、`classDef keep fill:#eeeeee,stroke:#9e9e9e,color:#424242`，再写 `class A,B new`。删除的节点用 `classDef del fill:#fde0e0,stroke:#c62828,color:#5c1010,stroke-dasharray:4 3`。
+  - `sequenceDiagram` 不支持节点着色：把新增或修改的连续步骤放进 `rect rgb(217, 242, 217)`（新增）或 `rect rgb(255, 233, 199)`（修改）块，块内消息文字以"【新增】""【修改】"开头；不加标记的消息即现有。
+  - 两种写法在 mermaid 8.13 和 11 都实测通过（2026-10-19）。颜色不是唯一载体：2.4 变更总览表是权威清单，时序图另有文字前缀。
 - 前后对照图用 `flowchart TB` 加两个 `subgraph`，两组会并排显示；渲染时后声明的组排在左边，所以先写"迁移后"再写"迁移前"，"迁移前"才会在左侧。
 - 一张图只有一条明显的主路径，分支从最近的主路径节点引出；主节点不超过 12 个、总节点不超过 15 个、消息不超过 12 条，超过就拆图或提升抽象层级。
 - 等宽文本块画的时序、调用树、时间线与 mermaid 同为正式形式，设计方可以直接选用；它在本地、GitLab 和飞书三端表现一致，飞书导入时保留为代码块。
@@ -73,6 +81,8 @@ node /home/joney/projects/ai/agent-tools/skills/dev-workflow/dev-design-solution
 ```
 
 脚本抽取全部 mermaid 块，默认用 mermaid 8.13.0 和 11 两个版本做 `parse`，再渲染 SVG 和 PNG 到 `diagrams/`，并写 `diagrams/results.md`。它复用 `get-browser-session` 已装好的 Chrome 与 Playwright，不需要新装软件，需要联网加载 mermaid。有图未通过就改到通过，改不好就换等宽文本块；结果表随方案一起提交。
+
+交付前按第 1 节逐行核对一次：正文里每个满足触发条件的内容（多参与者交互、核心算法、状态转换、分阶段切换等）都要有图，不画时在该处写一句理由。只画主图而正文里还有成段描述的调用顺序，是常见漏画。同时核对第 2、3 章的每张图都按第 4 节标了新增、修改和现有。
 
 发布到飞书由用户决定，用 `manage-feishu-doc` 的 `publish`：mermaid 代码块自动建成文本绘图小组件，等宽文本块逐字节保留且中文对齐，6 列以内的表格不需要横向滚动；它的 `lint` 会在发布前检查飞书侧的写法。不要再手工导入 `.md` 后逐张粘图。
 

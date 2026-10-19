@@ -70,6 +70,7 @@
 | Skill | 说明 | 配套 MCP |
 |---|---|---|
 | `manage-feishu-doc` | 读取、发布（本地 Markdown 新建、增量更新或全量覆盖）、局部修改 `lexin.feishu.cn` 飞书文档，发布前检查写法与 mermaid，预检权限并回读校验 | `lark-cli`（`mcp/third-party-mcp/lark/bin/lark-cli`） |
+| `fetch-tapd-story` | 只读抓取 TAPD 需求字段、描述、评论和图片到本地 Markdown，作为 `dev-clarify-task` 的原始需求来源；替代 risk-claude 的 `tapd-download` 命令 | `browser_session` |
 
 ### 发布与部署
 
