@@ -2,20 +2,21 @@
 """Spawn a separate agent process on a user-chosen backend (claude-<x> / codex-<x>) to run one task.
 
 usage:
-  spawn_model_agent.py --backend kimi --task "..." [--cwd DIR] [--readonly] [--slim] [--wait] [--client claude|codex]
+  spawn_model_agent.py --backend kimi --task "..." [--cwd DIR] [--readonly [--tools Read,Grep,Glob]] [--slim] [--wait] [--client claude|codex]
   spawn_model_agent.py --resume JOB_DIR --task "追问..."      # continue the same agent session
   spawn_model_agent.py --status JOB_DIR
   spawn_model_agent.py --list                                  # backends on PATH with eval scores
 
 Host detection: CLAUDECODE / CODEX_* env, then the parent process tree (claude / codex), else --client.
 Default permissions are fixed, not inherited from the host session (claude-*: --dangerously-skip-permissions with MCP; codex-*: workspace-write, approval never);
---readonly narrows to read-only tools; --slim skips the global CLAUDE.md/memory/skills for a faster start.
+--readonly narrows to read-only tools (--tools narrows further, e.g. Read,Grep,Glob for formal reviews); --slim skips the global CLAUDE.md/memory/skills for a faster start.
 """
 import argparse, glob, json, os, re, shlex, subprocess, sys, tempfile, time
 
 STATE = os.path.expanduser(os.environ.get('SPAWN_MODEL_AGENT_HOME', '~/.local/state/spawn-model-agent'))
 ROUTING = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'build-codeagent', 'model-routing.json')
 SLIM_DIR = os.path.expanduser('~/.config/spawn-model-agent/claude-slim')
+READONLY_TOOLS = ['Read', 'Grep', 'Glob', 'WebSearch', 'WebFetch']
 
 
 def wrappers_on_path():
@@ -88,24 +89,64 @@ def fit_hint(backend):
     return None
 
 
+def ledger_stats(path=None):
+    """Field record per backend from the reviewer ledger written by dev-workflow review_round.py persist."""
+    path = path or os.path.expanduser(os.environ.get('AGENT_TOOLS_REVIEWER_LEDGER', '~/.local/state/agent-tools/reviewer-ledger.jsonl'))
+    try:
+        rows = [json.loads(l) for l in open(path, encoding='utf-8') if l.strip()]
+    except OSError:
+        return {}
+    owner = {r['approval_id']: r['backend'] for r in rows if r.get('slot') == 'primary'}
+    stats = {}
+    for r in rows:
+        st = stats.setdefault(r['backend'], {'n': 0, 'invalid': 0, 'findings': 0, 'valid': 0, 'noise': 0, 'escaped': 0})
+        if not r.get('execution_valid'):
+            st['invalid'] += 1
+            continue
+        st['n'] += 1
+        for key, c in (r.get('finding_counts') or {}).items():
+            cls = key.split('/')[0]
+            st['findings'] += c
+            st['valid'] += c if cls in ('成立需修', '接受取舍') else 0
+            st['noise'] += c if cls == '噪音' else 0
+    for r in rows:
+        for aid in r.get('escaped_from') or []:
+            if aid in owner:
+                stats.setdefault(owner[aid], {'n': 0, 'invalid': 0, 'findings': 0, 'valid': 0, 'noise': 0, 'escaped': 0})['escaped'] += 1
+    return stats
+
+
+def format_stats(st):
+    if not st:
+        return '—'
+    text = f"n={st['n']} 成立 {st['valid']}/{st['findings']} 噪音 {st['noise']} 漏检 {st['escaped']}"
+    return text + (f" 无效 {st['invalid']}" if st['invalid'] else '')
+
+
 def list_backends():
     routing = routing_backends()
-    print('| 后端 | 模型 | 评审分（eval-v2） | 适用性 / 备注 |\n|---|---|---|---|')
+    stats = ledger_stats()
+    print('| 后端 | 模型 | 评审分（eval-v2） | 实战（评审记录） | 适用性 / 备注 |\n|---|---|---|---|---|')
     for b in wrappers_on_path():
         r = routing.get(b, {})
-        print(f"| {b} | {r.get('model') or r.get('model_source', '?')} | {r.get('review_score', '未测')} | {(r.get('fit') or r.get('warn') or r.get('note') or '')[:70]} |")
-    print('\n短名（qwen/deepseek/kimi/…）按宿主补成 claude-* 或 codex-*；分数与备注来自 build-codeagent/model-routing.json。')
+        print(f"| {b} | {r.get('model') or r.get('model_source', '?')} | {r.get('review_score', '未测')} | {format_stats(stats.get(b))} | "
+              f"{(r.get('fit') or r.get('warn') or r.get('note') or '')[:70]} |")
+    if stats.get('claude-subagent'):
+        print(f"\n同模型子 agent（agent-tools-*-reviewer）实战：{format_stats(stats['claude-subagent'])}")
+    print('\n短名（qwen/deepseek/kimi/…）按宿主补成 claude-* 或 codex-*；分数与备注来自 build-codeagent/model-routing.json；'
+          '实战列来自 ~/.local/state/agent-tools/reviewer-ledger.jsonl（漏检 = 后续轮次标记 escaped_from 的问题数）。')
 
 
-def build_command(backend, task, readonly, resume_id=None):
+def build_command(backend, task, readonly, resume_id=None, tools=None):
     """Return argv for the child process. Kept pure for tests."""
     if backend.startswith('claude-'):
-        cmd = [backend, '-p', task, '--output-format', 'json']
+        # stream-json keeps the init event (effective tools / MCP servers) and every tool_use for audit.
+        cmd = [backend, '-p', task, '--output-format', 'stream-json', '--verbose']
         if resume_id:
             cmd += ['--resume', resume_id]
         if readonly:
-            cmd += ['--strict-mcp-config', '--tools', 'Read,Grep,Glob,WebSearch,WebFetch',
-                    '--allowedTools', 'Read,Grep,Glob,WebSearch,WebFetch']
+            allowed = ','.join(tools or READONLY_TOOLS)
+            cmd += ['--strict-mcp-config', '--tools', allowed, '--allowedTools', allowed]
         else:
             cmd += ['--dangerously-skip-permissions']
         return cmd
@@ -120,17 +161,27 @@ def build_command(backend, task, readonly, resume_id=None):
 
 
 def parse_claude(raw):
-    try:
-        d = json.loads(raw.strip().splitlines()[-1])
-    except Exception:  # noqa: BLE001
+    events = []
+    for line in raw.splitlines():
+        try:
+            events.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    d = next((e for e in reversed(events) if e.get('type') == 'result'), events[-1] if events else None)
+    if not isinstance(d, dict):
         return {}, ''
+    init = next((e for e in events if e.get('type') == 'system' and e.get('subtype') == 'init'), {})
+    used = sorted({b.get('name') for e in events if e.get('type') == 'assistant'
+                   for b in (e.get('message') or {}).get('content') or [] if b.get('type') == 'tool_use'})
     mu = d.get('modelUsage') or {}
     model = next(iter(mu), None)
     u = mu.get(model, {}) if model else {}
     meta = {'model': model, 'session_id': d.get('session_id'), 'subtype': d.get('subtype'), 'turns': d.get('num_turns'),
             'duration_ms': d.get('duration_ms'),
             'input_tokens': (u.get('inputTokens') or 0) + (u.get('cacheReadInputTokens') or 0) + (u.get('cacheCreationInputTokens') or 0),
-            'output_tokens': u.get('outputTokens'), 'permission_denials': [x.get('tool_name') for x in d.get('permission_denials', [])]}
+            'output_tokens': u.get('outputTokens'), 'permission_denials': [x.get('tool_name') for x in d.get('permission_denials', [])],
+            'effective_tools': init.get('tools'), 'mcp_servers': [m.get('name') for m in init.get('mcp_servers') or []],
+            'tools_used': used}
     return meta, d.get('result', '') or ''
 
 
@@ -186,11 +237,12 @@ def apply_resume(a, prev):
     a.cwd = prev.get('cwd', a.cwd)
     a.slim = a.slim or bool(prev.get('slim'))  # the session lives in the same config dir
     a.readonly = a.readonly or bool(prev.get('readonly'))
+    a.tools = getattr(a, 'tools', None) or prev.get('tools')
     return prev['backend'], resume_id
 
 
-def run_child(job, backend, task, cwd, readonly, slim, timeout, resume_id):
-    cmd = build_command(backend, task, readonly, resume_id)
+def run_child(job, backend, task, cwd, readonly, slim, timeout, resume_id, tools=None):
+    cmd = build_command(backend, task, readonly, resume_id, tools)
     t0 = time.time()
     try:
         p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout,
@@ -201,11 +253,10 @@ def run_child(job, backend, task, cwd, readonly, slim, timeout, resume_id):
         p = subprocess.CompletedProcess(cmd, 'timeout', _text(e.stdout), _text(e.stderr) + f'\n[spawn-model-agent] timeout after {timeout}s\n')
     open(os.path.join(job, 'stderr.log'), 'w').write(p.stderr)
     wall = round(time.time() - t0, 1)
-    raw_name = 'raw.json' if backend.startswith('claude-') else 'raw.jsonl'
-    open(os.path.join(job, raw_name), 'w').write(p.stdout)
+    open(os.path.join(job, 'raw.jsonl'), 'w').write(p.stdout)
     meta, result = (parse_claude if backend.startswith('claude-') else parse_codex)(p.stdout)
     meta['model'] = meta.get('model') or routing_backends().get(backend, {}).get('model')
-    meta.update(backend=backend, cwd=cwd, readonly=readonly, slim=slim, resumed_from=resume_id,
+    meta.update(backend=backend, cwd=cwd, readonly=readonly, tools=tools, slim=slim, resumed_from=resume_id,
                 exit_code=p.returncode, wall_s=wall,
                 command=' '.join('"<task>"' if c == task else shlex.quote(c) for c in cmd),
                 finished=time.strftime('%Y-%m-%dT%H:%M:%S'))
@@ -220,6 +271,7 @@ def main():
     ap.add_argument('--task')
     ap.add_argument('--cwd', default=os.getcwd())
     ap.add_argument('--readonly', action='store_true')
+    ap.add_argument('--tools', type=lambda v: [t for t in v.split(',') if t], help='与 --readonly 合用：只读工具的子集，如 Read,Grep,Glob')
     ap.add_argument('--slim', action='store_true', help='claude-*：不加载全局 CLAUDE.md/记忆/skill，启动更快')
     ap.add_argument('--wait', action='store_true')
     ap.add_argument('--client', choices=['claude', 'codex'])
@@ -240,6 +292,8 @@ def main():
     if a.resume:
         prev = json.load(open(os.path.join(a.resume, 'meta.json')))
         backend, resume_id = apply_resume(a, prev)
+    if a.tools and (not a.readonly or set(a.tools) - set(READONLY_TOOLS)):
+        ap.error(f'--tools 只能与 --readonly 合用，且只能取 {",".join(READONLY_TOOLS)} 的子集')
     client = a.client or detect_client()
     backend = backend or resolve_backend(a.backend, client)
     cwd = os.path.abspath(a.cwd)
@@ -247,18 +301,19 @@ def main():
     if hint and not a._child:
         print(f'提醒：{hint}', file=sys.stderr)
     if a._child:
-        return run_child(os.environ['SPAWN_JOB_DIR'], backend, task, cwd, a.readonly, a.slim, a.timeout, resume_id)
+        return run_child(os.environ['SPAWN_JOB_DIR'], backend, task, cwd, a.readonly, a.slim, a.timeout, resume_id, a.tools)
     os.makedirs(STATE, exist_ok=True)
     # mkdtemp is atomic and unique: two jobs started in the same second must never share a directory.
     job = tempfile.mkdtemp(prefix=time.strftime('%Y%m%d-%H%M%S') + '-' + backend + '-', dir=STATE)
     open(os.path.join(job, 'task.md'), 'w', encoding='utf-8').write(task)
     if a.wait:
-        code = run_child(job, backend, task, cwd, a.readonly, a.slim, a.timeout, resume_id)
+        code = run_child(job, backend, task, cwd, a.readonly, a.slim, a.timeout, resume_id, a.tools)
         print(open(os.path.join(job, 'result.md'), encoding='utf-8').read())
         print(f'\n[作业目录 {job}，退出码 {code}]')
         return code
     child = [sys.executable, os.path.abspath(__file__), '--_child', '--backend', backend, '--task', '@' + os.path.join(job, 'task.md'),
-             '--cwd', cwd, '--timeout', str(a.timeout)] + (['--readonly'] if a.readonly else []) + (['--slim'] if a.slim else []) \
+             '--cwd', cwd, '--timeout', str(a.timeout)] + (['--readonly'] if a.readonly else []) + (['--tools', ','.join(a.tools)] if a.tools else []) \
+            + (['--slim'] if a.slim else []) \
             + (['--client', client] if client else []) + (['--resume', a.resume] if a.resume else [])
     subprocess.Popen(child, env={**os.environ, 'SPAWN_JOB_DIR': job}, start_new_session=True, stdin=subprocess.DEVNULL,
                      stdout=open(os.path.join(job, 'launcher.log'), 'w'), stderr=subprocess.STDOUT)

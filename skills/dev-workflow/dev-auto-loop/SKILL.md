@@ -2,7 +2,7 @@
 name: dev-auto-loop
 description: Use when 任务目标和边界已明确，需要按审批基线自动串联设计评审、测试清单与开发交付，并在完成、预算耗尽、无进展或外部阻塞时停止。
 metadata:
-  version: 3.1.2
+  version: 3.2.0
 ---
 
 # dev-auto-loop
@@ -90,7 +90,7 @@ metadata:
 
 ### 4. 派发独立正式评审
 
-生成和评审必须使用不同的运行时 agent 实例。编排器在每个门禁前冻结输入及 `producer_agent_refs[]`，分别派发 `agent-tools-solution-reviewer`、`agent-tools-test-design-reviewer`、`agent-tools-change-reviewer`。reviewer 只接收原始需求、冻结产物、必要证据和上一轮待复核 findings，不接收 producer 的推理过程或预期结论，也不得继续委派。
+生成和评审必须使用不同的运行时 agent 实例。编排器在每个门禁前冻结输入及 `producer_agent_refs[]`，分别派发 `agent-tools-solution-reviewer`、`agent-tools-test-design-reviewer`、`agent-tools-change-reviewer`。reviewer 只接收原始需求、冻结产物、必要证据和上一轮待复核 findings，不接收 producer 的推理过程或预期结论，也不得继续委派。reviewer 模型按委派契约 §3.1 的无人值守规则确定：沿用该需求已有的用户选择，否则用推荐项，不中途提问。
 
 身份、只读、写入、工具面和结果结构的准入只以 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/delegation-contract.md` 为准。编排器必须记录真实 `reviewer_agent_ref`，校验它与全部 producer 不相交，并以平台运行事件或前后快照证明 `checks.write_set_empty=true`；`changed_files=[]` 只是一项结果 schema 条件，不能作为未写入证明。校验成功后形成新的不可变 `approval-record-v1`；SubagentStop hook 仍只拦截缺失或畸形的结果信封。
 

@@ -2,7 +2,7 @@
 name: dev-review-test-cases
 description: Use when 已有版本化测试清单，需要独立复核测试清单（检查漏项、错项、不可执行项）：由非清单产出者复核需求、验收标准、已审批方案与检查项的三向追踪和风险覆盖，并形成绑定具体产物版本与代码基线的编码准入结论。
 metadata:
-  version: 1.10.0
+  version: 1.12.0
 ---
 
 # dev-review-test-cases
@@ -50,7 +50,7 @@ metadata:
 
 ### 2. 独立核对三向追踪
 
-正式复核必须由 `agent-tools-test-design-reviewer` 或满足同一契约的独立 agent 执行，并遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/delegation-contract.md`。身份、只读、写入、工具面和结果结构的准入只以该契约为准；任何一项无法由运行时事实证明时，不得形成正式结论。编排器冻结 `(R,S,C,B)` 和输入指纹，只传原始需求、方案、清单、必要代码证据与上一轮待复核 findings，不传编写过程或预期结论。编排器提供的代码证据必须逐条区分 `fact`（附检索命令 + 范围 + 计数）与 `inference`（附推理链）；**未标来源的一律按假设处理，不得作为判某维度 N/A 或某检查项不适用的依据**。负向断言（无并发场景 / 无上游消费方 / 路径不可达）需要两条独立检索路径。
+正式复核必须由 `agent-tools-test-design-reviewer` 或满足同一契约的独立 agent 执行，并遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/delegation-contract.md`。身份、只读、写入、工具面和结果结构的准入只以该契约为准；任何一项无法由运行时事实证明时，不得形成正式结论。派发前按委派契约 §3.1 让用户选择 reviewer 模型（外部模型、同模型子 agent 或双评审），同一需求已选过时沿用；经 `spawn-model-agent` 以 `--readonly --tools Read,Grep,Glob` 运行的外部模型进程同样满足本契约。编排器冻结 `(R,S,C,B)` 和输入指纹，只传原始需求、方案、清单、必要代码证据与上一轮待复核 findings，不传编写过程或预期结论。编排器提供的代码证据必须逐条区分 `fact`（附检索命令 + 范围 + 计数）与 `inference`（附推理链）；**未标来源的一律按假设处理，不得作为判某维度 N/A 或某检查项不适用的依据**。负向断言（无并发场景 / 无上游消费方 / 路径不可达）需要两条独立检索路径。
 
 三向追踪闭包是集合 diff：编排器在派发前按冻结分母重算 `|AC|` / `|CHG|` / `|TC|` 计数与未映射 ID 差集，作为冻结输入写进信封；reviewer **抽验**若干项而非全量重算，抽验项须在报告中列出，发现任一项与信封不符时立即恢复全量重算并按执行异常处理。
 
@@ -98,6 +98,32 @@ metadata:
 ## 输出要求
 
 默认按“输入绑定 → 结论 → 三向追踪与风险覆盖证据 → findings → 后续动作”输出。编排器在 stop 后保存报告与委派结果、计算两者指纹并生成不可变 `approval-record-v1`。只有该记录的身份、只读、工具面和写入检查通过，且针对精确 `(R,S,C,B)` 给出 `通过`，才允许构造 `T/G` 并交给 `dev-build-change`；handoff 只引用审批记录 ref 与 fingerprint。
+
+## 编排脚本
+
+冻结、闭包计数、快照和审批记录用共享脚本生成，不手写。`--stage test-cases-review` 时 `freeze` 按冻结分母算出 `mechanical-checks.json`（AC/CHG 未映射差集、无来源检查项、分母外引用、追踪表与检查项不一致），作为信封的冻结输入；`--prior-round` 按 `test-cases/versions/test-cases-v<旧版本>.md` 生成清单 diff。`B` 沿用方案审批绑定的基线，代码变化时才重新快照：
+
+```bash
+RR=/home/joney/projects/ai/agent-tools/skills/dev-workflow/scripts/review_round.py
+REQ=/home/joney/docs/requirements-development/<requirement-name>
+python3 $RR --req-dir $REQ --stage test-cases-review --round <N> freeze --artifact R=requirements:summary.md \
+  --artifact S=solution-design:solution.md,traceability.md --artifact C=test-cases:test-cases.md --repo <代码仓库>
+python3 $RR --req-dir $REQ --stage test-cases-review --round <N> envelope --task-id <id> \
+  --role agent-tools-test-design-reviewer --scope "<本轮范围>" [--prior-round <N-1>] [--evidence "fact：<命令> → <计数>"]
+python3 $RR --req-dir $REQ --stage test-cases-review --round <N> snapshot before
+# 派发 agent-tools-test-design-reviewer，提示词给信封路径；停止后：
+python3 $RR --req-dir $REQ --stage test-cases-review --round <N> snapshot after
+python3 $RR --req-dir $REQ --stage test-cases-review --round <N> persist --transcript <jsonl> --findings <json> --reviewer-ref <id>
+# 用户选了外部模型时，派发与收口改为（双评审时次 reviewer 用 --slot secondary 先落盘）：
+python3 $RR --req-dir $REQ --stage test-cases-review --round <N> task
+python3 /home/joney/projects/ai/agent-tools/skills/common/spawn-model-agent/scripts/spawn_model_agent.py --backend <后端> \
+  --readonly --tools Read,Grep,Glob --cwd <代码仓库> --wait --task @$REQ/test-cases-review/rounds/round-<N>/evidence/external-task-primary.md
+python3 $RR --req-dir $REQ --stage test-cases-review --round <N> persist --spawn-job <作业目录> --findings <json> --selected-by user
+```
+
+`--findings` 中每条 finding 带编排器的 `classification`，`噪音` / `契约误读` 附原文证据，双评审标 `found_by`，漏检写 `escaped_from`（委派契约 §3.2）；`persist` 同时把本轮写入本机评审记录，汇报时列出被判为噪音或误读的 finding 供用户抽查。
+
+编排器按委派契约 §3 直接分类和处置 findings：清单问题交 `dev-derive-test-cases` 修订后复审，不询问用户是否修改。
 
 ## 交接
 

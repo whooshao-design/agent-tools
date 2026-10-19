@@ -2,7 +2,7 @@
 name: requirements-review
 description: "评审已有产品或技术需求文档（PRD/需求单/接口需求），独立检查边界、异常、验收标准、风险和依赖是否完整。Use when 用户要求评审需求文档、PRD 评审、规格评审，或主流程需要在方案设计前形成稳定的需求身份 R。"
 metadata:
-  version: 1.7.1
+  version: 1.8.0
 ---
 
 # requirements-review
@@ -35,7 +35,7 @@ metadata:
 
 需求身份、内容指纹和风险授权遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/artifact-identity.md`。无法稳定标识评审对象，或关键业务规则缺失到无法判断时，结论为 `材料不足`，不得自行补造规则。
 
-正式评审必须由 `agent-tools-requirements-reviewer` 或满足同一契约的独立 agent 执行，并遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/delegation-contract.md`。身份、只读、写入、工具面和结果结构的准入只以该契约为准；任何一项无法由运行时事实证明时，不得形成正式结论。纯用户或外部原始需求的 producer 列表可以为空；根 agent 直接产出时使用可稳定标识的会话级 ref 并记录其强度限制，不构成审批阻塞（见 `delegation-contract.md` §1）。
+正式评审必须由 `agent-tools-requirements-reviewer` 或满足同一契约的独立 agent 执行，并遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/delegation-contract.md`。身份、只读、写入、工具面和结果结构的准入只以该契约为准；任何一项无法由运行时事实证明时，不得形成正式结论。派发前按委派契约 §3.1 让用户选择 reviewer 模型（外部模型、同模型子 agent 或双评审），同一需求已选过时沿用；经 `spawn-model-agent` 以 `--readonly --tools Read,Grep,Glob` 运行的外部模型进程同样满足本契约。纯用户或外部原始需求的 producer 列表可以为空；根 agent 直接产出时使用可稳定标识的会话级 ref 并记录其强度限制，不构成审批阻塞（见 `delegation-contract.md` §1）。
 
 ## Workflow
 

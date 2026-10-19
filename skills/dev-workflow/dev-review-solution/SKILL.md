@@ -2,7 +2,7 @@
 name: dev-review-solution
 description: Use when 已有可评审的技术方案，需要在编码前基于需求、代码和约束做独立技术评审，识别阻断问题与风险，并给出通过、有条件通过、修改后复审、退回重设计或材料不足的明确结论。
 metadata:
-  version: 3.5.0
+  version: 3.6.0
 ---
 
 # dev-review-solution
@@ -67,7 +67,7 @@ metadata:
 
 ### 2. 独立核对方案依据
 
-- 正式评审必须由 `agent-tools-solution-reviewer` 或满足同一契约的独立 agent 执行，并遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/delegation-contract.md`；身份、只读、写入、工具面和结果结构的准入只以该契约为准
+- 正式评审必须由 `agent-tools-solution-reviewer` 或满足同一契约的独立 agent 执行，并遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/delegation-contract.md`；身份、只读、写入、工具面和结果结构的准入只以该契约为准。派发前按委派契约 §3.1 让用户选择 reviewer 模型（外部模型、同模型子 agent 或双评审），同一需求已选过时沿用；经 `spawn-model-agent` 以 `--readonly --tools Read,Grep,Glob` 运行的外部模型进程同样满足本契约。
 - 编排器先冻结 `(R,S,B)` 和输入指纹，再只传原始需求、待评方案、必要代码证据与上一轮待复核 findings；不传设计方的推理过程或预期结论
 - 方案的 `producer_agent_refs[]` 必须完整且可稳定标识；根 agent 直接产出时使用会话级 ref 并在执行记录中说明其强度限制，不构成审批阻塞（见 `delegation-contract.md` §1）
 - 编排器在 reviewer 停止后按委派契约校验运行记录；任何一项无法由运行时事实证明时，不得形成正式领域结论
@@ -168,7 +168,14 @@ python3 $RR --req-dir $REQ --round <N> snapshot before
 python3 $RR --req-dir $REQ --round <N> snapshot after
 python3 $RR --req-dir $REQ --round <N> persist --transcript <subagent 记录> --findings <编排器归类后的 findings.json> \
   --reviewer-ref <spawn 返回的实例 ID> --model <模型> --trust-limit "<信任限制>"
+# 用户选了外部模型时，派发与收口改为（双评审时次 reviewer 用 --slot secondary 先落盘）：
+python3 $RR --req-dir $REQ --round <N> task
+python3 /home/joney/projects/ai/agent-tools/skills/common/spawn-model-agent/scripts/spawn_model_agent.py --backend <后端> \
+  --readonly --tools Read,Grep,Glob --cwd <代码仓库> --wait --task @$REQ/solution-review/rounds/round-<N>/evidence/external-task-primary.md
+python3 $RR --req-dir $REQ --round <N> persist --spawn-job <作业目录> --findings <json> --selected-by user
 ```
+
+`--findings` 中每条 finding 带编排器的 `classification`，`噪音` / `契约误读` 附原文证据，双评审标 `found_by`，漏检写 `escaped_from`（委派契约 §3.2）；`persist` 同时把本轮写入本机评审记录，汇报时列出被判为噪音或误读的 finding 供用户抽查。
 
 `freeze` 报出机械检查失败时先修产物再派发；`persist` 在结构、指纹回显、写入证明或工具面任一不通过时退出码非 0，审批记录的结论为空。
 

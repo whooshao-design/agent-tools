@@ -56,6 +56,11 @@ class SpawnModelAgentTest(unittest.TestCase):
         r = sma.build_command("claude-kimi", "do it", readonly=True)
         self.assertIn("--tools", r)
         self.assertNotIn("--dangerously-skip-permissions", r)
+        self.assertEqual(r[r.index("--tools") + 1], "Read,Grep,Glob,WebSearch,WebFetch")
+        self.assertEqual(c[c.index("--output-format") + 1], "stream-json")
+        n = sma.build_command("claude-qwen", "review", readonly=True, tools=["Read", "Grep", "Glob"])
+        self.assertEqual(n[n.index("--tools") + 1], "Read,Grep,Glob")
+        self.assertEqual(n[n.index("--allowedTools") + 1], "Read,Grep,Glob")
 
         x = sma.build_command("codex-qwen", "do it", readonly=False)
         self.assertEqual(x[:3], ["codex-qwen", "--search", "exec"])
@@ -96,11 +101,34 @@ class SpawnModelAgentTest(unittest.TestCase):
             self.assertTrue(os.path.exists(os.path.join(job, "result.md")))
 
     def test_parsers_capture_session_ids(self):
-        meta, text = sma.parse_claude('{"session_id":"s1","result":"ok","num_turns":2,"modelUsage":{"m":{"inputTokens":1,"outputTokens":2}}}')
+        raw = "\n".join([
+            '{"type":"system","subtype":"init","tools":["Glob","Grep","Read"],"mcp_servers":[]}',
+            '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Read","input":{}}]}}',
+            '{"type":"result","session_id":"s1","result":"ok","num_turns":2,"modelUsage":{"m":{"inputTokens":1,"outputTokens":2}}}',
+            '{"type":"rate_limit_event"}'])
+        meta, text = sma.parse_claude(raw)
         self.assertEqual((meta["session_id"], meta["model"], text), ("s1", "m", "ok"))
+        self.assertEqual((meta["effective_tools"], meta["mcp_servers"], meta["tools_used"]), (["Glob", "Grep", "Read"], [], ["Read"]))
         raw = '{"type":"thread.started","thread_id":"t1"}\n{"type":"item.completed","item":{"type":"agent_message","text":"hi"}}\n{"type":"turn.completed","usage":{"input_tokens":3,"output_tokens":4}}'
         meta, text = sma.parse_codex(raw)
         self.assertEqual((meta["session_id"], meta["input_tokens"], text), ("t1", 3, "hi"))
+
+    def test_ledger_stats_attribute_escapes_to_the_passing_reviewer(self):
+        import json, os, tempfile
+        rows = [
+            {"approval_id": "a1", "slot": "primary", "backend": "claude-qwen", "execution_valid": True,
+             "finding_counts": {"成立需修/Low": 2, "噪音/Low": 1}, "escaped_from": []},
+            {"approval_id": "a2", "slot": "primary", "backend": "claude-subagent", "execution_valid": True,
+             "finding_counts": {"成立需修/High": 1}, "escaped_from": ["a1"]},
+            {"approval_id": "a3", "slot": "primary", "backend": "claude-qwen", "execution_valid": False, "finding_counts": {}},
+        ]
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "ledger.jsonl")
+            open(path, "w").write("\n".join(json.dumps(r, ensure_ascii=False) for r in rows))
+            st = sma.ledger_stats(path)
+        self.assertEqual(sma.format_stats(st["claude-qwen"]), "n=1 成立 2/3 噪音 1 漏检 1 无效 1")
+        self.assertEqual(sma.format_stats(st["claude-subagent"]), "n=1 成立 1/1 噪音 0 漏检 0")
+        self.assertEqual(sma.format_stats(None), "—")
 
     def test_fit_hint_comes_from_routing(self):
         with mock.patch.object(sma, "routing_backends", return_value={"codex-glm": {"fit": "只派轻任务", "output_cap_tokens": 8192}}):

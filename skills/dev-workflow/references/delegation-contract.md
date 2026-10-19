@@ -10,7 +10,7 @@
 - **`reviewer_agent_ref` 必须是派发工具或平台运行时返回的不透明实例标识**，不是角色名、模型名、prompt、skill 名或模型自报 ID；只能在 spawn 返回或运行结束后由编排器可信附着，不是派发信封字段，也不由 reviewer 输出。
 - **`producer_agent_refs[]` 只需可稳定标识、可重新指认**，不要求不可伪造。subagent 使用平台返回的实例 ID；根 agent 直接产出时使用稳定的会话级 ref（如 `/root`），并在执行记录中说明该 ref 的强度限制。纯用户或外部原始产物可使用空 producer 列表。
 - 正式评审要求 `reviewer_agent_ref` 平台可验证，且不属于 `producer_agent_refs[]`。reviewer 身份缺失、与任一 producer 相交、或为模型自报身份时，均不能形成审批事实；producer ref 的强度不作为审批前置条件，但必须记录。
-- 换模型是可选的质量增强，不是独立性的证明。
+- 换模型是质量增强，不是独立性的证明；它降低的是同模型盲区相关，选择规则见 §3.1。
 
 ## 2. 只读与有效能力面
 
@@ -19,6 +19,7 @@
 - reviewer 必须处于有效只读 sandbox，且不可访问任何有写入或外部变更能力的工具/MCP。父会话处于全权限/跳过权限模式，或 reviewer 仍能继承写能力 MCP 时，本轮执行必须 `blocked`。
 - reviewer 一旦写入即成为新状态的 producer，本轮结果失效；`changed_files` 等模型自报不能作为未写入证明。
 - reviewer 返回的 `changed_files` 必须严格为 `[]`。
+- 经 `spawn-model-agent` 派发的外部 reviewer 不继承父会话权限，有效能力面由其自身启动参数决定：必须带 `--readonly --tools Read,Grep,Glob`（Claude 通道同时 `--strict-mcp-config`），并以运行流 init 事件记录的实际工具集与 MCP 列表为准；该集合超出 `Read/Grep/Glob` 或 MCP 非空时本轮无效。
 
 ### 写入证明
 
@@ -55,6 +56,25 @@ spawn/stop 后，编排器另外生成可信运行记录，至少包含：派发
 归类后的路由由编排器直接执行，不询问用户“要不要改”：成立需修的 finding 交回 producer 修订（编排器自己就是 producer 时直接修订），写处置记录，补齐复审所需材料后派发下一轮；契约误读与噪音补进下一轮信封。只有以下事项属于用户决策，才停下来问：接受未修正的 Medium 及以上风险（风险授权）；裁定范围事实源；改变需求范围或验收标准；在产品行为明显不同的修复方案之间选择。只剩 Low 时按对应 skill 的规则作为后续建议，不为改措辞重开审批。执行失败是否可重试以“已知信任边界”的恢复性判定为准；环境级能力缺口直接阻塞，只有可恢复的单次执行失败可在相同冻结输入上换新 reviewer 重试一次；再次失败时本轮执行状态记为 `formal_reviewer_unavailable`，不生成领域结论。各评审 skill 的“先确认执行状态为 `valid`”即指本节规则。
 
 用户对 finding 作出的风险授权属于新增冻结输入，不是编排器改写旧结论的许可。旧 `report.md`、`delegation-result.json` 和 `approval-record.json` 均不可修改；编排器必须生成新的 `task_id` 和 `round`，把原冻结对象与授权记录一并派发给独立 reviewer，由新一轮 reviewer 判断是否满足 `Accepted` 或有条件通过。没有新一轮有效结果时，旧结论保持不变。
+
+### 3.1 reviewer 选择
+
+每轮正式评审派发前，编排器让用户选择 reviewer 模型，而不是默认使用与 producer 相同的模型：
+
+1. 运行 `python3 /home/joney/projects/ai/agent-tools/skills/common/spawn-model-agent/scripts/spawn_model_agent.py --list`，候选只取宿主通道（Claude Code 取 `claude-*`，Codex 取 `codex-*`）中评审分为满分或最高档的后端；未测、低分或适用性备注不适合多缺陷评审的后端不进默认选项（用户点名时照常可用）。与 producer 同 provider 的后端不作推荐项。
+2. 用选择题列出 2～3 个候选（模型、评审分、关键备注），推荐项放第一位并写明理由；另外固定提供“同模型子 agent（`agent-tools-*-reviewer`）”和“双评审（推荐项 + 同模型子 agent）”两项。推荐项按评审分、再按备注中的缺陷捕获记录排序，有可靠性警告（如空返回）时在描述里写出处置。`--list` 的“实战”列（§3.2 评审记录）只在同一阶段累计不少于 5 轮有效记录后参与同分排序，样本不足时只展示；实战记录出现漏检或模型版本更新时，提示用户用 `build-codeagent/scripts/backend_eval.py` 重跑基准，不据实战记录单独换模型。
+3. 同一需求已有用户选择时，后续轮次与后续阶段默认沿用（`--selected-by carried-over`），不再重复提问；复审中途换 reviewer 会让 findings 口径不一致，只在用户明确要求时更换。沿用来源是最近一轮审批记录的 `reviewer` 字段。
+4. 无人值守编排（如 `dev-auto-loop`）不提问：沿用该需求已有选择，否则用推荐项，并以 `--selected-by default-unattended` 记入审批记录。
+
+外部 reviewer 的执行步骤：`review_round.py task` 生成任务文本（角色提示 + 评审 skill + 信封路径），以 `spawn_model_agent.py --backend <后端> --readonly --tools Read,Grep,Glob --cwd <代码仓库> --task @<任务文件>` 运行，前后快照照常采集，结束后 `review_round.py persist --spawn-job <作业目录>` 收口。`reviewer_agent_ref` 记为 `spawn:<后端>:<会话 ID>`，会话 ID 取自后端 CLI 运行时输出，不由模型自报。结果为空或畸形属于可恢复的单次执行失败，按 §3 在同一后端重试一次；不得静默换模型重跑，换模型须经用户选择。
+
+双评审时两个 reviewer 使用同一信封并发执行，次 reviewer 先以 `persist --slot secondary` 落盘，主 reviewer 再生成审批记录。两者都必须执行有效；结论取较严者，findings 由编排器合并归类后写入同一 `findings.json`。
+
+### 3.2 评审记录（reviewer 实战表现）
+
+编排器归类 findings 时，在 `findings.json` 的每条 finding 上写 `classification`（`成立需修` / `接受取舍` / `契约误读` / `噪音`）；`契约误读` 与 `噪音` 必须在 `evidence` 写出原文位置，`persist` 对缺分类或缺证据的 findings 拒绝生成审批记录。双评审时用 `found_by`（`primary` / `secondary`）标出由谁提出。后续轮次、代码评审或验证发现 Medium 及以上问题，且该问题在某个已通过版本中已经存在时，在新 finding 上写 `escaped_from: <那轮 approval_id>`，记作那轮 reviewer 的漏检。
+
+`persist` 据此向本机 `~/.local/state/agent-tools/reviewer-ledger.jsonl` 追加每个 reviewer 一行（模型、阶段、轮次、复核模式、执行是否有效、按分类与严重度的计数、漏检引用、耗时与 token）；该文件含需求名，不进仓库。已落盘的轮次可用 `review_round.py ledger` 补记。编排器往往也是产出者，判定 reviewer 意见为噪音存在利益冲突，因此每轮汇报须列出被判为 `噪音` 或 `契约误读` 的 finding 供用户抽查。
 
 ## 4. `delegation-result-v1`
 

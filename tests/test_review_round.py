@@ -6,6 +6,7 @@ import json
 import subprocess
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 import importlib.util
@@ -79,6 +80,9 @@ class ReviewRoundTest(unittest.TestCase):
         (self.req / "solution-design/solution.md").write_text(SOLUTION)
         (self.req / "solution-design/traceability.md").write_text(TRACE)
         self.base = ["--req-dir", str(self.req), "--round", "1"]
+        self.ledger_patch = unittest.mock.patch.object(rr, "LEDGER", root / "ledger.jsonl")
+        self.ledger_patch.start()
+        self.addCleanup(self.ledger_patch.stop)
         self.rd = self.req / "solution-review/rounds/round-1"
 
     def tearDown(self):
@@ -144,6 +148,94 @@ class ReviewRoundTest(unittest.TestCase):
         rec = json.loads((self.rd / "approval-record.json").read_text())
         self.assertIsNone(rec["conclusion"])
         self.assertFalse(rec["checks"]["write_set_empty"]["passed"])
+
+    def spawn_job(self, name, env, conclusion, tools=("Read", "Grep", "Glob")):
+        job = Path(self.tmp.name) / name
+        job.mkdir()
+        res = {"schema": "delegation-result-v1", "task_id": "t1", "role": env["role"], "status": "complete",
+               "input_fingerprints": env["input_fingerprints"], "conclusion": conclusion, "changed_files": [], "unresolved": []}
+        (job / "result.md").write_text("# 评审\n\n```json\n" + json.dumps(res, ensure_ascii=False) + "\n```")
+        (job / "meta.json").write_text(json.dumps({"backend": name, "session_id": name + "-sid", "model": name + "-model",
+                                                   "readonly": True, "exit_code": 0, "effective_tools": list(tools),
+                                                   "mcp_servers": [], "tools_used": ["Read"]}))
+        return job
+
+    def test_external_and_dual_review(self):
+        self.freeze()
+        run(*self.base, "envelope", "--task-id", "t1", "--scope", "full review")
+        run(*self.base, "task")
+        task = (self.rd / "evidence/external-task-primary.md").read_text()
+        self.assertIn("dev-review-solution/SKILL.md", task)
+        self.assertIn(str(self.rd / "delegation-envelope.json"), task)
+        env = json.loads((self.rd / "delegation-envelope.json").read_text())
+        run(*self.base, "snapshot", "before")
+        run(*self.base, "persist", "--slot", "secondary", "--spawn-job", str(self.spawn_job("claude-deepseek", env, "修改后复审")))
+        run(*self.base, "snapshot", "after")
+        findings = Path(self.tmp.name) / "f.json"
+        findings.write_text(json.dumps([
+            {"id": "F-1", "severity": "Medium", "status": "Open", "classification": "成立需修", "found_by": ["secondary"]},
+            {"id": "F-2", "severity": "Low", "status": "Open", "classification": "噪音", "evidence": "x.md:1", "found_by": ["primary", "secondary"]}]))
+        run(*self.base, "persist", "--spawn-job", str(self.spawn_job("claude-qwen", env, "通过")), "--findings", str(findings))
+        rows = [json.loads(l) for l in rr.LEDGER.read_text().splitlines()]
+        self.assertEqual([(r["slot"], r["backend"]) for r in rows], [("primary", "claude-qwen"), ("secondary", "claude-deepseek")])
+        self.assertEqual(rows[0]["finding_counts"], {"噪音/Low": 1})
+        self.assertEqual(rows[1]["finding_counts"], {"成立需修/Medium": 1, "噪音/Low": 1})
+        run(*self.base, "ledger")  # backfill is idempotent
+        self.assertEqual(len(rr.LEDGER.read_text().splitlines()), 2)
+        rec = json.loads((self.rd / "approval-record.json").read_text())
+        self.assertEqual(rec["reviewer_agent_ref"], "spawn:claude-qwen:claude-qwen-sid")
+        self.assertEqual(rec["reviewer"], {"kind": "spawn-model-agent", "model": "claude-qwen-model", "selected_by": "user"})
+        self.assertEqual(rec["conclusion"], "修改后复审")  # stricter of the two
+        self.assertFalse(rec["can_enter_next_stage"])
+        self.assertEqual(rec["secondary_reviewer"]["model"], "claude-deepseek-model")
+
+    def test_external_reviewer_with_write_tools_is_invalid(self):
+        self.freeze()
+        run(*self.base, "envelope", "--task-id", "t1", "--scope", "full review")
+        env = json.loads((self.rd / "delegation-envelope.json").read_text())
+        run(*self.base, "snapshot", "before")
+        run(*self.base, "snapshot", "after")
+        findings = Path(self.tmp.name) / "f.json"
+        findings.write_text("[]")
+        with self.assertRaises(SystemExit):
+            run(*self.base, "persist", "--findings", str(findings),
+                "--spawn-job", str(self.spawn_job("claude-qwen", env, "通过", tools=("Read", "WebFetch"))))
+        rec = json.loads((self.rd / "approval-record.json").read_text())
+        self.assertIsNone(rec["conclusion"])
+        self.assertFalse(rec["checks"]["tool_surface"]["passed"])
+
+    def test_persist_rejects_unclassified_or_unevidenced_findings(self):
+        self.freeze()
+        run(*self.base, "envelope", "--task-id", "t1", "--scope", "full review")
+        env = json.loads((self.rd / "delegation-envelope.json").read_text())
+        run(*self.base, "snapshot", "before")
+        run(*self.base, "snapshot", "after")
+        findings = Path(self.tmp.name) / "f.json"
+        for bad in ([{"id": "F-1", "severity": "Low", "status": "Open"}],
+                    [{"id": "F-1", "severity": "Low", "status": "Open", "classification": "噪音"}]):
+            findings.write_text(json.dumps(bad))
+            with self.assertRaises(SystemExit):
+                run(*self.base, "persist", "--findings", str(findings), "--spawn-job", str(self.spawn_job(f"claude-qwen{len(bad[0])}", env, "通过")))
+        self.assertFalse((self.rd / "approval-record.json").exists())
+
+    def test_test_case_closure_and_table_version(self):
+        (self.req / "test-cases").mkdir()
+        (self.req / "test-cases/test-cases.md").write_text(
+            "# 清单\n\n| 项目 | 内容 |\n|---|---|\n| 清单版本 | v2 |\n\n## 3. 追踪\n\n| AC | CHG | TC |\n|---|---|---|\n"
+            "| AC-001 | CHG-001 / 3.1 | TC-001～TC-002 |\n\n| 集合 | 分母 |\n|---|---|\n| TC | 3（TC-001～TC-003） |\n\n## 4. 检查项\n\n| ID | 来源 | CHG |\n|---|---|---|\n"
+            "| TC-001 | AC-001 | CHG-001 |\n| TC-002 | AC-001 | CHG-009 |\n| TC-003 | 无 | CHG-001 |\n")
+        base = ["--req-dir", str(self.req), "--stage", "test-cases-review", "--round", "1"]
+        with contextlib.redirect_stderr(io.StringIO()):
+            run(*base, "freeze", "--artifact", "C=test-cases:test-cases.md", "--repo", str(self.repo))
+        rd = self.req / "test-cases-review/rounds/round-1"
+        self.assertEqual(json.loads((rd / "evidence/frozen-inputs.json").read_text())["inputs"]["C"]["version"], "v2")
+        checks = json.loads((rd / "mechanical-checks.json").read_text())
+        self.assertEqual(checks["TC_count"], 3)
+        self.assertEqual(checks["CHG_unmapped"], ["CHG-002"])
+        self.assertEqual(checks["TC_without_AC"], ["TC-003"])
+        self.assertEqual(checks["TC_refs_outside_denominator"], ["CHG-009"])
+        self.assertEqual(checks["TC_defined_not_in_trace_table"], ["TC-003"])
+        self.assertEqual(checks["TC_CHG_mismatch_trace_vs_item"], {"TC-002": {"trace_table": ["CHG-001"], "item": ["CHG-009"]}})
 
 
 if __name__ == "__main__":

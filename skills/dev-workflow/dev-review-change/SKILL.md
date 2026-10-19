@@ -2,7 +2,7 @@
 name: dev-review-change
 description: Use when 代码改动已形成可评审结果，需要基于变更证据做代码评审，确认是否存在正确性、架构、安全或稳定性问题，并给出可执行后续动作。
 metadata:
-  version: 1.10.1
+  version: 1.11.0
 ---
 
 # dev-review-change
@@ -56,7 +56,7 @@ metadata:
 
 若 `G`、验证对象或 `change_revision` 与当前工作区不匹配，停止代码准入结论并回最早失效阶段；不能用针对旧版本的验证或评审继续收口。
 
-正式评审必须由 `agent-tools-change-reviewer` 或满足同一契约的独立 agent 执行，并遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/delegation-contract.md`。身份、只读、写入、工具面和结果结构的准入只以该契约为准；任何一项无法由运行时事实证明时，不得形成准入事实。编排器冻结 `G`、`change_revision`、diff 和验证证据，只传原始任务、冻结输入及上一轮待复核 findings，不传实现者的推理过程或预期结论。
+正式评审必须由 `agent-tools-change-reviewer` 或满足同一契约的独立 agent 执行，并遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/delegation-contract.md`。身份、只读、写入、工具面和结果结构的准入只以该契约为准；任何一项无法由运行时事实证明时，不得形成准入事实。派发前按委派契约 §3.1 让用户选择 reviewer 模型（外部模型、同模型子 agent 或双评审），同一需求已选过时沿用；经 `spawn-model-agent` 以 `--readonly --tools Read,Grep,Glob` 运行的外部模型进程同样满足本契约。编排器冻结 `G`、`change_revision`、diff 和验证证据，只传原始任务、冻结输入及上一轮待复核 findings，不传实现者的推理过程或预期结论。
 
 代码改动的 `producer_agent_refs[]` 必须完整且可稳定标识；根 agent 直接产出时使用会话级 ref 并在执行记录中说明其强度限制，不构成审批阻塞（见 `delegation-contract.md` §1）。
 
