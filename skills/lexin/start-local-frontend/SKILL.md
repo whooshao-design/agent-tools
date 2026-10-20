@@ -1,8 +1,8 @@
 ---
 name: start-local-frontend
-description: 米霍克 OA 前端(web_mihawk_oa)本地开发会话管理：启动前资源门禁、安全启动本地 webpack(127.0.0.1:8116)、把 whistle 网关规则切到预发布或项目环境（项目环境 IP 每次动态发现，不硬编码）、用真实域名打开本地页面。Use when 用户要求本地启动米霍克前端、npm run dev:index、检查 webpack 启动条件、把 rc_oa_gateway 切到预发布/项目环境、生成或写入 whistle 网关规则、验证本地页面访问链路。
+description: 米霍克 OA 前端(web_mihawk_oa)本地开发会话管理：启动前资源门禁、安全启动本地 webpack(127.0.0.1:8116)、把 whistle 网关规则切到预发布或项目环境（项目环境网关 IP 由用户指定并探活，不硬编码）、用真实域名打开本地页面。Use when 用户要求本地启动米霍克前端、npm run dev:index、检查 webpack 启动条件、把 rc_oa_gateway 切到预发布/项目环境、生成或写入 whistle 网关规则、验证本地页面访问链路。
 metadata:
-  version: 1.0.1
+  version: 1.1.0
 ---
 
 # start-local-frontend
@@ -11,7 +11,7 @@ metadata:
 
 管理 `web_mihawk_oa`（米霍克 OA 前端，`/home/joney/projects/frontend/web_mihawk_oa`）的本地开发会话：
 启动前门禁 -> 启动本地 webpack -> 把后端网关切到预发布(pre)或项目环境(prj) -> 用真实域名访问本地页面。
-核心价值是**项目环境 IP 随时在变，每次执行时动态发现，不硬编码**。
+项目环境网关机随每次部署新建、IP 会变，脚本不硬编码，由用户给出 IP 后探活。
 
 不治理的部分：
 
@@ -33,8 +33,8 @@ SCRIPT=/home/joney/projects/ai/agent-tools/skills/lexin/start-local-frontend/scr
 node $SCRIPT doctor                 # 1. 启动前置门禁（只读）
 node $SCRIPT start                  # 2. 门禁全绿后启动 npm run dev:index（长驻进程，建议后台运行）
 node $SCRIPT connect --env pre      # 3a. 网关指向预发布：默认只打印规则文本
-node $SCRIPT connect --env prj      # 3b. 网关指向项目环境：动态发现 IP + 探活后打印规则文本
-node $SCRIPT connect --env prj --apply   # 3c. 尝试调 whistle API 自动写入专属分组
+node $SCRIPT connect --env prj --ip <网关机IP>   # 3b. 网关指向项目环境：探活通过后打印规则文本
+node $SCRIPT connect --env prj --ip <网关机IP> --apply   # 3c. 调 whistle API 写入专属分组
 node $SCRIPT open                   # 4. 打印访问地址，并探测本地实例与网关当前指向
 ```
 
@@ -63,18 +63,21 @@ node $SCRIPT open                   # 4. 打印访问地址，并探测本地实
   工作目录 `/home/joney/projects/frontend/web_mihawk_oa`。
 - 长驻进程：由 agent 执行时放后台运行。端口开始监听不代表编译完成，等 webpack 明确输出编译完成再访问。
 
-### connect --env pre|prj [--app <name>] [--ip <ip>] [--apply]
+### connect --env pre|prj [--ip <ip>] [--apply]
 
 - whistle API 地址动态发现：`ip route show default` 取 Windows 宿主机 IP + 端口 8899
   （`/cgi-bin/rules/list` 已实测无鉴权可读）。宿主机 IP 会变，不硬编码；可 `--whistle h[:p]` 覆盖。
 - `pre`：网关规则指向预发布。预发布 IP 是脚本里带注释的默认常量 `DEFAULT_PRE_GATEWAY_IP`
   （当前值，变更频率低；已变化用 `--ip` 覆盖）。会顺带探活，失败只警告不阻断
   （WSL 直连与浏览器经 whistle 的网络路径不同）。
-- `prj`：**动态发现** —— 复用 `query-app-instances` 脚本查乐效实例
-  （应用名默认 `server_hawk_decision_manage`，环境 prj），拿到候选 IP 后逐个探活：
-  TCP 443 可达 + 带 `Host: mihawk.oa.fenqile.com` 的 HTTPS 请求
+- `prj`：`/rc_oa_gateway` 由项目环境的独立网关机（`server_rc_oa_gateway_java` VM，部署项目环境时新建）承接，
+  不是业务应用的 IP——manage 等业务应用在项目环境是 Pod，探活必然失败（2026-10-20 实测）。
+  prj 网关同时运行上百台、不按需求打标，任意一台都能探活通过，自动挑选会静默连到别人的环境，
+  因此 **`--ip` 必填**：从乐效项目环境页或用户处取得本环境网关机 IP。未传 `--ip` 时脚本只列出最近创建的
+  运行中网关实例作参考并以退出码 2 结束，不生成规则。
+  探活：TCP 443 可达 + 带 `Host: mihawk.oa.fenqile.com` 的 HTTPS 请求
   `/rc_oa_gateway/hawk_decision/alarm/rule/detail.json?alarm_rule_id=1`
-  返回含 `rc_gateway_ip` 或 `retcode` 的 JSON 才算通过；全部失败则拒绝生成规则。
+  返回含 `rc_gateway_ip` 或 `retcode` 的 JSON 才算通过（未登录的 `16051006` 也算可达）；失败则拒绝生成规则。
 - 规则只有一行 `<ip> mihawk.oa.fenqile.com/rc_oa_gateway`（加注释头），写入专属分组 `mihawk-gateway`。
 - 默认**只打印**规则文本和手工启用步骤；带 `--apply` 才调 whistle 写入 API
   （`/cgi-bin/rules/add` + `/cgi-bin/rules/select`，**这两个写入端点未实测**），
@@ -101,15 +104,16 @@ node $SCRIPT open                   # 4. 打印访问地址，并探测本地实
 一条会生效（以 whistle 匹配顺序为准）。建议一次性手工把公共组里那条注释掉，让 `mihawk-gateway`
 独占这条路径；这个调整由用户手工完成，skill 不代改公共组。
 
+whistle 若处于单选模式，用户切换到自己的分组（如「本地-项目」）会把 `mihawk-gateway` 关掉，浏览器实际走的是那个分组里的旧网关（2026-10-20 实测：请求落到旧项目环境网关，报旧版拦截错误）。`open` 会列出所有已启用分组中的 `/rc_oa_gateway` 规则并在冲突或专属分组未启用时告警；页面联调前先跑一次 `open`，有告警时请用户改实际启用分组里的那条规则。
+
 ## 待实测项（首次使用时人工确认）
 
 1. **whistle 写入 API**（`/cgi-bin/rules/add`、`/cgi-bin/rules/select`）未实测，只有
    `/cgi-bin/rules/list` 实测可读。`--apply` 失败会自动降级为手工粘贴，属预期行为。
-2. **登录态跨环境网关**：用预发布域名登录态访问项目环境网关这一跳截至创建时未实测；
-   首次 `connect --env prj` 后要人工确认页面接口不跳登录、不报权限错。若不通，需在项目环境
-   重新走一次登录，或回退 `connect --env pre`。
-3. 乐效 `prj` 环境的 env 取值按 `query-app-instances` 的透传逻辑处理；若乐效侧项目环境
-   命名不同，脚本会在报错里列出该应用实际可用的环境名。
+2. **登录态跨环境网关**：用户浏览器经 whistle（passport-odin 走预发布）登录后，项目环境网关可正常鉴权（2026-10-20 实测页面可用）。
+   WSL 自动化浏览器 profile 的 `oa_session` 来自线上 passport，项目环境网关返回 `16051006` 未登录，
+   所以 agent 无法用 profile 登录态直接调项目环境网关接口；agent 侧联调走扁鹊 Dubbo + SQL（见 `dev-verify-change`），
+   页面交互交用户验收。不要把 profile Cookie 发往预发布网关 IP 绕过（会被权限策略按数据外发拦截）。
 
 ## 安全边界
 

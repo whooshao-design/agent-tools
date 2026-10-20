@@ -39,7 +39,10 @@ const NODE16_BIN = path.join(os.homedir(), '.nvm/versions/node/v16.16.0/bin');
 // 与 web_mihawk_oa/AGENTS.md 一致：用精确 Node 版本覆盖整个进程树
 const START_PATH = `${NODE16_BIN}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`;
 const QUERY_APP_SCRIPT = '/home/joney/projects/ai/agent-tools/skills/lexin/query-app-instances/scripts/query_app_instances.js';
-const DEFAULT_PRJ_APP = 'server_hawk_decision_manage';
+// 项目环境的 /rc_oa_gateway 由独立网关机承接（每个项目环境一台 server_rc_oa_gateway_java VM），
+// 不是业务应用（如 manage Pod）的 IP；prj 网关有上百台且不按需求打标，无法安全自动选择
+const PRJ_GATEWAY_APP = 'server_rc_oa_gateway_java';
+const PRJ_GATEWAY_HINT_LIMIT = 5;
 // 网关探活接口：返回含 retcode 或 rc_gateway_ip 的 JSON 才算通过
 const PROBE_PATH = '/rc_oa_gateway/hawk_decision/alarm/rule/detail.json?alarm_rule_id=1';
 // 冷启动资源硬门禁（依据 AGENTS.md：2026-08-10 webpack 常驻 1.6GiB 曾把 WSL 打挂）
@@ -55,8 +58,8 @@ function usage() {
   doctor                     启动前置门禁检查（只读，不改任何东西）
   start                      门禁全绿后启动 npm run dev:index；已有本项目健康实例则复用不重启
   connect --env pre|prj      生成 whistle 网关规则（默认只打印文本，不写入）
-          [--app <name>]     prj 实例发现用的乐效应用名，默认 ${DEFAULT_PRJ_APP}
-          [--ip <ip>]        跳过发现直接指定网关 IP（prj 下仍会先探活）
+          [--ip <ip>]        网关 IP。prj 必填（项目环境网关机，见乐效项目环境页），探活通过才生成规则；
+                             prj 未传时只列出最近创建的 ${PRJ_GATEWAY_APP} 运行中实例作参考并退出
           [--whistle h[:p]]  覆盖 whistle 地址（默认取 \`ip route show default\` 的宿主机 IP:${WHISTLE_PORT}）
           [--apply]          调 whistle API 写入专属分组 ${WHISTLE_GROUP}（写入端点未实测，失败自动降级为手工粘贴）
   open                       打印访问地址并探测本地实例与网关当前指向`);
@@ -338,9 +341,9 @@ async function applyWhistleGroup(w, value) {
 
 // ---------- 乐效动态发现（prj） ----------
 
-async function discoverPrjCandidates(app) {
-    console.log(`· 通过乐效动态发现项目环境实例（app=${app}, env=prj），复用 query-app-instances 脚本...`);
-    const res = spawnSync(process.execPath, [QUERY_APP_SCRIPT, '--app', app, '--env', 'prj', '--json'], {
+async function listRecentPrjGateways() {
+    console.log(`· 查询项目环境网关实例（app=${PRJ_GATEWAY_APP}, env=prj），复用 query-app-instances 脚本...`);
+    const res = spawnSync(process.execPath, [QUERY_APP_SCRIPT, '--app', PRJ_GATEWAY_APP, '--env', 'prj', '--type', 'vm', '--json'], {
         encoding: 'utf8',
         timeout: 300000,
         maxBuffer: 64 * 1024 * 1024,
@@ -354,24 +357,14 @@ async function discoverPrjCandidates(app) {
     }
     if (res.status !== 0 || !json) {
         const errText = (res.stderr || stdout || '').trim().slice(0, 500);
-        throw new Error('乐效实例发现失败: ' + errText
+        throw new Error('乐效实例查询失败: ' + errText
             + '\n  提示: 若为登录态问题，先用 get-browser-session skill 刷新乐效登录态后重试');
     }
-    const candidates = [];
-    const push = (ip, label) => {
-        if (ip && !candidates.some((c) => c.ip === ip)) candidates.push({ ip, label });
-    };
-    const instances = json.instances || {};
-    for (const vm of instances.vm || []) push(vm.ip, `vm env=${vm.env} status=${vm.run_status}`);
-    for (const pod of instances.pod || []) {
-        push(pod.host_ip, `pod host_ip (${pod.pod_name || ''})`);
-        push(pod.pod_ip, `pod pod_ip (${pod.pod_name || ''})`);
-    }
-    if (!candidates.length) {
-        const avail = (json.available_envs || []).map((e) => `${e.env}(${e.count})`).join(', ');
-        throw new Error(`乐效未返回 prj 实例。该应用可用环境: ${avail || '未知'}`);
-    }
-    return candidates;
+    return ((json.instances || {}).vm || [])
+        .filter((vm) => vm.ip && vm.run_status === 'RUNNING')
+        .map((vm) => ({ ip: vm.ip, createTime: (vm.raw && vm.raw.create_time) || '' }))
+        .sort((a, b) => b.createTime.localeCompare(a.createTime))
+        .slice(0, PRJ_GATEWAY_HINT_LIMIT);
 }
 
 // ---------- doctor ----------
@@ -493,11 +486,11 @@ async function cmdStart() {
 async function cmdConnect(args) {
     const env = String(args.env || '').toLowerCase();
     if (env !== 'pre' && env !== 'prj') {
-        console.error('用法: connect --env pre|prj [--app <乐效应用名>] [--ip <网关IP>] [--whistle h[:p]] [--apply]');
+        console.error('用法: connect --env pre|prj [--ip <网关IP>] [--whistle h[:p]] [--apply]');
         process.exitCode = 2;
         return;
     }
-    const app = env === 'prj' ? String(args.app || DEFAULT_PRJ_APP) : null;
+    const app = env === 'prj' ? PRJ_GATEWAY_APP : null;
 
     // whistle API 地址动态发现（宿主机 IP 会变，不硬编码）
     let whistle = null;
@@ -524,27 +517,24 @@ async function cmdConnect(args) {
                 + 'WSL 直连与浏览器经 whistle 的网络路径不同，规则仍可能可用；若确认 IP 已变化，用 --ip 覆盖');
         }
     } else {
-        const candidates = args.ip
-            ? [{ ip: String(args.ip), label: '--ip 参数' }]
-            : await discoverPrjCandidates(app);
-        console.log(`· 候选实例 ${candidates.length} 个: ${candidates.map((c) => `${c.ip}(${c.label})`).join(', ')}`);
-        const failures = [];
-        for (const candidate of candidates) {
-            const probe = await probeGateway(candidate.ip);
-            if (probe.ok) {
-                ip = candidate.ip;
-                source = args.ip ? '--ip' : 'lexiao-discovery';
-                console.log(`· 探活通过: ${candidate.ip} (retcode=${probe.retcode})`);
-                break;
-            }
-            failures.push(`${candidate.ip}: ${probe.step} ${probe.detail}`);
+        if (!args.ip) {
+            // 多个项目环境的网关同时运行，任意一台都能探活通过，自动挑选会静默连到别人的环境
+            const recent = await listRecentPrjGateways();
+            console.error('prj 必须用 --ip 指定本项目环境的网关机 IP（乐效项目环境页可查；部署项目环境时新建的那台）。');
+            console.error(`最近创建的运行中 ${PRJ_GATEWAY_APP} 实例（仅供参考，不能据此认定归属）:`);
+            for (const vm of recent) console.error(`  - ${vm.ip}  create_time=${vm.createTime || '?'}`);
+            process.exitCode = 2;
+            return;
         }
-        if (!ip) {
-            console.error('探活全部失败，拒绝生成规则（项目环境 IP 必须探活通过才可用）:');
-            for (const failure of failures) console.error('  - ' + failure);
+        ip = String(args.ip);
+        source = '--ip';
+        const probe = await probeGateway(ip);
+        if (!probe.ok) {
+            console.error(`探活失败，拒绝生成规则（项目环境网关必须探活通过才可用）: ${ip}: ${probe.step} ${probe.detail}`);
             process.exitCode = 1;
             return;
         }
+        console.log(`· 探活通过: ${ip} (retcode=${probe.retcode})`);
     }
 
     const value = buildRuleValue(env, app, ip, source);
@@ -607,6 +597,32 @@ async function cmdOpen(args) {
             }
             const envGuess = envMatch ? `env=${envMatch[1]}` : (ip === DEFAULT_PRE_GATEWAY_IP ? 'env≈pre(等于默认常量)' : 'env=未知(自定义?)');
             console.log(`· whistle 分组 ${WHISTLE_GROUP}: ${group.selected ? '已启用' : '未启用（需在界面勾选）'}，网关指向 ${ip || '未识别'}（${envGuess}）`);
+        }
+        // 所有已启用分组里的 /rc_oa_gateway 规则：whistle 单选模式下启用别的分组会把专属分组关掉，
+        // 或者同时存在多条同 path 规则，浏览器实际走的网关就不是专属分组里那台
+        const gatewayRules = [];
+        for (const item of list.list) {
+            if (!item || !item.selected) continue;
+            for (const line of String(item.data || '').split('\n')) {
+                const parts = line.trim().split(/\s+/);
+                if (parts.length >= 2 && !parts[0].startsWith('#') && parts[1] === `${DOMAIN}/rc_oa_gateway`) {
+                    gatewayRules.push({ group: item.name, ip: parts[0] });
+                }
+            }
+        }
+        if (!gatewayRules.length) {
+            console.log('! 已启用的 whistle 分组里没有 /rc_oa_gateway 规则：接口会走真实 DNS（线上）');
+        } else {
+            console.log(`· 已启用分组中的 /rc_oa_gateway 规则: ${gatewayRules.map((r) => `${r.ip}(${r.group})`).join(', ')}`);
+            // 只有实际生效的网关 IP 与专属分组的目标不一致时才告警；用户分组指向同一台是正常用法
+            const targetIp = group ? (String(group.data || '').split('\n').map((l) => l.trim().split(/\s+/))
+                .find((parts) => parts.length >= 2 && !parts[0].startsWith('#') && parts[1] === `${DOMAIN}/rc_oa_gateway`) || [])[0] : null;
+            const mismatched = gatewayRules.filter((r) => targetIp && r.ip !== targetIp);
+            const ips = [...new Set(gatewayRules.map((r) => r.ip))];
+            if (mismatched.length || ips.length > 1) {
+                console.log(`! 已启用分组的 /rc_oa_gateway 指向与 ${WHISTLE_GROUP} 的目标 ${targetIp || '未知'} 不一致或有多个: `
+                    + `${gatewayRules.map((r) => `${r.ip}(${r.group})`).join(', ')}。请把实际启用分组里的这条规则改成目标网关 IP，或只保留一条同 path 规则`);
+            }
         }
     } catch (e) {
         console.log('! 读取 whistle 状态失败: ' + e.message);
