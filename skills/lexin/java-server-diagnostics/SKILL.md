@@ -2,7 +2,7 @@
 name: java-server-diagnostics
 description: "通过 java_app_diag MCP 对 Java 应用所在服务器做只读排查。Use when 用户要求排查某台服务器上 Java 应用的报错、进程、端口、JVM、线程或 GC；默认先只看 error.log 判断有没有问题，只有 error.log 暴露线索后才递进排查 info/debug/启动日志与运行时状态。"
 metadata:
-  version: 1.4.4
+  version: 1.4.5
 ---
 
 # java-server-diagnostics
@@ -89,7 +89,7 @@ metadata:
 3. 若 `error.log` 没有明确异常，结论停在“本次只查了 error.log，未发现明显错误线索”，不要继续扩大排查。
 4. 若工具返回自动连接失败且提示需要 password/otp，再向用户要最小认证信息。
 
-`java_app_diag` 已支持 `env` 和 `profile` 参数，调用时优先传 `env`，只有需要强制路径时才传 `profile`。如果无法从用户请求或发布上下文明确判断环境，默认按线上/生产机器处理，走线上堡垒机路径 `ssh.jumpserver.fenqile.cn`。`pre`、预发布、灰度、`prod`、线上、生产都映射到 `profile=online`；项目环境、`stable`、`test`、`prj` 映射到 `profile=dev`；DBA 类场景才使用 `profile=dba`。若工具返回自动连接失败且提示密码/OTP，要说明当前 `profile/host`，不要反复重试同一失败连接。
+`java_app_diag` 已支持 `env` 和 `profile` 参数，调用时优先传 `env`，只有需要强制路径时才传 `profile`。如果无法从用户请求或发布上下文明确判断环境，默认按线上/生产机器处理，走线上堡垒机路径 `ssh.jumpserver.lexincloud.com`。`pre`、预发布、灰度、`prod`、线上、生产都映射到 `profile=online`；项目环境、`stable`、`test`、`prj` 映射到 `profile=dev`；DBA 类场景才使用 `profile=dba`。若工具返回自动连接失败且提示密码/OTP，要说明当前 `profile/host`，不要反复重试同一失败连接。
 
 ### 2. 容器日志与历史日志
 

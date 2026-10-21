@@ -9,8 +9,9 @@ from mcp.server.fastmcp import FastMCP
 from devtools_mcp.common import bounded_int, error_text, json_text
 from devtools_mcp.java_app_diag_core import (
     BastionDiagSession,
-    app_log_dir,
-    app_log_path,
+    app_log_dir_candidates,
+    join_log_file,
+    pick_log_dir,
     ensure_success,
     q,
     resolve_bastion_profile,
@@ -31,6 +32,29 @@ session = BastionDiagSession()
 
 async def _execute(ip: str, command: str, timeout: int = 30, env: str = "", profile: str = "") -> str:
     return await session.execute(ip, command, bounded_int(timeout, 30, 5, 180), env=env, profile=profile)
+
+
+_log_dir_cache: dict[tuple[str, str], str] = {}
+
+
+async def _app_log_dir(ip: str, app_name: str, timeout: int = 30, env: str = "", profile: str = "") -> str:
+    """在目标机上确认实际存在的日志目录；只有一个候选时不额外执行命令，找到后按 (ip, app) 缓存。"""
+    candidates = app_log_dir_candidates(app_name)
+    if len(candidates) == 1:
+        return candidates[0]
+    key = (ip, app_name)
+    if key in _log_dir_cache:
+        return _log_dir_cache[key]
+    output = await _execute(ip, ensure_success("ls -d " + " ".join(q(c) for c in candidates) + " 2>/dev/null"), timeout, env=env, profile=profile)
+    found = pick_log_dir(candidates, output)
+    if found:
+        _log_dir_cache[key] = found
+    return found or candidates[0]
+
+
+async def _app_log_path(ip: str, app_name: str, file_name: str = "error.log", timeout: int = 30, env: str = "", profile: str = "") -> str:
+    validate_log_file(file_name)  # 非法文件名在任何远端命令之前拒绝
+    return join_log_file(await _app_log_dir(ip, app_name, timeout, env=env, profile=profile), file_name)
 
 
 async def _resolve_pid(
@@ -218,7 +242,7 @@ async def check_app_error_log(
                 "error": resolution.get("error", "unable to resolve app_name"),
                 "resolution": resolution,
             })
-        path = app_log_path(app, "error.log")
+        path = await _app_log_path(ip, app, "error.log", timeout, env=env, profile=profile)
     except ValueError as exc:
         return error_text(str(exc))
 
@@ -363,7 +387,7 @@ async def java_thread_summary(
 async def java_gc_log_summary(ip: str, app_name: str, timeout: int = 30, env: str = "", profile: str = "") -> str:
     """汇总共享日志目录中的 GC/OOM 线索和 GC 日志文件。"""
     try:
-        log_dir = app_log_dir(app_name)
+        log_dir = await _app_log_dir(ip, app_name, timeout, env=env, profile=profile)
     except ValueError as exc:
         return error_text(str(exc))
     gc_pattern = q("Full GC|OutOfMemoryError|GC overhead|Metaspace|java.lang.OutOfMemoryError")
@@ -403,7 +427,7 @@ async def local_health_get(
 async def list_log_files(ip: str, app_name: str, timeout: int = 30, env: str = "", profile: str = "") -> str:
     """仅限 VM/KVM 机器（经堡垒机 go 到 IP）；容器 Pod 不适用，Pod 日志用 query-app-logs 路径 B（container_log_check.js）。列出 /home/product/logs/{app_name}_logs/ 下的共享应用日志文件。"""
     try:
-        command = f"ls {q(app_log_dir(app_name))}/"
+        command = f"ls {q(await _app_log_dir(ip, app_name, timeout, env=env, profile=profile))}/"
     except ValueError as exc:
         return error_text(str(exc))
     return await _execute(ip, command, timeout, env=env, profile=profile)
@@ -421,7 +445,7 @@ async def tail_app_log(
 ) -> str:
     """仅限 VM/KVM 机器（经堡垒机 go 到 IP）；容器 Pod 不适用，Pod 日志用 query-app-logs 路径 B（container_log_check.js）。查看日志尾部。file_name 可为日志目录下任意相对路径（如 deploy.log、deploy/deploy_2026101410.log）或绝对路径，.gz 自动解压。"""
     try:
-        path = app_log_path(app_name, file_name)
+        path = await _app_log_path(ip, app_name, file_name, timeout, env=env, profile=profile)
         line_count = bounded_int(lines, 200, 1, 1000)
     except ValueError as exc:
         return error_text(str(exc))
@@ -446,7 +470,7 @@ async def grep_app_log(
 ) -> str:
     """仅限 VM/KVM 机器（经堡垒机 go 到 IP）；容器 Pod 不适用，Pod 日志用 query-app-logs 路径 B（container_log_check.js）。按关键字查询日志；file_name 可为日志目录下任意相对路径或绝对路径，.gz 自动解压。自动连接堡垒机，仅执行只读 grep/zcat/tail。"""
     try:
-        path = app_log_path(app_name, file_name)
+        path = await _app_log_path(ip, app_name, file_name, timeout, env=env, profile=profile)
         safe_keyword = validate_keyword(keyword)
         line_count = bounded_int(lines, 50, 1, 500)
     except ValueError as exc:
@@ -463,7 +487,7 @@ async def grep_app_log(
 async def recent_error_summary(ip: str, app_name: str, timeout: int = 30, env: str = "", profile: str = "") -> str:
     """仅限 VM/KVM 机器（经堡垒机 go 到 IP）；容器 Pod 不适用，Pod 日志用 query-app-logs 路径 B（container_log_check.js）。提取共享 error.log 里最近的 ERROR/Exception/Caused by 关键行。"""
     try:
-        path = app_log_path(app_name, "error.log")
+        path = await _app_log_path(ip, app_name, "error.log", timeout, env=env, profile=profile)
     except ValueError as exc:
         return error_text(str(exc))
     command = f"grep -i 'ERROR\\|Exception\\|Throwable\\|Caused by' {q(path)} | tail -80"

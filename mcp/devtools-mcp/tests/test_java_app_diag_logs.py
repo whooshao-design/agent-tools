@@ -61,5 +61,41 @@ class LogReadCommandTest(unittest.IsolatedAsyncioTestCase):
         execute.assert_not_awaited()
 
 
+class LogDirResolutionTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        server._log_dir_cache.clear()
+
+    def test_candidates_cover_hyphen_and_underscore_spellings(self):
+        self.assertEqual(core.app_log_dir_candidates("server_hawk-ynyw"), [
+            "/home/product/logs/server_hawk-ynyw_logs",
+            "/home/product/logs/server-hawk-ynyw_logs",
+            "/home/product/logs/server_hawk_ynyw_logs",
+        ])
+        self.assertEqual(core.app_log_dir_candidates("plainapp"), ["/home/product/logs/plainapp_logs"])
+        self.assertIsNone(core.pick_log_dir(["/a_logs"], "ls: cannot access\n__java_app_diag_done__"))
+
+    async def test_existing_hyphen_directory_is_used_and_cached(self):
+        hyphen = "/home/product/logs/server-hawk-decision-dispatcher-ynyw_logs"
+        outputs = [f"{hyphen}\n__java_app_diag_done__", "match", "match"]
+        with patch.object(server, "_execute", new_callable=AsyncMock, side_effect=outputs) as execute:
+            await server.grep_app_log("192.0.2.1", "server_hawk_decision_dispatcher_ynyw", "trace-id")
+            await server.grep_app_log("192.0.2.1", "server_hawk_decision_dispatcher_ynyw", "trace-id")
+        commands = [c.args[1] for c in execute.call_args_list]
+        self.assertTrue(commands[0].startswith("ls -d "))
+        self.assertIn(f"{hyphen}/error.log", commands[1])
+        self.assertEqual(len(commands), 3)  # 第二次命中缓存，不再 ls
+
+    async def test_single_candidate_skips_the_extra_ls(self):
+        with patch.object(server, "_execute", new_callable=AsyncMock, return_value="match") as execute:
+            await server.recent_error_summary("192.0.2.1", "plainapp")
+        execute.assert_awaited_once()
+        self.assertIn("/home/product/logs/plainapp_logs/error.log", execute.call_args.args[1])
+
+    def test_ls_probe_passes_the_bastion_guard(self):
+        import bastion_mcp.ssh_manager as bastion_ssh
+        cmd = core.ensure_success("ls -d " + " ".join(core.q(c) for c in core.app_log_dir_candidates("a_b")) + " 2>/dev/null")
+        self.assertIsNone(bastion_ssh.validate_command(cmd))
+
+
 if __name__ == "__main__":
     unittest.main()

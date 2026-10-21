@@ -24,9 +24,11 @@ pip install mcp paramiko
 cp config.json.example config.json
 ```
 
+堡垒机域名已从 `*.jumpserver.fenqile.cn` 迁到 `*.jumpserver.lexincloud.com`：线上 `ssh.jumpserver.lexincloud.com`，开发/stable `dev.ssh.jumpserver.lexincloud.com`。旧域名仍能建立 TCP 连接，但不返回 SSH banner，报错容易被误判为 aTrust 断开（2026-10-15 实测）。DBA 通道 `dba.ssh.jumpserver.fenqile.cn` 尚未核实新域名，示例暂保留旧值。
+
 ```json
 {
-  "bastion_host": "ssh.jumpserver.fenqile.cn",
+  "bastion_host": "ssh.jumpserver.lexincloud.com",
   "bastion_port": 39000,
   "username": "your_username",
   "password": "",

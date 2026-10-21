@@ -60,7 +60,7 @@ For Java apps, startup failures may appear only in the version-local `stdout.log
 
 For container deployment, inspect logs by logging into the instance. Prefer `/home/product/logs/<app_name>_logs/error.log`, `debug.log`, `info.log`, and any available startup/stdout log under the container. Container publish status in Lexiao is not sufficient evidence by itself; use it only to find the active pod, image/version, restart count, and login URL.
 
-For project-environment, stable, test, or prj machines, always use the dev bastion path `dev.ssh.jumpserver.fenqile.cn` for target-server diagnostics. Do not try production bastion first. If the available tool cannot use the dev bastion path, record the server-diagnostics blocker and continue only with non-server evidence; never request the password in chat.
+For project-environment, stable, test, or prj machines, always use the dev bastion path `dev.ssh.jumpserver.lexincloud.com` for target-server diagnostics. Do not try production bastion first. If the available tool cannot use the dev bastion path, record the server-diagnostics blocker and continue only with non-server evidence; never request the password in chat.
 
 Minimum log checks:
 

@@ -317,6 +317,23 @@ def app_log_path(app_name: str, file_name: str = "error.log") -> str:
     return _join_log_path(app_log_dir(app_name), validate_log_file(file_name))
 
 
+def app_log_dir_candidates(app_name: str) -> list[str]:
+    """应用名和日志目录名的横杠/下划线写法不一定一致（如 server-hawk-decision-dispatcher-ynyw_logs），按原样、横杠、下划线依次尝试。"""
+    app = validate_app(app_name)
+    names = list(dict.fromkeys([app, app.replace("_", "-"), app.replace("-", "_")]))
+    return [str(PurePosixPath("/home/product/logs") / f"{name}_logs") for name in names]
+
+
+def pick_log_dir(candidates: list[str], ls_output: str) -> str | None:
+    """从 `ls -d <候选...>` 的输出里按候选顺序取第一个存在的目录；都不存在时返回 None。"""
+    present = {line.strip().rstrip("/") for line in ls_output.splitlines()}
+    return next((c for c in candidates if c in present), None)
+
+
+def join_log_file(log_dir: str, file_name: str = "error.log") -> str:
+    return _join_log_path(log_dir, validate_log_file(file_name))
+
+
 def version_log_dir(app_name: str, version_tag: str) -> str:
     return str(PurePosixPath("/home/publish_product/server_java") / validate_app(app_name) / validate_version(version_tag) / "logs")
 

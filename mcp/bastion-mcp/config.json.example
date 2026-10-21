@@ -1,5 +1,5 @@
 {
-  "bastion_host": "ssh.jumpserver.fenqile.cn",
+  "bastion_host": "ssh.jumpserver.lexincloud.com",
   "bastion_port": 39000,
   "username": "your_username",
   "password": "your_password",
