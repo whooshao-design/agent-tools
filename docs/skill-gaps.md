@@ -11,6 +11,7 @@
 
 | 日期 | 触发任务 | 缺口 | 临时做法（当时的文件） | 建议落点 |
 |---|---|---|---|---|
+| 2026-10-21 | 填写 TQM 发布计划评审 2026102117000660 | 没有填写发布计划评审的能力：页面是 Ant Design，评审人用 `.ant-select-selection` 输入后选下拉；检查项单选一点即调 `review/modify_menu_check_by_status.json` 落库（status 2=通过）；“保存”调 `review/modify.json`（`dev_review_man` 等）；后台方案是应用模板时复制出的独立飞书 wiki 文档（`template/find_plan_by_id.json` 的 `feishu_node_token`） | 手写 Playwright 脚本 `fill.js`（已删除），方案文档用 `manage-feishu-doc edit` 写 | `manage-tqm-test-cases` 或新 TQM 评审 skill：填评审人、检查项、定位方案文档，不发起评审 |
 | 2026-09-20 ~ 09-23 | 乐信云查询 | 乐信云接口没有文档，agent 从前端 bundle 反查接口 | `lxcloud_app.js`、`lxcloud_query.js`、`lxjs/`、`lx*.mjs`、`lx_instances.mjs` | `query-mysql-data`、`query-app-instances` 的接口说明 |
 | 2026-09-21 ~ 09-22 | dispatcher / JedisProxy 排查 | 本地找不到框架源码，只能反编译依赖 | `dispatcher-xin-*bytecode.txt`、`dispatcher-JedisProxy-*.java`、`xin-separate-*bytecode.txt` | 工作区目录地图补框架源码仓库位置 |
 | 2026-09-22 | 告警 16620395 排查 | 告警排查时反复手工拉日志、Redis 配置、Pod 信息，多次查询输出为空 | `alert16620395-*`（约 30 个 JSON） | `diagnose-healthy-alert` 的标准取证步骤 |
