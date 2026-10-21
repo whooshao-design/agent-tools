@@ -79,6 +79,7 @@
 | `lexiao-deploy` | 乐效构建、发布和验收流程 | `lexiao` |
 | `lexiao-hippo-publish-authorize` | 在乐效版本里登记需随版本发布的 hippo namespace | - |
 | `manage-publish-plan` | 在 publish3 为乐效需求新建或修改（仅待审批）前端普通应用发布计划：历史计划取默认值、前端描述混入后端事项检查、同需求查重、先 dry-run 再保存并回读；不做发布申请与发布单，后端计划后续补充 | `browser_session` |
+| `manage-publish-order` | 前端发布单：需求分支合入 product（临时 worktree、`merge --no-ff`），在 publish3 新建前端发布单（线上、版本/补丁、预发布+灰度+线上）并打包；不推送、不发布、不结单，后端发布单后续补充 | `browser_session` |
 | `query-app-instances` | 通过乐效只读查询应用各环境 VM 和容器实例地址 | `browser_session` |
 
 ### 米霍克 / OA

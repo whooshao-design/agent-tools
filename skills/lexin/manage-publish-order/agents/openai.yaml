@@ -1,0 +1,6 @@
+interface:
+  display_name: "Manage Publish Order"
+  short_description: "前端发布单：需求分支合入 product，在 publish3 新建发布单并打包（不推送）"
+  default_prompt: "使用 $manage-publish-order 把需求分支合并到 product，在 publish3 新建前端发布单（线上、版本、预发布+灰度+线上）并打包，不推送不发布。"
+policy:
+  allow_implicit_invocation: true
