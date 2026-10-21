@@ -11,6 +11,7 @@
 
 | 日期 | 触发任务 | 缺口 | 临时做法（当时的文件） | 建议落点 |
 |---|---|---|---|---|
+| 2026-10-19 | SLA 邮件停发的时间点归因 | `query-mysql-data` 只有在线 SQL，缺少乐信云历史慢查询和实际节点监控取证；页面快照可能在异步数据到达前显示“0 条”，慢查询 `first_time/last_time` 又与应用执行时刻不一致，窄窗口易漏查 | 用 `launchLockedContext` 复用 main profile，监听页面实际请求，读取 `POST /v1/mysql/slow_query`（db_type/start/end/service_name/query_user/page/size/order_by_field/order_by_type），按指纹保留完整 SQL、耗时、扫描行数；从性能监控 iframe 发现 Grafana 数据源 `/graph/api/datasources/proxy/1/api/v1/query_range`，对同一主库查历史物理读取、CPU、IO、锁及 uptime；临时探针和原始响应已删除，脱敏证据归档于 `/home/joney/docs/diagnostics/20261019-sla-mail-root-cause-evidence.json` | 增加 MySQL 诊断只读能力：实例节点映射、慢查询指纹及分页、时间字段语义/采集延迟提示、同节点历史监控对照；禁止把未完成页面加载、查询失败或窄窗口空结果解释为健康或未执行 |
 | 2026-09-20 ~ 09-23 | 乐信云查询 | 乐信云接口没有文档，agent 从前端 bundle 反查接口 | `lxcloud_app.js`、`lxcloud_query.js`、`lxjs/`、`lx*.mjs`、`lx_instances.mjs` | `query-mysql-data`、`query-app-instances` 的接口说明 |
 | 2026-09-23 | Hippo namespace 操作 | 新建 namespace、授权相关接口靠反查前端 | `hippo_index.html`、`ConfigAppController.js`、`ConfigBaseInfoController.js`、`namespace-panel-directive.js` | `configure-hippo`（先核对 SKILL.md 是否已覆盖） |
 | 2026-09-21 | ClickHouse 查询 | HTTP 通道的调用方式需要临时探测 | `clickhouse-http-probe.cjs` | `query-clickhouse-water` |
@@ -28,6 +29,9 @@
 
 | 日期 | 缺口 | 处理 |
 |---|---|---|
+| 2026-10-21 | TQM 测试阶段填写用例执行结果只能手写脚本（`test_plan_case/get_test_plan_cases.json` + `edit.json`） | `manage-tqm-test-cases` 1.1.0 新增 `plan-cases` 与 `execute`（默认当前阶段、已有不同结果需 `--overwrite`、先 dry-run、写后回读；不推进阶段） |
+| 2026-10-20 | 没有质量管理平台（tqm.oa.fenqile.com）的 skill/MCP：给需求版本 1426731 建用例时接口、payload 和枚举值只能从页面 bundle 反查；模块树名称与用例 node_path 不一致；`networkidle` 打开页面会挂住 | 新建 `manage-tqm-test-cases` 1.0.0：`tqm_cases.js` 在已登录页面内调接口，支持 version / modules / list / create（≤10 条、同名跳过、`--dry-run`、写后回读）；不支持编辑与删除 |
+| 2026-10-20 | packageCopySupportRealTimeQuery 项目环境联调：`start-local-frontend connect --env prj` 拿 manage Pod IP 当网关探活必失败；agent 用线上 passport 的 profile 登录态调项目环境网关返回 16051006，只能改走扁鹊 + SQL；先把页面测试步骤交给了用户 | `start-local-frontend` 1.1.0：prj 必须 `--ip` 指定网关机（未传时列出最近创建的 `server_rc_oa_gateway_java` 实例作参考），说明登录态限制；`dev-verify-change` 1.9.0：部署后由 agent 先联调、用户只做最终验收，新增“环境联调”路由（扁鹊直调 + SQL 前后指纹、测试数据前缀、登录态拿不到时不转发 Cookie）。待补：`query-mysql-data` 精简行输出 |
 | 2026-10-16 | 没有乐空间 OKR 只读/草稿写入工具，O/KR 与草稿要临时写 Playwright 脚本读取 | 新建 `okr-weekly-progress`：`lib/leco.mjs` 在页面上下文读 `get_obj_list_adjust`/`get_obj_detail`，write 整组读改写草稿 |
 | 2026-10-16 | `manage-feishu-doc` 不能列目录或按标题搜索；设备码授权在 WSL 下因 `accounts.feishu.cn` 证书（LSA Root CA）x509 失败 | 新增 `list-folder`（`space:document:retrieve`）；lark-cli wrapper 追加按 SHA1 固定的 LSA Root CA；authorize 自动打开浏览器 |
 | 2026-09-24 | markitdown MCP 进程加载 onnxruntime 遥测，每个进程留下 `/tmp/mat-debug-<pid>.log` | launcher 默认设置 `ORT_DISABLE_TELEMETRY=1` |
@@ -39,3 +43,6 @@
 | 2026-10-14 | diagnose-healthy-alert 只能回放告警自身 prom_ql；排查需要任意 PromQL（provider QPS/耗时、Redis 宿主机指标）时只能手写 Python 复用 `~/.cache/healthy-alert-token.json` 调 `query_range`；多个 skill 共用 `browser-profiles/main`，并发会话下频繁 ProcessSingleton 冲突 | 待补 `--query <promql> --from/--to` 子命令；profile 冲突已处理：所有启动点改走 `launchLockedContext` 排队，乐效实例/日志平台/bianque 改为 `session_cache.js` 缓存优先 |
 | 2026-10-16 | `tapd-download` 依赖未安装的 Playwright MCP 并要求手贴 Cookie；get-browser-session 的 HeadlessChrome UA 被 TAPD WAF 403，只能手写抓取脚本 | 新增 `fetch-tapd-story`（普通 Chrome UA + 拦截 `common_get_info` 取结构化数据），`dev-clarify-task` 1.8.0 增加“获取原始需求”步骤；删除 `~/.claude/commands/tapd-download.md` 安装副本（源文件仍在 risk-claude，重跑其 install 会恢复） |
 | 2026-10-19 | packageCopySupportRealTimeQuery 方案评审 3 轮；2026-09-14 check-express-rule 评审 | dev-review-* 没有编排脚本，冻结指纹、repo-snapshot-v1、机械检查、前后快照、审批记录全靠手写，手写信封把 S.version 标错（MG-002） | 新增 `skills/dev-workflow/scripts/review_round.py`（freeze / envelope / snapshot / persist），版本从产物文件读取、上一轮版本取审批记录更正值；`dev-review-solution` 增加“编排脚本”一节，委派契约 §5 指向该脚本；`tests/test_review_round.py` |
+| 2026-10-20 | 本地前端组件 PoC 截图：chrome-devtools MCP 连不上 Windows Chrome（172.30.208.1:9222），WSL 内 ms-playwright chromium / headless_shell 缺 `libasound.so.2` 无法启动，只能 `apt-get download libasound2` 解包后 `LD_LIBRARY_PATH` 临时跑 | 待补：get-browser-session 或 verify-browser-qa 提供“本地 HTML 截图”入口，并在 doctor 中检测/提示缺失的 Chromium 系统库 |
+| 2026-10-20 | query-oa-gateway-interface 按文档用 `browser_session.js --request` POST `query_page_list.json`（已带 Origin/Referer）仍返回 `16051006`；改用 `fetch_with_session` GET 同一端点带 query 参数即成功 | 待核实：skill 文档补充 GET 方式为首选，或修正 `--request` POST 的会话/头部处理 |
+| 2026-10-20 | `review_round.py envelope --prior-round` 只认 S/C（`key = "C" if test-cases-review else "S"`），需求评审阶段定向复审会因 `prior_env["inputs"]["S"]` 缺失失败；需求 v1 也没有归档目录约定，只能手工从 v2 反推 v1 并核对字节指纹后手写 diff 和 review-materials.md 走全量复审 | 已补：`prior_material` 支持 `requirements-review`（key=R，比对 `requirements/versions/<v>/` 归档）；`persist`/`ledger` 只给本轮新提出的 finding 计分、区分 `environment`/`reviewer` 无效原因并在终端打印评分卡（delegation-contract §3.2）。待补：`dev-clarify-task` 约定修订前归档旧版本 |
