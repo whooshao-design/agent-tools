@@ -28,12 +28,12 @@
 | 2026-10-20 | query-oa-gateway-interface 查网关规则 | 按文档用 `browser_session.js --request` POST `query_page_list.json`（已带 Origin/Referer）仍返回 `16051006` | 改用 `fetch_with_session` GET 同一端点带 query 参数，成功 | 核实后在 skill 文档把 GET 作为首选，或修正 `--request` POST 的会话/头部处理 |
 | 2026-10-20 | packageCopySupportRealTimeQuery 项目环境联调 | 联调时用 `query-mysql-data` 查前后数据，输出整行宽表不便比对 | 手工挑列 | `query-mysql-data` 提供精简行输出（指定列或紧凑格式） |
 | 2026-10-20 | 需求评审定向复审（review_round 需求阶段） | 需求 v1 没有归档目录约定，复审只能从 v2 反推 v1 并核对字节指纹 | 手写 diff 与 review-materials.md 走全量复审 | `dev-clarify-task` 约定修订需求前把旧版本归档到 `requirements/versions/v<N>/` |
-| 2026-10-21 | 在 publish3 新建前端发布计划（需求 1426731，计划 44107） | 没有 publish3 发布计划的 skill：表单字段、业务名与审批人联动、选择应用弹窗都要现场探测 | 手写 Playwright 脚本按页面填写：业务名（下拉，例如“风控研发中心”，保存后记录为“风控业务线”）→ 项目类型“前端” → 需求 ID（自动带出需求名称和链接）→ 上线时间 → 抄送测试/leader/抄送总监（随业务名联动）→ 通知提醒 → 版本描述（发布指南模板）→ 选择应用（搜索 web_mihawk_oa）→ 保存 → 确认弹框；列表接口 `publish_server.oa.fenqile.com/publishPlan/list`（表单编码，按 creator/id 过滤）可读历史计划作参考，新增走 `publishPlan/add`；页面加载慢，需等待“业务名”标签出现再操作；用完已删除 | 新建 publish3 发布计划 skill：读取发布指南模板、参考上次计划的业务名与审批人、dry-run 预览表单、保存后回读 |
 
 ## 已处理
 
 | 日期 | 缺口 | 处理 |
 |---|---|---|
+| 2026-10-21 | 在 publish3 新建前端发布计划只能手写 Playwright 脚本（需求 1426731，计划 44107）：表单字段、业务名与审批人联动、选择应用弹窗都要现场探测 | 新建 `manage-publish-plan` 1.0.0：`history`/`options`/`show` 只读，`create`/`modify` 先 dry-run、写后回读，前端描述的后端关键词检查与同需求查重；只支持前端计划，后端计划后续补充 |
 | 2026-10-21 | ClickHouse HTTP 通道调用方式需要临时探测（2026-09-21，`clickhouse-http-probe.cjs`） | 复现确认：`query-clickhouse-water` 的 `clickhouse_http.js` 能直接列实例、执行 SELECT；补充服务端要求 SELECT 带 `WHERE` 和 `LIMIT` 的说明，profile 锁等待与其他脚本统一为 5 分钟（1.4.1） |
 | 2026-10-21 | 堡垒机域名迁移后示例与文档仍写旧域名；`java_app_diag` 写死 `<app>_logs`，不认横杠目录（2026-10-15 印尼 dispatcher 排查） | `config.json.example`、bastion README、`java-server-diagnostics`、`lexiao-deploy` 改为 `ssh`/`dev.ssh.jumpserver.lexincloud.com`；`java_app_diag` 按原样、横杠、下划线三种写法用 `ls -d` 探测实际目录并按 IP+应用缓存。DBA 域名与其余问题留在待处理 |
 | 2026-10-14 | 多个 skill 共用 `browser-profiles/main`，并发会话下频繁 ProcessSingleton 冲突；排查需要任意 PromQL（provider QPS/耗时、Redis 宿主机指标）时手写 Python 复用 `~/.cache/healthy-alert-token.json` 调 `query_range` | profile 冲突：所有启动点改走 `launchLockedContext` 排队，乐效实例/日志平台/bianque 改为 `session_cache.js` 缓存优先。任意 PromQL：`inspect-healthy-metrics` 早已支持 `--queries-json`（instant/range，`--start/--end` 回查，2026-10-21 核实），未处理的是 diagnose-healthy-alert 文档没有指过去，并入待处理 2026-10-14 ~ 10-16 雷神规则一条 |

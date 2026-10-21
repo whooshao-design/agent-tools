@@ -1,0 +1,6 @@
+interface:
+  display_name: "Manage Publish Plan"
+  short_description: "在 publish3 为乐效需求新建或修改前端普通应用发布计划，先 dry-run 再保存并回读"
+  default_prompt: "使用 $manage-publish-plan 参考我的历史发布计划取默认值，按发布指南模板写前端版本描述，先 dry-run 给我确认，再在 publish3 保存发布计划并回读。"
+policy:
+  allow_implicit_invocation: true
