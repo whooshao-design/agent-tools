@@ -2,7 +2,7 @@
 name: query-clickhouse-water
 description: 只读查询 ClickHouse 流水；DecisionWaterHawkCK 默认走 bastion_dba、通道不可用时自动降级乐信云 HTTP，其他 CK 实例默认走乐信云 HTTP，支持用户显式指定通道。Use when 用户要求查询预发布/灰度/线上/stable/测试 ClickHouse 流水、决策/规则/trace cost 流水，验证流水口径或优化查询 SQL；输出执行 SQL 和查询结果。
 metadata:
-  version: 1.4.0
+  version: 1.4.1
 ---
 
 # query-clickhouse-water
@@ -32,7 +32,7 @@ metadata:
 
 1. 使用 `/home/joney/projects/ai/agent-tools/skills/lexin/query-clickhouse-water/scripts/clickhouse_http.js`，显式传 `--env` 和已确认的 `--instance`；实例不明时先 `--action instances`，再用 `databases`/`tables` 探查。
 2. 脚本在同一 BrowserContext 内复用登录态、读取当前用户并查询，不导出凭据。需要登录时交给 `get-browser-session`，不重复启动浏览器或自行索取凭据。
-3. HTTP 目前接受单条 `SELECT`/`SHOW`，表结构用 `SHOW CREATE TABLE <database.table>`；不要发 `DESCRIBE`，也不要假设有 `system` 库权限。复杂 SQL 无法等价改写时报告接口限制，不自动改走堡垒机。
+3. HTTP 目前接受单条 `SELECT`/`SHOW`，其中 `SELECT` 服务端要求必须带 `WHERE` 和 `LIMIT`，表结构用 `SHOW CREATE TABLE <database.table>`；不要发 `DESCRIBE`，也不要假设有 `system` 库权限。复杂 SQL 无法等价改写时报告接口限制，不自动改走堡垒机。
 4. 同时校验 HTTP 状态、外层 `code`、内层 `code` 和 `query_code`。错误与成功的空结果分别报告。
 
 ## DBA 堡垒机步骤

@@ -138,7 +138,9 @@ async function run(args) {
   const options = queryOptions(args); // Validate before opening any browser or making requests.
   const url = options.baseUrl + PAGE_PATH;
   const paths = resolvePaths(args, url);
-  const release = await acquireProfileLock(paths.profileDir, { timeoutMs: 30000, pollMs: 100 });
+  // 与其他 browser_session 脚本一致：profile 被别的会话占用时排队等待（默认 5 分钟，BROWSER_PROFILE_LOCK_TIMEOUT_MS 可调）
+  const lockTimeoutMs = Number(process.env.BROWSER_PROFILE_LOCK_TIMEOUT_MS) || 300000;
+  const release = await acquireProfileLock(paths.profileDir, { timeoutMs: lockTimeoutMs, pollMs: 100 });
   let context;
   try {
     const chromium = createRequire(paths.playwrightPackage)('playwright').chromium;

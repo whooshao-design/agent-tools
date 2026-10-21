@@ -28,6 +28,8 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/query-clickhouse-water/scr
   --env stable --query 'SELECT count() AS matched_rows FROM risk_control_base_db.t_strategy_node_decision_water WHERE 1 = 0 LIMIT 1'
 ```
 
+乐信云服务端要求 `SELECT` 同时带 `WHERE` 和 `LIMIT`，缺任一个都返回 `code 403`（「SQL必须带where条件」「SQL必须带有limit条件」，2026-10-21 实测）；只验证通道时可用 `SELECT 1 AS ok WHERE 1 = 1 LIMIT 1`。
+
 复杂 SQL 用 `--sql-file <本地文件>`，与 `--query` 互斥；每次只执行一条 SQL。支持 `--profile` 和会话层已有的 profile 环境变量。脚本只实现 HTTP；`DecisionWaterHawkCK` 默认会在联网前提示改用 DBA MCP，用户显式指定 HTTP 或 DBA 通道不可用触发降级时，额外传 `--transport http`。
 
 ## 接口契约
