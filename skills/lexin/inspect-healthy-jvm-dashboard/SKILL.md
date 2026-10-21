@@ -2,7 +2,7 @@
 name: inspect-healthy-jvm-dashboard
 description: "Use when 需要只读查看、理解或对比 Healthy/雷神 JVM、JVM 内存、G1 GC 监控看板，例如 https://healthy.lexincloud.com/show/dashboard/11147 或 /dashboards/14333；自动复用浏览器登录态，回读大盘配置，整理变量、面板、PromQL、页面快照、明显配置问题，并可按 app/env 拉取实例级 JVM 指标摘要。"
 metadata:
-  version: 1.1.3
+  version: 1.1.5
 ---
 
 # inspect-healthy-jvm-dashboard
@@ -76,7 +76,11 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/inspect-healthy-jvm-dashbo
   --no-page
 ```
 
-输出时优先说明：
+看板解读按下列信息说明；应用巡检先给结论与覆盖范围，再用紧凑表格列出关键指标和异常实例，对比看板时只突出差异。
+本 skill 不加载复杂故障报告指南。作为故障排查的指标来源时提供观察结果与限制，根因链和处置方案由综合分析主流程负责。
+当前值、区间峰值与基线分开标注单位、窗口和采样时间；无数据不能判为正常，GC/内存变化与业务故障的相关性不能直接写成因果。
+
+按实际查询保留：
 
 - 看板 id、名称、标签、面板数量。
 - 变量定义，特别是 `app/env/ident` 的 label source。
