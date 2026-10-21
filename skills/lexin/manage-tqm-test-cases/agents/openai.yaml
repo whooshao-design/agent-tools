@@ -1,0 +1,6 @@
+interface:
+  display_name: "Manage TQM Test Cases"
+  short_description: "在质量管理平台给需求版本查看模块与用例，批量创建核心测试用例"
+  default_prompt: "使用 $manage-tqm-test-cases 解析这个 TQM 版本链接，选好模块，提炼不超过 10 条核心用例，先 dry-run 给我确认再创建，并回读校验。"
+policy:
+  allow_implicit_invocation: true
