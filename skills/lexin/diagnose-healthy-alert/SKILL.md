@@ -2,7 +2,7 @@
 name: diagnose-healthy-alert
 description: 从雷神告警排查告警原因。Use when 用户给出 Healthy/雷神告警 ID 或 alert-show-detail 链接、要求排查告警原因、判断告警是真实故障还是误报或规则过敏、需要把告警关联到触发指标、埋点代码和应用日志。
 metadata:
-  version: 1.1.3
+  version: 1.1.5
 ---
 
 # diagnose-healthy-alert
@@ -193,7 +193,9 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/diagnose-healthy-alert/scr
 ## 输出约束
 
 - 只读：不调用任何写接口，不改规则、大盘、指标、配置或服务。
-- 报告结构：告警画像 → 逐层证据 → 定性结论 → 建议动作（谁来做、改哪里）。
+- 默认按“定性结论与已知影响 → 决定性证据及限制 → 建议动作”简短回复；规则过敏、单次抖动等已能清楚解释的告警，不生成完整报告，不按 L0–L6 堆叠过程。
+- 仅当用户要求故障复盘/完整根因报告，或需要综合日志、指标、代码、配置/变更等证据解释故障机制、业务影响与处置取舍时，读取 [复杂故障分析报告指南](/home/joney/projects/ai/agent-tools/skills/common/debug-systematic/references/diagnostic-output.md)。按需展示关键数字、根因链、时间线和分阶段建议；多实例或告警次数多本身不触发报告。
+- 保留告警 ID、规则、环境/实例、触发与恢复时间、查询窗口和代码基线。区分告警恢复与业务恢复；回放命中点数不能当真实告警次数，未验证业务结果时不写“主流程无影响”。
 - 不输出 token、ticket、Cookie、完整登录跳转参数。
 - `receiver`、`app_owner` 等人员字段可在终端回复中保留，但不要写入外发文档或外部服务。
 - 代码检索超过 3 轮仍未定位点位时，可委派 `Explore` 子代理，默认不委派。

@@ -2,7 +2,7 @@
 name: java-server-diagnostics
 description: "通过 java_app_diag MCP 对 Java 应用所在服务器做只读排查。Use when 用户要求排查某台服务器上 Java 应用的报错、进程、端口、JVM、线程或 GC；默认先只看 error.log 判断有没有问题，只有 error.log 暴露线索后才递进排查 info/debug/启动日志与运行时状态。"
 metadata:
-  version: 1.4.2
+  version: 1.4.4
 ---
 
 # java-server-diagnostics
@@ -131,7 +131,9 @@ metadata:
 
 ## 汇总结论
 
-回复优先包含：
+默认先给限定范围的结论，再给关键证据和最小下一步；日志快检、进程/端口检查、单项 GC/线程诊断按实际结果简短回复，不加载完整报告指南。
+仅当用户要求故障复盘/完整根因报告，或深入诊断需要综合多类证据解释故障机制、业务影响与处置取舍时，读取 [复杂故障分析报告指南](/home/joney/projects/ai/agent-tools/skills/common/debug-systematic/references/diagnostic-output.md)，按需选用其中模块。作为告警等主流程的取证步骤时只返回证据与限制，由主流程汇总。
+不为填报告扩大诊断范围。以下信息按实际查询范围保留：
 
 - 查询的 IP、应用、日志文件和时间范围。
 - 关键异常类型、traceId、业务字段、最近出现时间和出现次数。
