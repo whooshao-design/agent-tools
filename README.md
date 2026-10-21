@@ -11,7 +11,7 @@
 |---|---|
 | `build-codeagent` | 跨模型生成与轻量互审；支持 dev-workflow 正式委派、候选轮换和实际参与登记 |
 | `spawn-model-agent` | 用户点名某个模型做子任务时，另起该模型的 agent 进程（Claude/Codex 宿主自动选包装器），权限同普通子 agent |
-| `debug-systematic` | 系统化调试方法论：复现→定位→根因→验证 |
+| `debug-systematic` | 系统化调试方法论：复现→定位→根因→验证；复杂故障分析按需使用[报告指南](skills/common/debug-systematic/references/diagnostic-output.md) |
 | `convert-epub-to-markdown` | EPUB 转 Markdown，保留原件与图片，自动选择全文或分卷并校验正文 |
 | `skill-authoring` | 按仓库约定创建/维护 skill 的元技能 |
 | `recall-agent-sessions` | 跨 Claude Code 与 Codex 只读检索本机历史会话，并为指定会话生成交接摘要 |
@@ -90,7 +90,7 @@
 | `query-oa-gateway-interface` | 查询前端 URL 映射的后端接口和代码链路 | `browser_session` |
 | `locate-frontend-page` | 从 Dubbo 接口、网关 URL 或 MySQL 表反查线上前端页面地址 | `browser_session` |
 | `start-local-frontend` | 米霍克 OA 前端本地启动、whistle 网关切预发布/项目环境（IP 动态发现）与页面访问 | `browser_session` |
-| `manage-tqm-test-cases` | 在质量管理平台（TQM）给需求版本查看模块与用例，批量创建核心测试用例（≤10 条、同名跳过、先 dry-run、写后回读） | `browser_session` |
+| `manage-tqm-test-cases` | 在质量管理平台（TQM）给需求版本查看模块与用例，批量创建核心测试用例（≤10 条、同名跳过），在测试阶段填写用例执行结果；先 dry-run、写后回读 | `browser_session` |
 
 ### 接口调用
 
@@ -114,13 +114,13 @@
 
 | Skill | 说明 | 配套 MCP |
 |---|---|---|
-| `java-server-diagnostics` | Java 应用服务器只读诊断：默认先查 `error.log`，支持 warn/轮转日志及独立堡垒机会话 | `java_app_diag` |
-| `query-app-logs` | 统一查应用日志：服务器/容器日志复用 `java_app_diag` 与容器脚本，超出保存期或跨机器汇总走日志平台 | `java_app_diag`、`browser_session` |
+| `java-server-diagnostics` | Java 应用服务器只读诊断：默认先查 `error.log`，支持 warn/轮转日志及独立堡垒机会话；深入故障分析按需组织报告 | `java_app_diag` |
+| `query-app-logs` | 统一查应用日志：服务器/容器或日志平台；结论先行，保留数量口径与查询覆盖范围 | `java_app_diag`、`browser_session` |
 | `healthy-dashboard-config` | stable/线上大盘读写、版本比对、动态筛选和页面查询验证 | `healthy` |
 | `inspect-healthy-metrics` | 批量 PromQL、指标上报状态、最后样本和注册辅助信息，共用持久会话 | `healthy`, `browser_session` |
-| `inspect-healthy-jvm-dashboard` | 只读查看雷神 JVM/G1 看板，整理变量、面板、PromQL 和页面快照 | `healthy`, `browser_session` |
+| `inspect-healthy-jvm-dashboard` | 只读查看雷神 JVM/G1 看板，整理变量、面板、PromQL 和页面快照；巡检突出结论、指标与异常实例 | `healthy`, `browser_session` |
 | `register-healthy-metrics` | 查询、注册和复查 Healthy/雷神指标 | `browser_session` |
-| `diagnose-healthy-alert` | 从雷神告警排查原因：事件、规则、指标回放、埋点代码到日志的证据链 | `browser_session` |
+| `diagnose-healthy-alert` | 从雷神告警排查原因：事件到日志的证据链；默认简短定性，复杂故障按需组织证据、影响与处置建议 | `browser_session` |
 | `inspect-app-call-topology` | 复用 Healthy 登录态，支持多应用合并查询 FSOF/Dubbo 上下游流量与同窗口服务归属；异常下钻默认关闭，按需开启；按应用生成主报告 | `browser_session` |
 | `okr-weekly-progress` | 汇总飞书周报、本机会话与提交，按乐空间 OKR 的 KR 归类生成本地周报（mdview 评审），确认后整组读改写只存草稿；每周五 13:40 systemd 定时生成 | `okr_weekly.mjs`、`install_timer.py` |
 
@@ -128,7 +128,7 @@
 
 | Skill | 说明 | 配套 MCP |
 |---|---|---|
-| `jenkins-pipeline-fix` | Jenkins 流水线诊断与修复（默认只读诊断，修复需显式开启） | `jenkins` |
+| `jenkins-pipeline-fix` | Jenkins 流水线诊断与修复：根因先行，区分首错与跳过阶段（默认只读诊断，修复需显式开启） | `jenkins` |
 | `fix-sonarqube-issues` | 评估并修复 SonarQube 新代码周期 BLOCKER/CRITICAL 问题 | `sonarqube` |
 
 带配套 MCP 的 skill 均为"MCP 优先、脚本兜底"双轨。

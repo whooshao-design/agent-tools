@@ -3,7 +3,8 @@
 // Query and create test cases on the 质量管理平台 (TQM, tqm.oa.fenqile.com) for one 乐效 requirement version.
 // Every API call runs inside a logged-in TQM page via fetch(credentials: 'include');
 // cookies never leave the browser and are never printed or written to disk.
-// Supported writes: create only (test_case/add.json), at most MAX_CASES per run. No edit, no delete.
+// Supported writes: create cases (test_case/add.json, at most MAX_CASES per run) and record execution results of a
+// test stage (test_plan_case/edit.json, at most MAX_RESULTS per run). No case edit, no delete, no stage transition.
 const fs = require('fs');
 const path = require('path');
 const { createRequire } = require('module');
@@ -20,11 +21,18 @@ const API = {
   modules: 'oa/test_track/web/test_case/get_test_case_module_list.json',
   list: 'oa/test_track/web/test_case/list_test_case.json',
   add: 'oa/test_track/web/test_case/add.json',
+  planCases: 'oa/test_track/web/test_plan_case/get_test_plan_cases.json',
+  planCaseEdit: 'oa/test_track/web/test_plan_case/edit.json',
 };
 const SESSION_URL = `${API_BASE}oa/api/user/session.json?resource_sn=RD_OA`;
 const MAX_CASES = 10;
 const MAX_NAME_LENGTH = 255;
 const PRIORITIES = new Set(['P0', 'P1', 'P2', 'P3']);
+const MAX_RESULTS = 30;
+// Stages that hold executable plan cases; key is the plan_list_detail `stage` value.
+const TEST_STAGES = { project_test: '项目环境测试', pre_test: '预发布环境测试', product_test: '线上验证' };
+// Execution result values used by the page's 执行结果 select; Chinese labels are accepted as input.
+const RESULT_STATUS = { Pass: '通过', Failure: '失败', Blocking: '阻塞', Skip: '跳过', Prepare: '未开始' };
 const LIST_PAGE_SIZE = 100;
 const LIST_MAX_PAGES = 50;
 // The page keeps long-polling requests open, so `networkidle` never settles; load the DOM and give the SPA a moment.
@@ -35,9 +43,13 @@ const USAGE = `Usage:
   node tqm_cases.js modules --url=<链接> --match=<关键字> [--sample]
   node tqm_cases.js list    --url=<链接>
   node tqm_cases.js create  --url=<链接> --file=<cases.json> [--node-id=<模块id>] [--maintainer=<OA用户名>] [--dry-run]
+  node tqm_cases.js plan-cases --url=<链接> [--stage=project_test|pre_test|product_test]
+  node tqm_cases.js execute --url=<链接> --file=<results.json> [--stage=...] [--overwrite] [--dry-run]
 
 Common: [--profile <dir>] (default: get-browser-session main profile)
-create writes at most ${MAX_CASES} cases, skips names that already exist in the version, and re-reads the list afterwards.`;
+create writes at most ${MAX_CASES} cases, skips names that already exist in the version, and re-reads the list afterwards.
+execute records at most ${MAX_RESULTS} results in one test stage (default: the version's current stage), skips cases that
+already have a different result unless --overwrite, and re-reads the stage afterwards.`;
 
 class TqmError extends Error {}
 
@@ -200,6 +212,83 @@ function splitByExisting(payloads, existingNames) {
   };
 }
 
+function normalizeStatus(value, label) {
+  const text = String(value || '').trim();
+  const byValue = Object.keys(RESULT_STATUS).find((key) => key.toLowerCase() === text.toLowerCase());
+  const byLabel = Object.keys(RESULT_STATUS).find((key) => RESULT_STATUS[key] === text);
+  const status = byValue || byLabel;
+  if (!status || status === 'Prepare') {
+    throw new TqmError(`${label}: status must be one of Pass/Failure/Blocking/Skip (通过/失败/阻塞/跳过)`);
+  }
+  return status;
+}
+
+// Picks the plan (test stage) whose plan cases are executed: --stage wins, else the version's current stage.
+function resolveStagePlan(version, stageArg) {
+  const stage = String(stageArg && stageArg !== true ? stageArg : version.stage || '').trim();
+  if (!TEST_STAGES[stage]) {
+    throw new TqmError(`stage ${stage || '(none)'} has no executable cases; pass --stage=${Object.keys(TEST_STAGES).join('|')}`);
+  }
+  const plan = (version.stages || []).find((item) => item.stage === stage);
+  if (!plan || !plan.id) throw new TqmError(`version has no plan for stage ${stage}`);
+  return { stage, stageDesc: TEST_STAGES[stage], planId: String(plan.id), planStatus: plan.status || '-' };
+}
+
+// Maps result entries (by case number `num`, or exact `name`) onto the stage's plan cases.
+function buildExecutionPayloads(rawResults, planRows, options) {
+  if (!Array.isArray(rawResults)) throw new TqmError('results file must contain a JSON array');
+  if (rawResults.length === 0) throw new TqmError('results file is empty');
+  if (rawResults.length > MAX_RESULTS) {
+    throw new TqmError(`refusing to record ${rawResults.length} results: at most ${MAX_RESULTS} per run`);
+  }
+  const byNum = new Map(planRows.map((row) => [String(row.num), row]));
+  const byName = new Map(planRows.map((row) => [String(row.name).trim(), row]));
+  const seen = new Set();
+  const toWrite = [];
+  const skipped = [];
+  rawResults.forEach((raw, index) => {
+    const label = `result #${index + 1}`;
+    if (!raw || typeof raw !== 'object') throw new TqmError(`${label}: must be an object`);
+    const key = raw.num !== undefined && raw.num !== null && raw.num !== '' ? String(raw.num).trim() : null;
+    const row = key ? byNum.get(key) : byName.get(String(raw.name || '').trim());
+    if (!row) throw new TqmError(`${label}: case ${key || raw.name || '(no num/name)'} is not in this stage`);
+    if (seen.has(row.id)) throw new TqmError(`${label}: case ${row.num} listed twice`);
+    seen.add(row.id);
+    if (row.step_model && row.step_model !== 'TEXT') {
+      throw new TqmError(`${label}: case ${row.num} uses step_model=${row.step_model}; only TEXT cases are supported, record it on the page`);
+    }
+    const status = normalizeStatus(raw.status, label);
+    const actual = toParagraphs(raw.actual);
+    if (!actual) throw new TqmError(`${label}: actual (实际结果) is required`);
+    const current = row.status || 'Prepare';
+    if (current !== 'Prepare' && current !== status && !options.overwrite) {
+      skipped.push({ num: row.num, name: row.name, current, status });
+      return;
+    }
+    toWrite.push({
+      id: row.id,
+      case_id: row.case_id,
+      status,
+      results: '[]',
+      project_id: options.projectId,
+      name: row.name,
+      actual_result: actual,
+      num: row.num,
+      current,
+    });
+  });
+  return { toWrite, skipped };
+}
+
+function formatPlanTable(rows) {
+  const lines = ['编号\t执行结果\t执行人\t等级\t名称'];
+  for (const row of rows) {
+    const status = row.status || 'Prepare';
+    lines.push(`${row.num ?? '-'}\t${RESULT_STATUS[status] || status}\t${row.executor || '-'}\t${row.priority || '-'}\t${row.name}`);
+  }
+  return lines.join('\n');
+}
+
 function marks(row) {
   const result = [];
   if (Number(row.is_abnormal) === 1) result.push('异常');
@@ -288,6 +377,7 @@ async function fetchVersion(page, ids) {
     stage: row.stage ?? null,
     stageId: row.current_stage_id ?? null,
     needTest: row.is_need_test ?? null,
+    stages: Array.isArray(row.list) ? row.list.map((item) => ({ stage: item.stage, id: item.id, status: item.status })) : [],
   };
 }
 
@@ -309,6 +399,19 @@ async function fetchCases(page, body) {
 
 function listVersionCases(page, ids) {
   return fetchCases(page, { name: '', versionId: ids.versionId, projectId: ids.projectId, latest: 0, nodeIds: [] });
+}
+
+async function listPlanCases(page, ids, planId) {
+  const rows = [];
+  for (let pageNo = 1; pageNo <= LIST_MAX_PAGES; pageNo += 1) {
+    const json = await callApi(page, 'planCases', {
+      planId, plan_id: planId, projectId: ids.projectId, name: '', nodeIds: [], page: pageNo, limit: LIST_PAGE_SIZE,
+    });
+    const batch = Array.isArray(json.result_rows) ? json.result_rows : [];
+    rows.push(...batch);
+    if (batch.length < LIST_PAGE_SIZE) return rows;
+  }
+  throw new TqmError(`more than ${LIST_PAGE_SIZE * LIST_MAX_PAGES} plan cases; refusing to continue with a partial list`);
 }
 
 async function resolveMaintainer(page, override) {
@@ -435,7 +538,63 @@ async function cmdCreate(page, ids, args) {
   }
 }
 
-const COMMANDS = { version: cmdVersion, modules: cmdModules, list: cmdList, create: cmdCreate };
+async function cmdPlanCases(page, ids, args) {
+  const version = await fetchVersion(page, ids);
+  const plan = resolveStagePlan(version, args.stage);
+  const rows = await listPlanCases(page, ids, plan.planId);
+  console.log(`${version.versionName} / ${plan.stageDesc}（${plan.stage}，计划状态 ${plan.planStatus}）用例 ${rows.length} 条:`);
+  console.log(formatPlanTable(rows));
+}
+
+async function cmdExecute(page, ids, args) {
+  const dryRun = Boolean(args['dry-run']);
+  const version = await fetchVersion(page, ids);
+  const plan = resolveStagePlan(version, args.stage);
+  const rows = await listPlanCases(page, ids, plan.planId);
+  const { toWrite, skipped } = buildExecutionPayloads(args.results, rows, { projectId: ids.projectId, overwrite: Boolean(args.overwrite) });
+
+  console.log(`目标: ${version.versionName} / ${plan.stageDesc}（${plan.stage}，计划状态 ${plan.planStatus}）`);
+  console.log(`文件结果 ${toWrite.length + skipped.length} 条；待写入 ${toWrite.length} 条；已有不同结果跳过 ${skipped.length} 条`);
+  for (const item of skipped) {
+    console.log(`  跳过(已是${RESULT_STATUS[item.current] || item.current}，需 --overwrite 才改为${RESULT_STATUS[item.status]}): ${item.num} ${item.name}`);
+  }
+  for (const item of toWrite) {
+    console.log(`  待写入: ${item.num} ${RESULT_STATUS[item.current] || item.current} -> ${RESULT_STATUS[item.status]} | ${item.name}`);
+  }
+  if (dryRun) {
+    console.log('\n--dry-run: 未写入。实际结果摘要:');
+    for (const item of toWrite) console.log(`  ${item.num}: ${item.actual_result.slice(0, 200)}`);
+    return;
+  }
+  if (toWrite.length === 0) {
+    console.log('没有需要写入的结果。');
+    return;
+  }
+  let written = 0;
+  for (const item of toWrite) {
+    const { num, current, ...payload } = item;
+    try {
+      await callApi(page, 'planCaseEdit', payload);
+      written += 1;
+      console.log(`  已写入: ${num} ${RESULT_STATUS[item.status]}`);
+    } catch (error) {
+      console.error(`  写入失败，停止后续写入: ${num} ${item.name}: ${error.message}`);
+      break;
+    }
+  }
+  const after = await listPlanCases(page, ids, plan.planId);
+  const byId = new Map(after.map((row) => [row.id, row]));
+  const mismatched = toWrite.slice(0, written).filter((item) => (byId.get(item.id) || {}).status !== item.status);
+  console.log(`\n回读校验: 写入 ${written}/${toWrite.length} 条；状态不符 ${mismatched.length} 条`);
+  console.log(formatPlanTable(after));
+  if (mismatched.length || written < toWrite.length) {
+    throw new TqmError(`incomplete: wrote ${written}/${toWrite.length}, status mismatch after re-read: ${mismatched.map((item) => item.num).join(', ') || 'none'}`);
+  }
+}
+
+const COMMANDS = {
+  version: cmdVersion, modules: cmdModules, list: cmdList, create: cmdCreate, 'plan-cases': cmdPlanCases, execute: cmdExecute,
+};
 
 async function main(argv) {
   const args = parseArgs(argv);
@@ -451,6 +610,12 @@ async function main(argv) {
     args.cases = readCasesFile(args.file);
     if (Array.isArray(args.cases) && args.cases.length > MAX_CASES) {
       throw new TqmError(`refusing to create ${args.cases.length} cases: at most ${MAX_CASES} per run`);
+    }
+  }
+  if (command === 'execute') {
+    args.results = readCasesFile(args.file);
+    if (Array.isArray(args.results) && args.results.length > MAX_RESULTS) {
+      throw new TqmError(`refusing to record ${args.results.length} results: at most ${MAX_RESULTS} per run`);
     }
   }
   const paths = resolvePaths(args, TQM_HOME);
@@ -475,7 +640,11 @@ if (require.main === module) {
 
 module.exports = {
   MAX_CASES,
+  MAX_RESULTS,
   buildCasePayloads,
+  buildExecutionPayloads,
+  normalizeStatus,
+  resolveStagePlan,
   escapeHtml,
   flattenModules,
   formatCaseTable,

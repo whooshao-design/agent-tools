@@ -5,7 +5,11 @@ const fs = require('fs');
 const path = require('path');
 const {
   MAX_CASES,
+  MAX_RESULTS,
   buildCasePayloads,
+  buildExecutionPayloads,
+  normalizeStatus,
+  resolveStagePlan,
   flattenModules,
   parseArgs,
   parseVersionUrl,
@@ -85,3 +89,61 @@ test('example cases file is valid input', () => {
   const modules = [{ id: '3357dd38-2815-4c3b-ad89-c48259a9e900', name: '乐包列表', path: '决策支撑/决策引擎/乐包管理/乐包列表', isCaseNode: 1 }];
   assert.equal(buildCasePayloads(cases, { ...OPTIONS, modules }).length, 7);
 });
+
+const PLAN_ROWS = [
+  { id: 'pc-1', case_id: 'c-1', num: 101, name: '主流程', status: 'Prepare', step_model: 'TEXT' },
+  { id: 'pc-2', case_id: 'c-2', num: 102, name: '取消', status: 'Failure', step_model: 'TEXT' },
+  { id: 'pc-3', case_id: 'c-3', num: 103, name: '步骤用例', status: 'Prepare', step_model: 'STEP' },
+];
+
+test('normalizeStatus accepts values and Chinese labels, rejects 未开始', () => {
+  assert.equal(normalizeStatus('pass', 'r'), 'Pass');
+  assert.equal(normalizeStatus('阻塞', 'r'), 'Blocking');
+  assert.throws(() => normalizeStatus('Prepare', 'r'), /status must be/);
+  assert.throws(() => normalizeStatus('ok', 'r'), /status must be/);
+});
+
+test('resolveStagePlan uses --stage, else the current test stage', () => {
+  const version = { stage: 'project_test', stages: [{ stage: 'project_test', id: 'plan-p' }, { stage: 'pre_test', id: 'plan-pre' }] };
+  assert.equal(resolveStagePlan(version).planId, 'plan-p');
+  assert.equal(resolveStagePlan(version, 'pre_test').planId, 'plan-pre');
+  assert.throws(() => resolveStagePlan({ ...version, stage: 'case_design' }), /no executable cases/);
+  assert.throws(() => resolveStagePlan(version, 'product_test'), /no plan for stage/);
+});
+
+test('buildExecutionPayloads maps by num or name and protects existing results', () => {
+  const { toWrite, skipped } = buildExecutionPayloads([
+    { num: 101, status: '通过', actual: ['a', '<b>'] },
+    { name: '取消', status: 'Pass', actual: 'x' },
+  ], PLAN_ROWS, { projectId: 'p-1', overwrite: false });
+  assert.equal(toWrite.length, 1);
+  assert.deepEqual(
+    { id: toWrite[0].id, case_id: toWrite[0].case_id, status: toWrite[0].status, results: toWrite[0].results, project_id: toWrite[0].project_id },
+    { id: 'pc-1', case_id: 'c-1', status: 'Pass', results: '[]', project_id: 'p-1' },
+  );
+  assert.equal(toWrite[0].actual_result, '<p>a</p><p>&lt;b&gt;</p>');
+  assert.deepEqual(skipped.map((item) => item.num), [102]);
+  const forced = buildExecutionPayloads([{ name: '取消', status: 'Pass', actual: 'x' }], PLAN_ROWS, { projectId: 'p-1', overwrite: true });
+  assert.equal(forced.toWrite.length, 1);
+});
+
+test('buildExecutionPayloads rejects unknown, duplicate, STEP and oversized input', () => {
+  const opts = { projectId: 'p-1' };
+  assert.throws(() => buildExecutionPayloads([{ num: 999, status: 'Pass', actual: 'x' }], PLAN_ROWS, opts), /not in this stage/);
+  assert.throws(() => buildExecutionPayloads([{ num: 101, status: 'Pass', actual: 'x' }, { name: '主流程', status: 'Pass', actual: 'y' }], PLAN_ROWS, opts), /listed twice/);
+  assert.throws(() => buildExecutionPayloads([{ num: 103, status: 'Pass', actual: 'x' }], PLAN_ROWS, opts), /only TEXT/);
+  assert.throws(() => buildExecutionPayloads([{ num: 101, status: 'Pass' }], PLAN_ROWS, opts), /actual/);
+  const many = Array.from({ length: MAX_RESULTS + 1 }, (_, i) => ({ num: i, status: 'Pass', actual: 'x' }));
+  assert.throws(() => buildExecutionPayloads(many, PLAN_ROWS, opts), /at most/);
+});
+
+test('results example file is well formed', () => {
+  const results = JSON.parse(fs.readFileSync(path.join(__dirname, '../references/results.example.json'), 'utf8'));
+  assert.ok(results.length > 0 && results.length <= MAX_RESULTS);
+  for (const item of results) {
+    assert.ok(item.num);
+    assert.equal(normalizeStatus(item.status, 'example'), 'Pass');
+    assert.ok(Array.isArray(item.actual) && item.actual.length);
+  }
+});
+
