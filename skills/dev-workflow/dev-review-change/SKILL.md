@@ -2,7 +2,7 @@
 name: dev-review-change
 description: Use when 代码改动已形成可评审结果，需要基于变更证据做代码评审，确认是否存在正确性、架构、安全或稳定性问题，并给出可执行后续动作。
 metadata:
-  version: 1.11.0
+  version: 1.12.0
 ---
 
 # dev-review-change
@@ -54,7 +54,7 @@ metadata:
 - `change_revision` 中全部代码 `producer_agent_refs[]`
 - `change_revision` 中各 `DEV-*` 的来源、最终状态、实际写集和执行证据
 
-若 `G`、验证对象或 `change_revision` 与当前工作区不匹配，停止代码准入结论并回最早失效阶段；不能用针对旧版本的验证或评审继续收口。
+若 `G`、验证对象或 `change_revision` 与当前工作区不匹配，停止代码准入结论并回最早失效阶段；不能用针对旧版本的验证或评审继续收口。评审后代码又被修改（含他人重构）时，旧评审不覆盖新代码；用户明确表示新 revision 评审通过时以此收口；否则按 `references/frontend-review.md` §2 选择重新评审或定点复审。记录新旧 revision、复核方式与结果。
 
 正式评审必须由 `agent-tools-change-reviewer` 或满足同一契约的独立 agent 执行，并遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/delegation-contract.md`。身份、只读、写入、工具面和结果结构的准入只以该契约为准；任何一项无法由运行时事实证明时，不得形成准入事实。派发前按委派契约 §3.1 让用户选择 reviewer 模型（外部模型、同模型子 agent 或双评审），同一需求已选过时沿用；经 `spawn-model-agent` 以 `--readonly --tools Read,Grep,Glob` 运行的外部模型进程同样满足本契约。编排器冻结 `G`、`change_revision`、diff 和验证证据，只传原始任务、冻结输入及上一轮待复核 findings，不传实现者的推理过程或预期结论。
 
@@ -77,6 +77,8 @@ metadata:
 - 架构：分层、职责、复用、改动边界是否失控
 - 安全：输入处理、权限、敏感信息、危险用法
 - 稳定性：失败处理、回退路径、可观测性、发布风险
+
+评审写集含前端文件（`.vue`/`.js`/`.ts`/样式等，或位于前端仓库）时，按 `references/frontend-review.md` §1 补查组件惯例、仓库编码规范文件、手写 VNode/命令式弹窗、注入风险和前后端发布顺序。
 
 复杂度、冗余与严重度的统一判定口径见 `references/severity-and-complexity.md`。只报告有当前变更证据和实际影响的问题，不把个人风格偏好升级为 finding。
 

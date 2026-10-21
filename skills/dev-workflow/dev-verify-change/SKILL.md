@@ -2,7 +2,7 @@
 name: dev-verify-change
 description: Use when 代码改动已完成，需要跑测试、执行构建检查或做验证：围绕本次变更做最小必要验证，给出验证结论，并决定是否需要扩大验证范围。
 metadata:
-  version: 1.9.0
+  version: 1.10.0
 ---
 
 # dev-verify-change
@@ -67,7 +67,7 @@ metadata:
 
 原则是先小后大，先验证核心路径，再决定是否扩展。
 
-执行前先读取 `references/test-execution-routing.md`：仅在仓库实际使用 Maven/TestNG、存在覆盖率要求或需要诊断测试发现规则时，消费其中相应小节。仓库文档和真实配置优先于通用建议。
+执行前先读取 `references/test-execution-routing.md`：仅在仓库实际使用 Maven/TestNG、改动含前端文件、存在覆盖率要求或需要诊断测试发现规则时，消费其中相应小节。仓库文档和真实配置优先于通用建议。
 
 部署到测试或项目环境后，联调验证由 agent 先执行，用户只做最后的人工验收：不要把检查项步骤直接交给用户代跑。agent 用接口调用、数据核对、日志和浏览器自动化覆盖能覆盖的检查项；只有确实做不到的（如需要用户本人登录态的页面交互）才列为验收项交给用户，并写明原因。环境联调的路由见 `references/test-execution-routing.md` 的“环境联调”小节。
 
