@@ -2,7 +2,7 @@
 name: manage-publish-order
 description: 在乐信发布系统 publish3（publish3.oa.fenqile.com）为乐效需求准备前端发布单：先把需求分支合并到前端发布分支（默认 product）并推送，再在“应用版本发布”新建前端发布单（线上、版本/补丁、预发布+灰度+线上）并打包；不推送、不发布、不回滚、不结单。Use when 用户要求合并前端代码到 product 后建发布单、新建前端发布单、给发布单打包、查看自己的发布单；后端发布单后续补充；不负责发布计划（用 manage-publish-plan）、乐效部署或推送上线。
 metadata:
-  version: 1.0.0
+  version: 1.0.1
 ---
 
 # manage-publish-order
@@ -60,5 +60,5 @@ node $S pack   --id=<发布单号> [--dry-run]
 
 ## 未覆盖
 
-- `pack` 按发布指南与页面文案实现，尚未在真实发布单上执行过；第一次使用时要看着输出确认每个弹框都被正确处理，失败就停下让用户在页面上操作。
+- `merge`、`create`、`pack` 已在真实发布单上跑通（2026-10-21，web_mihawk_oa 发布单 2201389：补丁、tag 1.65.1，打包成功、文件状态正常）。
 - 后端发布单、补丁类型、OA/稳定等其他环境组合、发布 CDN 文件未实测。
