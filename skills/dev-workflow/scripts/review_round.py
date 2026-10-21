@@ -218,16 +218,16 @@ def prior_material(args, frozen) -> tuple[dict, dict]:
             sys.exit(f"targeted re-review needs {p}")
         inputs[key], fps[key] = str(p), fp(p)
     # the approval record carries orchestrator corrections, so prefer its version label over the envelope's
-    key = "C" if args.stage == "test-cases-review" else "S"
+    key = {"test-cases-review": "C", "requirements-review": "R"}.get(args.stage, "S")
     prior_rec = json.loads((prd / "approval-record.json").read_text())
     prior_version = (prior_rec.get("bound_inputs", {}).get(key) or prior_env["inputs"][key]).get("version")
     inputs[f"prior_{key}"] = {"version": prior_version, "fingerprint": prior_env["input_fingerprints"][key]}
     fps[f"prior_{key}"] = prior_env["input_fingerprints"][key]
     if key == "C":  # archived as test-cases/versions/test-cases-v<N>.md
         pairs = [(base / "test-cases/versions" / f"test-cases-{prior_version}.md", Path(frozen["C"]["ref"]) / f["path"]) for f in frozen["C"]["files"]]
-    else:
-        old_dir = base / "solution-design/versions" / str(prior_version)
-        pairs = [(old_dir / f["path"], Path(frozen["S"]["ref"]) / f["path"]) for f in frozen["S"]["files"]]
+    else:  # archived as solution-design/versions/<v>/ or requirements/versions/<v>/
+        old_dir = base / {"R": "requirements", "S": "solution-design"}[key] / "versions" / str(prior_version)
+        pairs = [(old_dir / f["path"], Path(frozen[key]["ref"]) / f["path"]) for f in frozen[key]["files"]]
     if all(old.exists() for old, _ in pairs):
         diff = b"".join(subprocess.run(["diff", "-u", str(old), str(new)], capture_output=True).stdout for old, new in pairs)
         (rd / "evidence").mkdir(parents=True, exist_ok=True)
@@ -377,17 +377,41 @@ def check_findings(findings) -> list:
     return errors
 
 
+def prior_finding_ids(rd: Path) -> set:
+    """Finding IDs already raised in earlier rounds of the same stage; re-listed in this round they score nothing."""
+    cur, ids = int(rd.name.split("-")[1]), set()
+    for p in rd.parent.glob("round-*/findings.json"):
+        if int(p.parent.name.split("-")[1]) < cur:
+            ids |= {f.get("id") for f in json.loads(p.read_text())}
+    return ids
+
+
+def invalid_cause(rec: dict, rd: Path):
+    """None for a valid round. 'environment' when the reviewer itself passed every check and only the write-set
+    snapshot moved (a read-only reviewer cannot write, so another writer changed the monitored scope); else 'reviewer'."""
+    if rec["review_execution"]["execution_status"] == "valid":
+        return None
+    checks = rec["checks"]
+    structure = json.loads((rd / "evidence/structure-check.json").read_text())
+    reviewer_ok = (all(checks[k]["passed"] for k in ("independence", "read_only", "tool_surface"))
+                   and all(v for k, v in structure.items() if k != "status"))
+    return "environment" if reviewer_ok and not checks["write_set_empty"]["passed"] else "reviewer"
+
+
 def ledger_rows(rd: Path, req_dir: Path) -> list:
-    """One reviewer-ledger row per reviewer of a persisted round (primary, and secondary for dual review)."""
+    """One reviewer-ledger row per reviewer of a persisted round (primary, and secondary for dual review).
+    finding_counts only covers findings first raised in this round; carried-over IDs go to carried_findings."""
     rec = json.loads((rd / "approval-record.json").read_text())
     findings = json.loads((rd / "findings.json").read_text())
     env = json.loads((rd / "delegation-envelope.json").read_text())
+    prior = prior_finding_ids(rd)
     rows = []
     for slot, rt_path in (("primary", rd / "evidence/runtime-record.json"), ("secondary", rd / "secondary/runtime-record.json")):
         if not rt_path.exists():
             continue
         rt = json.loads(rt_path.read_text())
-        mine = [f for f in findings if slot in (f.get("found_by") or ["primary"])]
+        found = [f for f in findings if slot in (f.get("found_by") or ["primary"])]
+        mine = [f for f in found if f.get("id") not in prior]
         counts = {}
         for f in mine:
             key = f"{f.get('classification')}/{f.get('severity')}"
@@ -399,26 +423,53 @@ def ledger_rows(rd: Path, req_dir: Path) -> list:
                      "reviewer_agent_ref": rt["reviewer_agent_ref"], "selected_by": rt.get("selected_by"),
                      "review_mode": env["inputs"].get("review_mode"), "execution_valid": rec["review_execution"]["execution_status"] == "valid"
                      if slot == "primary" else rt.get("valid"), "conclusion": rec["conclusion"] if slot == "primary" else None,
-                     "finding_counts": counts, "escaped_from": sorted({f["escaped_from"] for f in findings if f.get("escaped_from")})
+                     "invalid_cause": invalid_cause(rec, rd) if slot == "primary" else (None if rt.get("valid") else "reviewer"),
+                     "finding_counts": counts, "carried_findings": len(found) - len(mine),
+                     "spot_check": [{"id": f.get("id"), "classification": f.get("classification"), "evidence": f.get("evidence")}
+                                    for f in mine if f.get("classification") not in VALID_CLASSES],
+                     "escaped_from": sorted({f["escaped_from"] for f in findings if f.get("escaped_from")})
                      if slot == "primary" else [], "exit_code": surface.get("exit_code"),
                      "wall_s": surface.get("wall_s"), "input_tokens": surface.get("input_tokens"), "output_tokens": surface.get("output_tokens")})
     return rows
 
 
-def append_ledger(rd: Path, req_dir: Path) -> None:
+def append_ledger(rd: Path, req_dir: Path) -> list:
     done = set()
     if LEDGER.exists():
         done = {(r.get("approval_id"), r.get("slot")) for r in map(json.loads, LEDGER.read_text().splitlines()) if r}
     LEDGER.parent.mkdir(parents=True, exist_ok=True)
+    rows = ledger_rows(rd, req_dir)
     with LEDGER.open("a") as out:
-        for row in ledger_rows(rd, req_dir):
+        for row in rows:
             if (row["approval_id"], row["slot"]) not in done:
                 out.write(json.dumps(row, ensure_ascii=False) + "\n")
     print(f"ledger: {LEDGER}")
+    return rows
+
+
+def scorecard(rows: list) -> str:
+    """Terminal scorecard for one round (delegation-contract.md 3.2): the orchestrator shows it to the user as is."""
+    sys.path.insert(0, str(TOOLS_ROOT / "skills/common/spawn-model-agent/scripts"))
+    try:
+        import spawn_model_agent as sma
+    finally:
+        sys.path.pop(0)
+    stats = sma.ledger_stats(str(LEDGER))
+    head = rows[0]
+    lines = [f"## 评审打分：{head['requirement']} / {head['stage']} / round {head['round']}", "",
+             "| reviewer | 模型 | 选择方式 | 执行 | 本轮新提出 | 往轮带入（不计分） |", "|---|---|---|---|---|---|"]
+    for r in rows:
+        status = "有效" if r["execution_valid"] else {"environment": "作废（环境原因，不计 reviewer）"}.get(r["invalid_cause"], "无效（reviewer 原因）")
+        found = "、".join(f"{k.replace('/', ' ')}×{v}" for k, v in sorted(r["finding_counts"].items())) or "无"
+        lines.append(f"| {r['slot']} {r['backend']} | {r['model']} | {r['selected_by'] or '—'} | {status} | {found} | {r['carried_findings']} |")
+    checks = [c for r in rows for c in r["spot_check"]]
+    lines += ["", "需抽查（噪音 / 契约误读）：" + ("；".join(f"{c['id']} {c['classification']}（{c['evidence']}）" for c in checks) if checks else "无")]
+    lines += [f"累计实战 {b}：{sma.format_stats(stats.get(b))}" for b in dict.fromkeys(r["backend"] for r in rows)]
+    return "\n".join(lines)
 
 
 def cmd_ledger(args) -> None:
-    append_ledger(round_dir(args), Path(args.req_dir))
+    print(scorecard(append_ledger(round_dir(args), Path(args.req_dir))))
 
 
 def cmd_persist(args) -> None:
@@ -490,11 +541,12 @@ def cmd_persist(args) -> None:
            "can_enter_next_stage": valid and conclusion in PASSING, "production_release_approved": False,
            "created_at": datetime.datetime.now().astimezone().isoformat()}
     write_json(rd / "approval-record.json", rec)
-    append_ledger(rd, Path(args.req_dir))
+    rows = append_ledger(rd, Path(args.req_dir))
     print(json.dumps({"valid": valid, "conclusion": rec["conclusion"], "reviewer": rec["reviewer"], "secondary": bool(secondary),
                       "open": counts, "material_gaps": rec["material_gaps"], "unexpected_tools": unexpected, "write_set_equal": equal,
                       "runtime_surface_ok": runtime["runtime_surface_ok"],
                       "structure_failures": [k for k, v in structure.items() if k != "status" and not v]}, ensure_ascii=False))
+    print(scorecard(rows))
     if not valid:
         sys.exit(1)
 

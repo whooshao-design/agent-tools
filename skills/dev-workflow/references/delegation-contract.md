@@ -74,7 +74,11 @@ spawn/stop 后，编排器另外生成可信运行记录，至少包含：派发
 
 编排器归类 findings 时，在 `findings.json` 的每条 finding 上写 `classification`（`成立需修` / `接受取舍` / `契约误读` / `噪音`）；`契约误读` 与 `噪音` 必须在 `evidence` 写出原文位置，`persist` 对缺分类或缺证据的 findings 拒绝生成审批记录。双评审时用 `found_by`（`primary` / `secondary`）标出由谁提出。后续轮次、代码评审或验证发现 Medium 及以上问题，且该问题在某个已通过版本中已经存在时，在新 finding 上写 `escaped_from: <那轮 approval_id>`，记作那轮 reviewer 的漏检。
 
-`persist` 据此向本机 `~/.local/state/agent-tools/reviewer-ledger.jsonl` 追加每个 reviewer 一行（模型、阶段、轮次、复核模式、执行是否有效、按分类与严重度的计数、漏检引用、耗时与 token）；该文件含需求名，不进仓库。已落盘的轮次可用 `review_round.py ledger` 补记。编排器往往也是产出者，判定 reviewer 意见为噪音存在利益冲突，因此每轮汇报须列出被判为 `噪音` 或 `契约误读` 的 finding 供用户抽查。
+`persist` 据此向本机 `~/.local/state/agent-tools/reviewer-ledger.jsonl` 追加每个 reviewer 一行（模型、阶段、轮次、复核模式、执行是否有效、无效原因、按分类与严重度的计数、往轮带入数、待抽查条目、漏检引用、耗时与 token）；该文件含需求名，不进仓库。已落盘的轮次可用 `review_round.py ledger` 补记。
+
+- 复审信封里沿用往轮 ID 的 finding（无论 Open 还是 Resolved）只计入"往轮带入"，不重复计分；分类计数只覆盖本轮首次提出的 finding。
+- reviewer 的身份、只读、工具面和结果结构全部通过，仅因前后快照不一致而作废的轮次，无效原因记为 `environment`：它由其他写入方造成，照常计入该 reviewer 的实战，不记"无效"；其余无效轮次记为 `reviewer`。环境作废仍不能形成审批事实，按 §2 重新冻结。
+- `persist` 与 `ledger` 收口时在终端打印本轮评分卡（reviewer 与模型、选择方式、执行状态、本轮新提出的分类计数、往轮带入数、待抽查条目、该后端累计实战）。编排器每轮向用户汇报时原样展示评分卡，不等用户追问。编排器往往也是产出者，判定 reviewer 意见为噪音存在利益冲突，评分卡中的 `噪音` 与 `契约误读` 条目就是供用户抽查的清单。
 
 ## 4. `delegation-result-v1`
 

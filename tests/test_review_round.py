@@ -149,13 +149,14 @@ class ReviewRoundTest(unittest.TestCase):
         self.assertIsNone(rec["conclusion"])
         self.assertFalse(rec["checks"]["write_set_empty"]["passed"])
 
-    def spawn_job(self, name, env, conclusion, tools=("Read", "Grep", "Glob")):
+    def spawn_job(self, name, env, conclusion, tools=("Read", "Grep", "Glob"), backend=None):
         job = Path(self.tmp.name) / name
         job.mkdir()
-        res = {"schema": "delegation-result-v1", "task_id": "t1", "role": env["role"], "status": "complete",
+        name = backend or name
+        res = {"schema": "delegation-result-v1", "task_id": env["task_id"], "role": env["role"], "status": "complete",
                "input_fingerprints": env["input_fingerprints"], "conclusion": conclusion, "changed_files": [], "unresolved": []}
         (job / "result.md").write_text("# 评审\n\n```json\n" + json.dumps(res, ensure_ascii=False) + "\n```")
-        (job / "meta.json").write_text(json.dumps({"backend": name, "session_id": name + "-sid", "model": name + "-model",
+        (job / "meta.json").write_text(json.dumps({"backend": name, "session_id": job.name + "-sid", "model": name + "-model",
                                                    "readonly": True, "exit_code": 0, "effective_tools": list(tools),
                                                    "mcp_servers": [], "tools_used": ["Read"]}))
         return job
@@ -217,6 +218,63 @@ class ReviewRoundTest(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 run(*self.base, "persist", "--findings", str(findings), "--spawn-job", str(self.spawn_job(f"claude-qwen{len(bad[0])}", env, "通过")))
         self.assertFalse((self.rd / "approval-record.json").exists())
+
+    def review_round(self, base, task_id, findings, job, disturb=None, prior=None):
+        """One external-reviewer round on R; returns (exit raised, stdout)."""
+        run(*base, "freeze", "--artifact", "R=requirements:summary.md")
+        extra = ["--prior-round", str(prior)] if prior else []
+        run(*base, "envelope", "--task-id", task_id, "--role", "agent-tools-requirements-reviewer", "--scope", "full", *extra)
+        rd = self.req / "requirements-review/rounds" / f"round-{base[-1]}"
+        env = json.loads((rd / "delegation-envelope.json").read_text())
+        run(*base, "snapshot", "before")
+        if disturb:
+            disturb()
+        run(*base, "snapshot", "after")
+        path = Path(self.tmp.name) / f"{task_id}-findings.json"
+        path.write_text(json.dumps(findings, ensure_ascii=False))
+        out, failed = io.StringIO(), False
+        with contextlib.redirect_stdout(out):
+            try:
+                rr.main([*base, "persist", "--findings", str(path),
+                         "--spawn-job", str(self.spawn_job(job, env, "通过", backend="claude-qwen"))])
+            except SystemExit:
+                failed = True
+        return failed, out.getvalue(), env
+
+    def test_ledger_scores_only_new_findings_and_separates_environment_voids(self):
+        base1 = ["--req-dir", str(self.req), "--stage", "requirements-review", "--round", "1"]
+        f1 = {"id": "RR-001", "severity": "Medium", "status": "Open", "classification": "成立需修"}
+        failed, out, _ = self.review_round(base1, "t1", [f1], "job1")
+        self.assertFalse(failed)
+        self.assertIn("## 评审打分", out)
+        base2 = ["--req-dir", str(self.req), "--stage", "requirements-review", "--round", "2"]
+        f2 = {"id": "RR-002", "severity": "Low", "status": "Open", "classification": "噪音", "evidence": "summary.md:3"}
+        other_writer = lambda: (self.req / "requirements/notes.md").write_text("另一会话写入\n")
+        failed, out, _ = self.review_round(base2, "t2", [dict(f1, status="Resolved"), f2], "job2", disturb=other_writer)
+        self.assertTrue(failed)  # still no approval fact
+        rows = [json.loads(l) for l in rr.LEDGER.read_text().splitlines()]
+        self.assertEqual([r["invalid_cause"] for r in rows], [None, "environment"])
+        self.assertEqual(rows[1]["finding_counts"], {"噪音/Low": 1})
+        self.assertEqual(rows[1]["carried_findings"], 1)
+        self.assertIn("作废（环境原因", out)
+        self.assertIn("RR-002 噪音（summary.md:3）", out)
+        self.assertIn("累计实战 claude-qwen：n=2 成立 1/2 噪音 1", out)
+        self.assertIn("环境作废 1", out)
+
+    def test_requirements_review_targeted_rereview_diffs_archived_version(self):
+        base1 = ["--req-dir", str(self.req), "--stage", "requirements-review", "--round", "1"]
+        self.review_round(base1, "t1", [], "job1")
+        rd1 = self.req / "requirements-review/rounds/round-1"
+        (rd1 / "resolution.md").write_text("处置\n")
+        archive = self.req / "requirements/versions/v0.3"
+        archive.mkdir(parents=True)
+        (archive / "summary.md").write_text((self.req / "requirements/summary.md").read_text())
+        (self.req / "requirements/summary.md").write_text("状态：已对齐 · 版本：v0.4\n\nAC-001 新行为\n")
+        base2 = ["--req-dir", str(self.req), "--stage", "requirements-review", "--round", "2"]
+        _, _, env = self.review_round(base2, "t2", [], "job2", prior=1)
+        self.assertEqual(env["inputs"]["review_mode"], "targeted")
+        self.assertEqual(env["inputs"]["prior_R"]["version"], "v0.3")
+        self.assertIn("+AC-001 新行为", Path(env["inputs"]["diff"]).read_text())
 
     def test_test_case_closure_and_table_version(self):
         (self.req / "test-cases").mkdir()
