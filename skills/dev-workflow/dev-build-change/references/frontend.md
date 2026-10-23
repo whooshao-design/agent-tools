@@ -49,7 +49,7 @@ B 端后台的版式目标是“和仓库里同类界面一样、和组件库默
 - 图标与标题并排：父元素用 `display: flex; align-items: flex-start`，图标的 `margin-top` 取 `(标题行高 - 图标高度) / 2`，图标与文字间距 12px 左右；正文与标题左边线对齐。不要靠栅格列宽（如 `col-2` / `col-22`）碰运气对齐。
 - 状态齐全：加载中（按钮显示 loading 并保留原文案）、空列表（说明为什么空、下一步做什么）、失败（说明原因和怎么处理）、长文本（换行或截断，截断时能看到全文）。
 - 样式泄漏：改动所在组件或其父组件有 `/deep/`、`>>>`、`::v-deep` 的全局覆盖（尤其带 `!important`）时，它会命中渲染在这个组件 DOM 内的所有子组件，包括新嵌进去的弹窗。新增嵌套弹窗前先 `rg -n "/deep/|>>>|::v-deep" <组件文件及其 @import 的样式>`，确认覆盖范围；处理方式按仓库已有做法选一种：把弹窗挂到 `body`（Element 的 `append-to-body`），把父级覆盖收窄到父级自己的类名，或给子弹窗加类名后恢复组件默认值。
-  - 反例：需求 packageCopySupportRealTimeQuery 中，`appEditor.vue` 引入的 `modal.scss` 有 `/deep/ .modal-body { padding: 4px 0 0 0 !important }`，把嵌在里面的“乐包复制提醒”弹窗的内边距也清成 0，两个按钮贴着弹窗边框，直到发到 pre 才被用户发现。修复是给提醒弹窗加 `copy-confirm-modal` 类并恢复 `padding: 15px`。
+  - 反例：需求 packageCopySupportRealTimeQuery 中，`appEditor.vue` 引入的 `modal.scss` 有 `/deep/ .modal-body { padding: 4px 0 0 0 !important }`，把嵌在里面的“乐包复制提醒”弹窗的内边距也改成上 4px、左右下 0，两个按钮贴着弹窗右边框和下边框，直到发到 pre 才被用户发现。修复是给提醒弹窗加 `copy-confirm-modal` 类并恢复 `padding: 15px`。
 - 不改公共组件或全局样式去修一个页面的问题；修改范围限定在本页面的类名下。
 
 参考来源（经改写并入）：Element UI 2.15 主题源码 <https://github.com/ElemeFE/element/tree/dev/packages/theme-chalk/src>；Ant Design 设计价值观与间距规范 <https://ant.design/docs/spec/values-cn>；pbakaus/impeccable 的 polish 分类与 `cramped-padding` 规则 <https://github.com/pbakaus/impeccable>；Leonxlnx/taste-skill 的“截图 + DOM 测量”自检 <https://github.com/Leonxlnx/taste-skill>。
