@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { archivePlan, cnDate, gitRepos, overlaps, pickWeeklyReport, weekWindow } from '../scripts/lib/collect.mjs';
+import { archivePlan, cnDate, collectRequirementDocs, gitRepos, overlaps, pickWeeklyReport, weekWindow } from '../scripts/lib/collect.mjs';
 import { buildRequest, changedSince, normalizeDetail, parseLecoTime, restoreRequest, verifyAfterWrite } from '../scripts/lib/payload.mjs';
 
 const ARCHIVE = `# 周工作汇总 2026-10-12 ~ 10-16
@@ -148,6 +148,11 @@ test('nested theme lists keep their hierarchy in the HTML sent to leco', () => {
   assert.equal(html, '<p>本周工作</p><ol><li><strong>线上问题支持</strong><ol><li>事项一（会 a）</li><li>事项二（会 b）</li></ol></li><li><strong>SER 迁移</strong>：比对规则（会 c）</li></ol>');
 });
 
+test('a stage table under a numbered item stays inside that item', () => {
+  const html = markdownToHtml('1. **乐包复制**\n\n   | 阶段 | 进度 |\n   |---|---|\n   | 方案设计 | 已完成 |\n\n   收益：预期 a；实际 b\n\n2. **告警排查**：结论\n');
+  assert.equal(html, '<ol><li><p><strong>乐包复制</strong></p><table><thead><tr><th>阶段</th><th>进度</th></tr></thead><tbody><tr><td>方案设计</td><td>已完成</td></tr></tbody></table><p>收益：预期 a；实际 b</p></li><li><p><strong>告警排查</strong>：结论</p></li></ol>');
+});
+
 test('archivePlan never overwrites an existing summary or an earlier .new.md', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'okr-arch-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -158,4 +163,31 @@ test('archivePlan never overwrites an existing summary or an earlier .new.md', (
   assert.equal(path.basename(archivePlan(dir, feishu, w).path), '2026-10-16.new.md');
   fs.writeFileSync(path.join(dir, '2026-10-16.new.md'), 'x');
   assert.equal(path.basename(archivePlan(dir, feishu, w).path), '2026-10-16.new-2.md');
+});
+
+test('collectRequirementDocs lists stage dates only for requirements touched this week', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'okr-req-'));
+  try {
+    const put = (rel, iso) => {
+      const f = path.join(root, rel);
+      fs.mkdirSync(path.dirname(f), { recursive: true });
+      fs.writeFileSync(f, 'x');
+      fs.utimesSync(f, new Date(iso), new Date(iso));
+    };
+    put('reqA/requirements/summary.md', '2026-10-20T02:00:00Z');
+    put('reqA/solution-design/v1/solution.md', '2026-10-22T02:00:00Z');
+    put('reqB/requirements/summary.md', '2026-09-01T02:00:00Z');
+    put('archive/old/requirements/summary.md', '2026-10-21T02:00:00Z');
+    const window = { start: new Date('2026-10-18T16:00:00Z'), end: new Date('2026-10-23T05:40:00Z') };
+    const out = collectRequirementDocs(root, window);
+    assert.equal(out.status, 'ok');
+    assert.deepEqual(out.requirements.map((r) => r.name), ['reqA']);
+    assert.equal(out.requirements[0].summary, path.join(root, 'reqA', 'requirements', 'summary.md'));
+    // 创建时间是今天，比设置的修改时间晚，因此最早日期取修改时间
+    assert.deepEqual(out.requirements[0].stages, [
+      { stage: 'requirements', first: '2026-10-20', last: '2026-10-20' },
+      { stage: 'solution-design', first: '2026-10-22', last: '2026-10-22' },
+    ]);
+    assert.equal(collectRequirementDocs(path.join(root, 'missing'), window).status, 'error');
+  } finally { fs.rmSync(root, { recursive: true, force: true }) }
 });

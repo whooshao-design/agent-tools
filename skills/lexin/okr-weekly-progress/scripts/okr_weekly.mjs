@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { isEmptySection, markdownToHtml, parseArchive, scanSensitive } from './lib/archive.mjs';
-import { DEFAULTS, archivePlan, collectCommits, collectFeishu, collectSessions, recentArchives, weekWindow } from './lib/collect.mjs';
+import { DEFAULTS, archivePlan, collectCommits, collectFeishu, collectRequirementDocs, collectSessions, recentArchives, weekWindow } from './lib/collect.mjs';
 import { openLeco, readOkr } from './lib/leco.mjs';
 import { buildRequest, changedSince, normalizeDetail, parseLecoTime, restoreRequest, verifyAfterWrite } from './lib/payload.mjs';
 
@@ -51,6 +51,7 @@ async function cmdCollect(opts) {
   const feishu = collectFeishu(opts.folder || DEFAULTS.folder, window);
   const sessions = collectSessions(window);
   const commits = collectCommits(opts.projects || DEFAULTS.projects, opts.author || 'joneyshao', window);
+  const requirements = collectRequirementDocs(opts['requirements-dir'] || DEFAULTS.requirementsDir, window);
   let okr;
   try {
     okr = await withLeco(mid, (c) => readOkr(c, { mid, periodId: opts.period ? Number(opts.period) : undefined }));
@@ -75,7 +76,7 @@ async function cmdCollect(opts) {
     window: { start: window.start.toISOString(), end: window.end.toISOString(), timezone: 'Asia/Shanghai' },
     archive: { ...archivePlan(archiveDir, feishu, window), previous: recentArchives(archiveDir) },
     meta: { goal_mid: mid, period_id: okr.periodId ?? null, window_start: window.start.toISOString() },
-    sources: { feishu, sessions, commits, okr },
+    sources: { feishu, sessions, commits, requirements, okr },
   };
   // 只读模式下素材只能落在状态目录，不接受 --out
   const out = opts.out && process.env.OKR_WEEKLY_READONLY !== '1' ? opts.out : path.join(DEFAULTS.stateDir, 'collect', `${stamp()}.json`);

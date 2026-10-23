@@ -1,4 +1,4 @@
-// 定时段的确定性取数：飞书周报、本机会话、git 提交、乐空间 OKR。任一来源失败只标注，不中断其他来源。
+// 定时段的确定性取数：飞书周报、本机会话、git 提交、需求文档阶段日期、乐空间 OKR。任一来源失败只标注，不中断其他来源。
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -120,6 +120,41 @@ export function collectCommits(root, author, window) {
   });
 }
 
+function filesUnder(dir) {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    const p = path.join(dir, e.name);
+    return e.isDirectory() ? filesUnder(p) : e.isFile() ? [p] : [];
+  });
+}
+
+// 需求文档目录（<需求>/<阶段>/…）：给阶段表提供各阶段文件的最早、最晚日期；只列本周有文件改动的需求。
+// 最早日期取创建时间与修改时间中较早的一个，文件系统不支持创建时间（birthtimeMs 为 0）时用修改时间
+export function collectRequirementDocs(root, window) {
+  return guard(() => {
+    const requirements = [];
+    for (const req of fs.readdirSync(root, { withFileTypes: true })) {
+      if (!req.isDirectory() || req.name === 'archive') continue;
+      const dir = path.join(root, req.name);
+      const stages = [];
+      for (const stage of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (!stage.isDirectory()) continue;
+        const stats = filesUnder(path.join(dir, stage.name)).map((f) => fs.statSync(f));
+        if (stats.length === 0) continue;
+        const first = Math.min(...stats.map((st) => (st.birthtimeMs > 0 ? Math.min(st.birthtimeMs, st.mtimeMs) : st.mtimeMs)));
+        const last = Math.max(...stats.map((st) => st.mtimeMs));
+        stages.push({ stage: stage.name, first: cnDate(new Date(first)), last: cnDate(new Date(last)), lastMs: last });
+      }
+      if (!stages.some((st) => st.lastMs >= window.start.getTime())) continue;
+      const summary = path.join(dir, 'requirements', 'summary.md');
+      requirements.push({
+        name: req.name, dir, summary: fs.existsSync(summary) ? summary : null,
+        stages: stages.sort((a, b) => a.first.localeCompare(b.first) || a.stage.localeCompare(b.stage)).map(({ lastMs, ...st }) => st),
+      });
+    }
+    return { status: 'ok', count: requirements.length, requirements };
+  });
+}
+
 export function recentArchives(dir, limit = 4) {
   try {
     return fs.readdirSync(dir).filter((f) => /^\d{4}-\d{2}-\d{2}\.md$/.test(f)).sort().slice(-limit).map((f) => path.join(dir, f));
@@ -141,5 +176,6 @@ export const DEFAULTS = {
   mid: 49548,
   projects: path.join(os.homedir(), 'projects'),
   archiveDir: path.join(os.homedir(), 'docs', 'weekly-reports'),
+  requirementsDir: path.join(os.homedir(), 'docs', 'requirements-development'),
   stateDir: path.join(os.homedir(), '.local', 'state', 'agent-tools', 'okr-weekly'),
 };

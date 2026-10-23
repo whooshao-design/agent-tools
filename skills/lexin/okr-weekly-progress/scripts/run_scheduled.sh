@@ -30,7 +30,7 @@ cd "$OUT" || exit 1
 # 文件写入只认 Edit(path) 规则；绝对路径要以 // 开头，"/$OUT" 展开后即 //home/...
 timeout 25m "$CLAUDE_BIN" -p "$prompt" \
   --permission-mode dontAsk --strict-mcp-config --no-session-persistence \
-  --add-dir "$STATE" --add-dir "$SKILL_DIR" \
+  --add-dir "$STATE" --add-dir "$SKILL_DIR" --add-dir "$HOME/docs/requirements-development" \
   --allowedTools "Bash(node $CLI collect:*)" "Bash(node $CLI open:*)" "Read" "Edit(/$OUT/**)" \
   --disallowedTools "WebFetch" "WebSearch" "Bash(node $CLI write:*)" "Bash(node $CLI restore:*)" \
   >"$log" 2>&1
