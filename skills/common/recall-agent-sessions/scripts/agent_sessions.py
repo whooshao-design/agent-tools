@@ -4,6 +4,7 @@
 Read-only. Sources:
   Claude Code: ~/.claude/projects/<dir>/<session-id>.jsonl (subagent transcripts in deeper dirs are skipped)
   Codex:       ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl (threads with parent_thread_id are skipped)
+Headless runs (claude -p / codex exec, e.g. delegated reviewers) are skipped unless --include-headless.
 """
 import argparse
 import json
@@ -32,6 +33,7 @@ class Session:
     def __init__(self, agent, sid, path):
         self.agent, self.id, self.path = agent, sid, path
         self.cwd = self.branch = self.source = ""
+        self.headless = False
         self.start = self.end = ""
         self.events = []  # (timestamp, kind, text); kind: user | assistant | command | file
 
@@ -82,6 +84,7 @@ def parse_claude(path):
             continue
         s.cwd = s.cwd or d.get("cwd", "")
         s.branch = s.branch or d.get("gitBranch", "")
+        s.headless = s.headless or d.get("entrypoint") == "sdk-cli"
         ts = d.get("timestamp", "")
         content = (d.get("message") or {}).get("content")
         if typ == "user":
@@ -128,6 +131,7 @@ def parse_codex(path):
             s.cwd = p.get("cwd", "")
             s.branch = (p.get("git") or {}).get("branch", "") if isinstance(p.get("git"), dict) else ""
             s.source = p.get("originator", "")
+            s.headless = s.source == "codex_exec"
         elif typ == "event_msg" and p.get("type") == "item_completed":
             items.append((ts, p.get("item") or {}))
         elif typ == "event_msg" and p.get("type") in ("user_message", "agent_message"):
@@ -180,21 +184,30 @@ def current_ids():
     return {v for v in (os.environ.get("CLAUDE_CODE_SESSION_ID"), os.environ.get("CODEX_THREAD_ID")) if v}
 
 
-def raw_contains(path, terms):
+def raw_contains(path, queries):
+    """True if the raw file may match any query (a list of terms that must all occur)."""
     try:
-        raw = path.read_text(encoding="utf-8", errors="replace").lower()
+        raw = path.read_bytes()
     except OSError:
         return False
-    return all(t in raw for t in terms)
+
+    def has(term):
+        b = term.encode()
+        # Byte search avoids decoding and lower-casing large transcripts; only cased terms need re.I.
+        return b in raw or (term.lower() != term.upper() and re.search(re.escape(b), raw, re.I) is not None)
+
+    return any(all(has(t) for t in terms) for terms in queries)
 
 
-def load_sessions(args, terms=()):
+def load_sessions(args, queries=()):
     skip = set() if getattr(args, "include_current", False) else current_ids()
     for agent, path in session_files(args.agent, args.since):
-        if terms and not raw_contains(path, terms):
+        if queries and not raw_contains(path, queries):
             continue
         s = parse_claude(path) if agent == "claude" else parse_codex(path)
         if s is None or s.id in skip or not s.events:
+            continue
+        if s.headless and not args.include_headless:
             continue
         if args.cwd and args.cwd.lower() not in s.cwd.lower():
             continue
@@ -246,28 +259,53 @@ def snippet(text, pattern, width=90):
     return ("…" if a else "") + " ".join(text[a:b].split()) + ("…" if b < len(text) else "")
 
 
+def short_cwd(cwd):
+    home = str(Path.home())
+    return "~" + cwd[len(home):] if cwd.startswith(home) else cwd
+
+
 def cmd_search(args):
     if args.regex:
-        patterns = [re.compile(args.query, re.I)]
+        groups = [[re.compile(q, re.I)] for q in args.query]
+        queries = ()
     else:
-        patterns = [re.compile(re.escape(t), re.I) for t in args.query.split()]
+        groups = [[re.compile(re.escape(t), re.I) for t in q.split()] for q in args.query]
+        queries = [[t.lower() for t in q.split()] for q in args.query]
     kinds = {"user", "assistant", "command", "file"} if args.all_kinds else {"user", "assistant"}
-    found = 0
-    terms = () if args.regex else [t.lower() for t in args.query.split()]
-    for s in load_sessions(args, terms):
-        hits = [(ts, k, t) for ts, k, t in s.events if k in kinds and all(p.search(t) for p in patterns)]
-        if not hits:
-            continue
-        print(header(s))
-        print(f"  命中 {len(hits)} 处，恢复：{s.resume_cmd()}")
-        for ts, k, t in hits[-args.per_session:]:
-            print(f"  - {ts[:16].replace('T', ' ')} {k}: {snippet(t, patterns[0])}")
-        print()
-        found += 1
-        if found >= args.limit:
-            break
-    if not found:
-        print("没有匹配的会话。可以放宽关键词、加 --all-kinds 搜命令和文件，或加大 --since。")
+
+    def match(text):
+        return next((g[0] for g in groups if all(p.search(text) for p in g)), None)
+
+    results = []
+    for s in load_sessions(args, queries):
+        hits = [(ts, k, t, pat) for ts, k, t in s.events if k in kinds and (pat := match(t))]
+        if hits:
+            in_first = match(s.first_prompt()) is not None
+            results.append((in_first, len(hits), s.end, s, hits))
+    if not results:
+        print("没有匹配的会话。可以换同义词、多给几组关键词、加 --all-kinds 搜命令和文件，或加大 --since。")
+        return
+    # Topic sessions first: query in the first prompt, then hit count, then recency.
+    results.sort(key=lambda r: r[:3], reverse=True)
+    shown = results[:args.limit]
+
+    print(f"命中 {len(results)} 个会话" + (f"，显示前 {len(shown)} 个" if len(results) > len(shown) else "")
+          + "（排序：首问命中 > 命中数 > 最近时间）\n")
+    print("| # | agent | 会话 | 最后活动 | 命中 | 工作目录 | 首个提问 |")
+    print("|---|---|---|---|---|---|---|")
+    for i, (in_first, n, _, s, _) in enumerate(shown, 1):
+        mark = f"{n}{'（首问）' if in_first else ''}"
+        print(f"| {i} | {s.agent} | `{s.id[:8]}` | {s.end[5:16].replace('T', ' ')} | {mark} "
+              f"| `{short_cwd(s.cwd)}` | {short(s.first_prompt(), 50).replace('|', '/')} |")
+
+    for i, (_, n, _, s, hits) in enumerate(shown[:args.detail], 1):
+        print(f"\n## {i}. {s.agent} {s.id}")
+        print(f"- 时间：{s.start[:16].replace('T', ' ')} → {s.end[:16].replace('T', ' ')}"
+              + (f"；分支 `{s.branch}`" if s.branch else ""))
+        print(f"- 恢复：`{s.resume_cmd()}`")
+        print(f"- 首个提问：{short(s.first_prompt(), 160)}")
+        for ts, k, t, pat in hits[-args.per_session:]:
+            print(f"- {ts[5:16].replace('T', ' ')} {k}：{snippet(t, pat, 60)}")
 
 
 def find_session(sid):
@@ -325,6 +363,8 @@ def main():
         p.add_argument("--since", type=float, default=30, help="只看最近 N 天修改过的会话，0 表示不限，默认 30")
         p.add_argument("--limit", type=int, default=10, help="最多输出几个会话，默认 10")
         p.add_argument("--include-current", action="store_true", help="也检索当前会话")
+        p.add_argument("--include-headless", action="store_true",
+                       help="也检索无人值守会话（claude -p / codex exec，如委派的评审者）")
 
     p = sub.add_parser("list", help="按最近修改时间列出会话")
     filters(p)
@@ -334,10 +374,12 @@ def main():
     p.set_defaults(func=cmd_list)
 
     p = sub.add_parser("search", help="按关键词检索会话内容")
-    p.add_argument("query", help="空格分隔的关键词，同一条消息里须全部出现；--regex 时为正则")
+    p.add_argument("query", nargs="+",
+                   help="一组或多组关键词；组内空格分隔、须在同一条消息里全部出现，任一组命中即算；--regex 时每组为正则")
     p.add_argument("--regex", action="store_true")
     p.add_argument("--all-kinds", action="store_true", help="同时搜执行的命令和改动的文件路径")
-    p.add_argument("--per-session", type=int, default=3, help="每个会话最多显示几处命中，默认 3")
+    p.add_argument("--detail", type=int, default=3, help="总表之后展开前几个会话的命中片段，默认 3")
+    p.add_argument("--per-session", type=int, default=2, help="展开的会话每个显示几处命中，默认 2")
     filters(p)
     p.set_defaults(func=cmd_search)
 
