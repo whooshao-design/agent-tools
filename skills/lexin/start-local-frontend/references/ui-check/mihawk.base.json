@@ -1,0 +1,20 @@
+{
+  "rewrite": [
+    { "match": "^https://mihawk\\.oa\\.fenqile\\.com/(?!assets/|rc_oa_gateway/)", "to": "https://127.0.0.1:8116/" }
+  ],
+  "passthrough": [
+    "^https://vui\\.oa\\.fenqile\\.com/",
+    "^https://mihawk\\.oa\\.fenqile\\.com/assets/"
+  ],
+  "mocks": [
+    { "match": "/rc_oa_gateway/hawk_decision/manage/auth/query_auth_user_name\\.json", "json": { "retcode": 0, "retmsg": "ok", "result_rows": [{ "super_admin": true }] } },
+    { "match": "/rc_oa_gateway/profile/desc\\.json", "json": { "retcode": 0, "retmsg": "ok", "result_rows": [{ "profile": "prod" }] } }
+  ],
+  "defaultMock": { "match": "/rc_oa_gateway/", "json": { "retcode": 0, "retmsg": "ok", "result_rows": [], "total_num": 0 } },
+  "cookies": [
+    { "name": "rog_session", "value": "ui-check", "domain": "mihawk.oa.fenqile.com", "path": "/" }
+  ],
+  "sessionStorage": {
+    "user_info": { "mid": "1", "min": "ui-check", "name": "ui-check" }
+  }
+}

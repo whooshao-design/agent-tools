@@ -1,0 +1,17 @@
+{
+  "extends": "mihawk.base.json",
+  "url": "https://mihawk.oa.fenqile.com/#/app/app_manager",
+  "target": ".copy-confirm-modal",
+  "mocks": [
+    { "match": "/hawk_decision/manage/package_detail\\.json", "json": { "retcode": 0, "result_rows": [{ "package_name": "示例乐包", "package_desc": "", "package_mode": 1, "policy_centers_list": [], "sharer_list": [], "field_available_type": "" }] } }
+  ],
+  "steps": [
+    { "wait": 6000 },
+    { "eval": "const all = []; (function walk(v) { if (!v) return; all.push(v); (v.$children || []).forEach(walk); })(document.querySelector('#app').__vue__.$root); const vm = all.find((v) => typeof v.confirmRealTimeQueryCopy === 'function'); if (!vm) return 'appEditor not found'; await vm.show({ package_id: 1 }, 'copy'); vm.confirmRealTimeQueryCopy({}, { confirm_message: '本次乐包复制不包含差异化查征逻辑复制，如需开启差异化查征，请参考《差异化查征流程》申请！', confirm_link_name: '《差异化查征流程》', confirm_link_url: 'https://example.invalid/doc' }); return 'opened';" },
+    { "waitFor": ".copy-confirm-modal" },
+    { "wait": 800 }
+  ],
+  "check": {
+    "align": [{ "icon": ".copy-confirm-modal .tip-icon", "text": ".copy-confirm-modal h3" }]
+  }
+}

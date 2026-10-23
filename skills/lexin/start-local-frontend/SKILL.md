@@ -2,7 +2,7 @@
 name: start-local-frontend
 description: 米霍克 OA 前端(web_mihawk_oa)本地开发会话管理：启动前资源门禁、安全启动本地 webpack(127.0.0.1:8116)、把 whistle 网关规则切到预发布或项目环境（项目环境网关 IP 由用户指定并探活，不硬编码）、用真实域名打开本地页面。Use when 用户要求本地启动米霍克前端、npm run dev:index、检查 webpack 启动条件、把 rc_oa_gateway 切到预发布/项目环境、生成或写入 whistle 网关规则、验证本地页面访问链路。
 metadata:
-  version: 1.1.0
+  version: 1.2.0
 ---
 
 # start-local-frontend
@@ -114,6 +114,24 @@ whistle 若处于单选模式，用户切换到自己的分组（如「本地-�
    WSL 自动化浏览器 profile 的 `oa_session` 来自线上 passport，项目环境网关返回 `16051006` 未登录，
    所以 agent 无法用 profile 登录态直接调项目环境网关接口；agent 侧联调走扁鹊 Dubbo + SQL（见 `dev-verify-change`），
    页面交互交用户验收。不要把 profile Cookie 发往预发布网关 IP 绕过（会被权限策略按数据外发拦截）。
+
+## 页面视觉自检（不需要登录）
+
+`references/ui-check/mihawk.base.json` 是 `verify-browser-qa` 的 `ui_check.js` 用的米霍克基础场景，让 agent 不登录也能在本地渲染页面并测量：
+
+- `rewrite`：`https://mihawk.oa.fenqile.com/` 下除 `assets/`、`rc_oa_gateway/` 以外的请求，改从本地 `https://127.0.0.1:8116/` 取，所以要先 `start` 并等 webpack 编译完成。
+- `passthrough`：`vui.oa.fenqile.com` 和 `mihawk.oa.fenqile.com/assets/` 的公共静态资源直连真实地址取。
+- `mocks`：`auth/query_auth_user_name.json` 返回 `super_admin: true`（页面按超管权限渲染，菜单和按钮全部可见）；`profile/desc.json` 返回 `prod`。其余 `/rc_oa_gateway/` 请求由 `defaultMock` 返回空列表。
+- 伪造 Cookie `rog_session` 和 `sessionStorage.user_info`，让前端的登录检查放行。这些值只在本次无头浏览器里有效，不会发往任何真实网关。
+
+示例 `references/ui-check/package-copy-confirm.json` 打开乐包列表，通过 Vue 实例调用 `appEditor` 的 `show(..., 'copy')` 和 `confirmRealTimeQueryCopy(...)` 弹出“乐包复制提醒”，测量 `.copy-confirm-modal`（2026-10-23 实测：通过；注入原先泄漏的 `.modal-body { padding: 4px 0 0 0 !important }` 后两个按钮报 `cramped` 0px）。新页面照它写场景：给页面依赖的接口补 `mocks`，用 `steps` 点开或调用组件方法打开要检查的界面。
+
+```bash
+node /home/joney/projects/ai/agent-tools/skills/dev-quality/verify-browser-qa/scripts/ui_check.js \
+  --scenario=/home/joney/projects/ai/agent-tools/skills/lexin/start-local-frontend/references/ui-check/package-copy-confirm.json
+```
+
+模拟数据只证明布局和样式；接口真实返回、权限和后端行为仍按原来的方式交用户在环境里验收。
 
 ## 安全边界
 
