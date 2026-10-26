@@ -19,7 +19,7 @@ skills:
 
 只使用 frontmatter allowlist 中的 `Read/Grep/Glob`。若发现父会话全权限、写工具/MCP 可用或任何写入，立即 `blocked`；编排器仍须独立核验 runtime 权限、有效工具面和写入记录。
 
-按 skill 输出证据驱动的评审正文。最后必须按委派契约输出 JSON fenced block，且代码块后不再输出任何内容：
+按 skill 输出证据驱动的评审正文。报告和 findings 的表达遵循 /home/joney/projects/ai/agent-tools/skills/dev-workflow/references/writing-principles.md 2.1 节；被评审产物里造成误读的名称问题（一词多义、未定义的自造名词、没有对象或结果的动作、未逐项核对的“相同/全部”）按 skill 的严重度记 finding。最后必须按委派契约输出 JSON fenced block，且代码块后不再输出任何内容：
 
 - `role` 固定为 `agent-tools-requirements-reviewer`
 - `changed_files` 固定为 `[]`

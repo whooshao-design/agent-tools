@@ -8,16 +8,39 @@
 //   PW_PATH      ~/tools/lexiao-browser/node_modules/playwright
 //   CHROME_PATH  ~/tools/lexiao-browser/browsers/chrome-linux64/chrome
 //   RUNTIME_LIBS ~/tools/lexiao-browser/runtime-libs/usr/lib/x86_64-linux-gnu  (libasound etc.)
-// mermaid itself is loaded from cdn.jsdelivr.net, so the run needs network access.
+//   MERMAID_CACHE ~/.cache/agent-tools/mermaid  (<version>/mermaid.min.js, filled by `npm pack` on first use)
+// mermaid is injected from the local cache, so only the first run of a version needs the npm registry
+// (whatever `npm config get registry` points to); the browser never touches the network.
 // Exit code: 0 all blocks ok, 2 at least one block failed, 1 fatal.
 const fs = require('fs');
+const { execFileSync } = require('child_process');
 const os = require('os');
 const path = require('path');
 
 const home = os.homedir();
 const PW_PATH = process.env.PW_PATH || path.join(home, 'tools/lexiao-browser/node_modules/playwright');
 const CHROME_PATH = process.env.CHROME_PATH || path.join(home, 'tools/lexiao-browser/browsers/chrome-linux64/chrome');
+const MERMAID_CACHE = process.env.MERMAID_CACHE || path.join(home, '.cache/agent-tools/mermaid');
 const RUNTIME_LIBS = process.env.RUNTIME_LIBS || path.join(home, 'tools/lexiao-browser/runtime-libs/usr/lib/x86_64-linux-gnu');
+
+// 返回本地 mermaid.min.js 路径；缓存没有时用 npm pack 从当前 registry 取一次（含 UMD 版 dist/mermaid.min.js）
+function mermaidFile(ver) {
+  const dir = path.join(MERMAID_CACHE, ver);
+  const file = path.join(dir, 'mermaid.min.js');
+  if (fs.existsSync(file)) return file;
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mermaid-pack-'));
+  try {
+    const out = execFileSync('npm', ['pack', `mermaid@${ver}`, '--pack-destination', tmp, '--silent'], { encoding: 'utf8', timeout: 180000 });
+    const tgz = path.join(tmp, out.trim().split('\n').pop());
+    execFileSync('tar', ['-xzf', tgz, '-C', tmp, 'package/dist/mermaid.min.js', 'package/package.json']);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.copyFileSync(path.join(tmp, 'package/dist/mermaid.min.js'), file);
+    fs.writeFileSync(path.join(dir, 'version.txt'), JSON.parse(fs.readFileSync(path.join(tmp, 'package/package.json'), 'utf8')).version + '\n');
+    return file;
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
 
 // 围栏规则与 manage-feishu-doc 发布时一致：``` 或 ~~~（3 个以上）、最多缩进 3 格、info 第一个词是 mermaid；
 // 其他代码块里的内容不算图
@@ -61,7 +84,13 @@ function main() {
   // 只有存在 mermaid 块才需要浏览器工具链；等宽文本图或无图方案不依赖 Playwright。
   const { chromium } = require(PW_PATH);
 
-  const modernTag = (ver) => `import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@${ver}/dist/mermaid.esm.min.mjs'; mermaid.initialize({startOnLoad:false, securityLevel:'loose'}); window.mermaid = mermaid;`;
+  const files = {};
+  for (const ver of versions) {
+    try { files[ver] = mermaidFile(ver); } catch (e) {
+      console.error(`FATAL mermaid ${ver} 不在本地缓存 ${MERMAID_CACHE}，npm pack 也失败（检查 npm registry）：${String(e.message || e).split('\n')[0]}`);
+      process.exit(1);
+    }
+  }
 
   (async () => {
     const browser = await chromium.launch({
@@ -73,13 +102,10 @@ function main() {
       const modern = parseInt(ver, 10) >= 10;
       const page = await browser.newPage({ viewport: { width: 1200, height: 800 }, deviceScaleFactor: 1.5 });
       const load = async () => {
-        if (modern) {
-          await page.setContent('<html><body><div id="c"></div></body></html>');
-          await page.addScriptTag({ type: 'module', content: modernTag(ver) });
-        } else {
-          await page.setContent(`<html><body><div id="c"></div><script src="https://cdn.jsdelivr.net/npm/mermaid@${ver}/dist/mermaid.min.js"></script></body></html>`, { waitUntil: 'load' });
-        }
+        await page.setContent('<html><body><div id="c"></div></body></html>');
+        await page.addScriptTag({ path: files[ver] });
         await page.waitForFunction(() => window.mermaid, null, { timeout: 30000 });
+        if (modern) await page.evaluate(() => window.mermaid.initialize({ startOnLoad: false, securityLevel: 'loose' }));
       };
       await load();
       for (const b of blocks) {
@@ -102,7 +128,8 @@ function main() {
     }
     await browser.close();
 
-    const header = ['图', '所在标题', '行号', ...versions.map((v) => `mermaid ${v}`)];
+    const actual = (v) => { try { return fs.readFileSync(path.join(path.dirname(files[v]), 'version.txt'), 'utf8').trim(); } catch (e) { return v; } };
+    const header = ['图', '所在标题', '行号', ...versions.map((v) => (actual(v) === v ? `mermaid ${v}` : `mermaid ${v}（${actual(v)}）`))];
     const rows = blocks.map((b) => [b.id, b.heading, String(b.line), ...versions.map((v) => results[b.id][v])]);
     const table = ['| ' + header.join(' | ') + ' |', '|' + header.map(() => '---').join('|') + '|', ...rows.map((r) => '| ' + r.join(' | ') + ' |')].join('\n');
     const bad = rows.filter((r) => r.slice(3).some((s) => s !== 'ok')).length;

@@ -2,7 +2,7 @@
 name: dev-derive-test-cases
 description: Use when 技术方案已评审通过，需要基于原始需求、验收标准、方案审批结论和代码基线编写可追踪、可独立复核的测试清单，作为编码与验证的共同依据。
 metadata:
-  version: 1.8.0
+  version: 1.9.0
 ---
 
 # dev-derive-test-cases
@@ -73,6 +73,8 @@ metadata:
 - 将测试清单交给 `dev-review-test-cases`；不得自行写成 `Approved`
 
 ## 输出要求
+
+表达遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/writing-principles.md`，名称与准确性按其 2.1 节逐条自检。检查项写出操作的对象、输入和预期结果，不用"正确处理""行为一致"这类无法判定的说法。
 
 默认输出输入绑定、三向追踪矩阵、测试清单、覆盖汇总和缺口清单。合格产物应满足：
 

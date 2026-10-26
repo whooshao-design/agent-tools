@@ -2,7 +2,7 @@
 name: dev-finish-branch
 description: Use when 改动范围已基本稳定，且已有当前模式所需的验证结果及评审状态，准备在提交或交付前做最终收口。
 metadata:
-  version: 1.7.2
+  version: 1.8.0
 ---
 
 # dev-finish-branch
@@ -81,6 +81,8 @@ metadata:
 - 当前是否仍存在不能忽略的发布风险
 
 ### 5. 整理交付摘要
+
+表达遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/writing-principles.md`，名称与准确性按其 2.1 节逐条自检。commit 与 MR 说明写出改了哪些类或方法、行为从什么变成什么、怎么验证的，不写"优化逻辑""修复问题"这类概括。
 把当前分支收敛成可交付信息：
 - 变更摘要
 - 验证摘要

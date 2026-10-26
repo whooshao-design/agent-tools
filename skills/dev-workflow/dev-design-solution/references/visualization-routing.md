@@ -12,6 +12,7 @@
 | 分支逻辑 | 3 个以上分支或分支再分支 | `flowchart` | 条件表 |
 | 分阶段切换 | 3 个以上阶段且跨系统并存 | 阶段图 | 阶段表，多数情况表更清楚 |
 | 数据模型 | 实体关系变化 | `erDiagram` | 字段表 |
+| 进程内或缓存结构 | 新增或改变嵌套形状（Map 套 Map、一个对象里放多个 Map） | 类型签名 + 字段表 + 小实例（`readability-and-writing.md` 4.1.1）；层级多于两层时加 `classDiagram` | 等宽文本树 |
 | 数据、脚本、报文变换 | 字段或文本在处理前后不同 | 不画图，用前后对照示例（代码块或对照表） | — |
 | 算法或处理步骤 | 4 步以上或含分支，且是核心机制 | `flowchart`（中文节点），配"节点 → 代码位置"的实现对照表；不写伪代码 | 编号列表 |
 | 线性 3 到 4 步 | 不画：重述编号列表的图只是装饰 | — | 编号列表 |
@@ -49,7 +50,7 @@
 ## 4. 格式
 
 - mermaid 只用稳定子集：`flowchart` / `graph`、`sequenceDiagram`（含 `autonumber`、`Note`、`alt`/`loop`、激活）、`stateDiagram` / `stateDiagram-v2`、`erDiagram`、`classDiagram`。不用 beta 图型、`%%{init}%%` 指令和主题配置。flowchart、带 autonumber/alt/loop 的 sequenceDiagram、stateDiagram-v2、erDiagram、classDiagram 在飞书文本绘图小组件里都实测能出图（2026-09-18、2026-09-23）；飞书侧的其他限制见 `manage-feishu-doc` 的 `references/diagrams.md`。
-- 节点文本避免全角冒号和箭头符号，mermaid 8.13 会报词法错误；用逗号或空格分隔。节点文本用中文概念名，不放 `$`、引号、括号这类代码片段，精确写法放旁边的表。
+- 节点文本避免全角冒号和箭头符号，mermaid 8.13 会报词法错误；用逗号或空格分隔。节点文本用与正文相同的名称（代码名可以直接写，不加反引号），不放 `$`、引号、括号这类代码片段，精确写法放旁边的表。
 - 时序图里参与者对自己的调用（`A->>A`）标签会压在生命线上，改用 `Note over A: ...`。判断菱形的文字控制在 10 字内，过长时菱形会被撑得很大。
 - 第 2、3 章的图区分新增、修改和现有（规则见 `readability-and-writing.md` 4.2），配色固定，图后一句"绿色为新增，橙色为修改，灰色为现有"：
   - `flowchart` 在末尾声明三个类并给节点归类：
@@ -80,7 +81,7 @@ node /home/joney/projects/ai/agent-tools/skills/dev-workflow/dev-design-solution
   solution-design/solution.md solution-design/diagrams
 ```
 
-脚本抽取全部 mermaid 块，默认用 mermaid 8.13.0 和 11 两个版本做 `parse`，再渲染 SVG 和 PNG 到 `diagrams/`，并写 `diagrams/results.md`。它复用 `get-browser-session` 已装好的 Chrome 与 Playwright，不需要新装软件，需要联网加载 mermaid。有图未通过就改到通过，改不好就换等宽文本块；结果表随方案一起提交。
+脚本抽取全部 mermaid 块，默认用 mermaid 8.13.0 和 11 两个版本做 `parse`，再渲染 SVG 和 PNG 到 `diagrams/`，并写 `diagrams/results.md`。它复用 `get-browser-session` 已装好的 Chrome 与 Playwright，不需要新装软件。mermaid 从本地缓存 `~/.cache/agent-tools/mermaid/<版本>/` 注入浏览器，某个版本首次使用时用 `npm pack` 经当前 npm registry 取一次，之后离线运行。有图未通过就改到通过，改不好就换等宽文本块；结果表随方案一起提交。
 
 交付前按第 1 节逐行核对一次：正文里每个满足触发条件的内容（多参与者交互、核心算法、状态转换、分阶段切换等）都要有图，不画时在该处写一句理由。只画主图而正文里还有成段描述的调用顺序，是常见漏画。同时核对第 2、3 章的每张图都按第 4 节标了新增、修改和现有。
 

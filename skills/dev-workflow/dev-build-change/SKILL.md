@@ -2,7 +2,7 @@
 name: dev-build-change
 description: Use when 需求边界与实现路径已基本明确，需要根据技术方案、测试清单或完成标准生成/拆分 DEV-* 开发执行清单（包括只生成清单、暂不编码），或准备基于现有代码模式实施最小必要改动。
 metadata:
-  version: 1.15.0
+  version: 1.16.0
 ---
 
 # dev-build-change
@@ -166,6 +166,8 @@ metadata:
 - 结论基于代码证据，不基于想象中的理想结构
 
 ## 输出物
+
+表达遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/writing-principles.md`，名称与准确性按其 2.1 节逐条自检。
 
 默认输出一份轻量开发结果，至少包括：
 - 前提状态：当前 `gate_context G`、对应审批/direct/waiver 记录、`change_revision`

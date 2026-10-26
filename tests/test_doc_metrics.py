@@ -26,7 +26,7 @@ class DocMetricsTest(unittest.TestCase):
     def test_dense_code_names_in_prose_are_flagged(self):
         line = "调用 `A.b` 后由 `C.d` 写入 `e.f`，再交给 `G`。\n\n"
         text = HEAD + "## 1. 背景\n\n" + line * 10
-        self.assertTrue(any("代码名密度" in f for f in flags(text)))
+        self.assertTrue(any("正文行内代码" in f for f in flags(text)))
 
     def test_glossary_table_is_detected(self):
         rows = "".join(f"| 名称{i} | `Code{i}` |\n" for i in range(35))

@@ -2,7 +2,7 @@
 name: dev-verify-change
 description: Use when 代码改动已完成，需要跑测试、执行构建检查或做验证：围绕本次变更做最小必要验证，给出验证结论，并决定是否需要扩大验证范围。
 metadata:
-  version: 1.10.0
+  version: 1.11.0
 ---
 
 # dev-verify-change
@@ -109,6 +109,8 @@ approved 逐条输出“检查项 ID (`TC-*`) → 对应 `DEV-*`/实现位置 �
 - 保持与项目现有测试和验证方式一致
 
 ## 输出物
+
+表达遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/writing-principles.md`，名称与准确性按其 2.1 节逐条自检。验证结论写出执行的命令、范围和结果数字，没跑的明确写没跑。
 
 默认输出一份轻量验证结果；正式落盘时使用 `references/verification-template.md`。至少包括：
 - 前提状态：`gate_context G`、审批/任务/waiver 记录、待验 `change_revision`

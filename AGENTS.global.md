@@ -50,6 +50,18 @@
 - Choose the simplest form that helps the reader answer their question: short text for a result, tables for comparisons, diagrams for relationships or sequences, and local interactive HTML when filtering or changing parameters helps understanding. Reserve video for an explicit teaching or video request. Follow the user's format and applicable skill output contract; simple answers do not need an artifact.
 - Keep summaries, diagrams, and pages faithful to their source evidence. Diagram edges and causal arrows also need support; retain uncertainty and label simulated values. Link detailed evidence where readers can verify important claims without putting raw tool output into the main explanation.
 
+## Naming & Precision
+These rules apply to every output: terminal replies, reports, review findings, requirement/solution/test documents, commit and PR messages, and rules or examples written into skills. They take precedence over length limits and over skill wording that asks for shorter text or Chinese names.
+
+- Use the real name of a thing: the class, method, table, column, config key, command, protocol term (Redis `HGETALL`, field), or data-structure term (Map, key, value, entry, list); put code names in code format. Use a Chinese term only when it is the established term for that concept (主库, 连接池). Do not translate a term into a word that already means something else in the project (in Hawk, 字段 is a feature field, not a Redis Hash field).
+- Coin a new name only when the thing has no existing name and is referred to at least twice; define it where it first appears in real terms (type, location, contents). Do not use a coined name, metaphor, or label (链路, 闭环, 快照) where an existing concrete name or description works.
+- One concept, one name; one name, one concept. Before reusing a word, check that it does not already refer to something else in the same output.
+- Each action states who does what to which object and what results: who reads, writes, or calls what, from where, and what it returns. For a data structure, say which part is operated on: the whole Map, its keys, the value for a key, or its entries. Replace vague verbs (处理, 优化, 调整, 变化, 支持) with the specific action, unless the same sentence states the object and the before/after difference.
+- Claim sameness or completeness (相同, 全部, 没有, 唯一) only after checking every member item by item; otherwise state the scope actually checked. Before saying two code paths are the same, compare them step by step.
+- Keep numbers, units, conditions, negations, time ranges, and scope exactly as in the source. Never drop them to meet a length limit; exceed the limit or split the content instead.
+- Every example, including examples inside rules, must itself satisfy the rule it illustrates; check it before writing it down.
+- Before delivering, answer yes or no: every name maps to one real object or is defined at first use; no name refers to two things; every action has an actor, an object, and a result; every sameness or completeness claim has full coverage or a stated scope; numbers, conditions, and negations match the source; examples obey the rules. Fix any "no" first.
+
 ## Final Response Format
 - State the conclusion in the first sentence: the answer, root cause, or recommendation. Then give only what the user needs to decide or act, most important first.
 - Default to short paragraphs, one main idea each. Use lists only for parallel, sequential, or comparable items (at most 5, no nesting); use a table to compare options.
@@ -57,7 +69,7 @@
 - Skip stock phrases and framing such as "核心结论：", "一句话总结", "值得注意的是", "不是 X，而是 Y" (unless the user asked about X), and closing recaps.
 - Write plain sentences: no "**标签**：内容" bullet runs, no one-line closing aphorisms, no stacked hedges like "可能在一定程度上", no flattery like "好问题".
 - Always keep: risks and bad news, unverified assumptions, actions the user must take, exact paths, commands, and versions.
-- Length: simple questions within 5 lines; complex tasks within 25 lines. Written files match what the task needs, without filler sections or repeated summaries.
+- Length: simple questions within 5 lines; complex tasks within 25 lines, unless Naming & Precision needs more. Written files match what the task needs, without filler sections or repeated summaries.
 - Correct an earlier statement only when the error changes the user's code, conclusions, or decisions, and say it in one sentence.
 - Skill-defined output contracts (e.g. `dev-*` documents) take precedence over this section.
 - Example: "根因是 `foo.yaml` 缺少 `timeout` 配置，导致下游调用超时。已在 `foo.yaml:12` 补上，`mvn test -pl foo` 通过。还需要你手动发布 Hippo 配置 `bar.timeout`。"

@@ -2,7 +2,7 @@
 name: dev-review-change
 description: Use when 代码改动已形成可评审结果，需要基于变更证据做代码评审，确认是否存在正确性、架构、安全或稳定性问题，并给出可执行后续动作。
 metadata:
-  version: 1.12.0
+  version: 1.13.0
 ---
 
 # dev-review-change
@@ -100,6 +100,8 @@ metadata:
 
 ### 5. 输出评审结论
 
+表达遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/writing-principles.md`，名称与准确性按其 2.1 节逐条自检。finding 写出具体文件行、触发输入和错误结果，不写"可能有问题""处理不当"。
+
 先确认评审执行状态为 `valid`；执行失败的一次重试与 `formal_reviewer_unavailable` 规则见委派契约 §3，有效 reviewer 的“修复后再评”属于正常结果。
 
 最终明确：
@@ -161,6 +163,7 @@ metadata:
 - 外部评审证据：`ocr` 结果引用、provider/model 与逐文件覆盖表；未使用时写无
 - 后续动作：下一步先做什么、是否需要补验证或专项复查
 - 严重度口径：本次高/中/低分别基于什么标准判定，避免误把一般优化项写成阻塞项
+- 评分卡：正式评审向用户汇报本轮结果时，原样粘贴 `rounds/round-<N>/scorecard.md`（`persist` 写入），不改写、不删行
 
 ## 正式准入结果要求
 

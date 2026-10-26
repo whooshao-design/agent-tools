@@ -2,7 +2,7 @@
 name: requirements-review
 description: "评审已有产品或技术需求文档（PRD/需求单/接口需求），独立检查边界、异常、验收标准、风险和依赖是否完整。Use when 用户要求评审需求文档、PRD 评审、规格评审，或主流程需要在方案设计前形成稳定的需求身份 R。"
 metadata:
-  version: 1.8.0
+  version: 1.9.0
 ---
 
 # requirements-review
@@ -73,7 +73,9 @@ metadata:
 
 ## 输出要求
 
-默认按“输入绑定 → 结论 → findings → 非规范性验收标准建议 → 风险与依赖 → 后续动作”输出。建议仅用于指出如何消除歧义，不会修改 `R`，也不能被当作新增需求或验收标准。若需求方采纳建议，应由需求方或可追踪 producer 写成新 `R`，再派发新的独立 reviewer。编排器按委派契约 §5 落盘并生成 `approval-record-v1`；handoff 只引用其 ref 与 fingerprint。
+表达遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/writing-principles.md`，名称与准确性按其 2.1 节逐条自检。评审时把需求里一词多义、未定义的自造名词、没有对象或结果的动作记为 finding。
+
+默认按“输入绑定 → 结论 → findings → 非规范性验收标准建议 → 风险与依赖 → 后续动作”输出。建议仅用于指出如何消除歧义，不会修改 `R`，也不能被当作新增需求或验收标准。若需求方采纳建议，应由需求方或可追踪 producer 写成新 `R`，再派发新的独立 reviewer。编排器按委派契约 §5 落盘并生成 `approval-record-v1`；handoff 只引用其 ref 与 fingerprint。向用户汇报本轮结果时，原样粘贴 `rounds/round-<N>/scorecard.md`（`persist` 写入），不改写、不删行。
 
 ## 交接
 

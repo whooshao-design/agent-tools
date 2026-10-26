@@ -2,7 +2,7 @@
 name: dev-review-test-cases
 description: Use when 已有版本化测试清单，需要独立复核测试清单（检查漏项、错项、不可执行项）：由非清单产出者复核需求、验收标准、已审批方案与检查项的三向追踪和风险覆盖，并形成绑定具体产物版本与代码基线的编码准入结论。
 metadata:
-  version: 1.12.0
+  version: 1.13.0
 ---
 
 # dev-review-test-cases
@@ -97,7 +97,9 @@ metadata:
 
 ## 输出要求
 
-默认按“输入绑定 → 结论 → 三向追踪与风险覆盖证据 → findings → 后续动作”输出。编排器在 stop 后保存报告与委派结果、计算两者指纹并生成不可变 `approval-record-v1`。只有该记录的身份、只读、工具面和写入检查通过，且针对精确 `(R,S,C,B)` 给出 `通过`，才允许构造 `T/G` 并交给 `dev-build-change`；handoff 只引用审批记录 ref 与 fingerprint。
+表达遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/writing-principles.md`，名称与准确性按其 2.1 节逐条自检。复核时把清单里无法判定的说法（"正确处理""与原来一致"但没写比较对象和比较项）记为 finding。
+
+默认按“输入绑定 → 结论 → 三向追踪与风险覆盖证据 → findings → 后续动作”输出。编排器在 stop 后保存报告与委派结果、计算两者指纹并生成不可变 `approval-record-v1`。只有该记录的身份、只读、工具面和写入检查通过，且针对精确 `(R,S,C,B)` 给出 `通过`，才允许构造 `T/G` 并交给 `dev-build-change`；handoff 只引用审批记录 ref 与 fingerprint。向用户汇报本轮结果时，原样粘贴 `rounds/round-<N>/scorecard.md`（`persist` 写入），不改写、不删行。
 
 ## 编排脚本
 

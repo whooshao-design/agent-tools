@@ -174,9 +174,9 @@ def flags_for(m):
     if m["long_paragraphs"]:
         f.append(f"{m['long_paragraphs']} 段超过 {LONG_PARAGRAPH_CHARS} 字，检查是否混入了流程、对比或清单")
     if m["prose_code_per_1k_chars"] > 12:
-        f.append(f"正文代码名密度 {m['prose_code_per_1k_chars']}/千字，改用中文名并移入术语或实现对照表")
+        f.append(f"正文行内代码 {m['prose_code_per_1k_chars']}/千字，检查是否把清单或对比写成了段落；代码名本身不需要换成中文名")
     if m["inline_code_total"] > 30 and not m["has_glossary"]:
-        f.append("行内代码较多但没有术语对照表（中文名 | 代码中的名称）")
+        f.append("行内代码较多但没有术语对照表（名称 | 含义与代码位置）")
     if not m["has_change_table"]:
         f.append("缺少带'变更'列的变更总览表（2.4，标新增/修改/删除）")
     if m["mermaid_blocks"] > 0 and m["marked_diagrams"] == 0:
