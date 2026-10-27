@@ -25,6 +25,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -42,6 +43,8 @@ CONCLUSIONS = {
 PASSING = {"通过", "有条件通过", "可继续推进", "带风险接受"}
 ALLOWED_TOOLS = {"Read", "Grep", "Glob", "SubagentHandback"}
 EXTERNAL_TOOLS = {"Read", "Grep", "Glob"}
+CODEX_TOOLS = {"shell"}  # codex-vps reviewer: read-only shell under codex-reviewer
+CODEX_REVIEWER = str(Path("~/bin/codex-reviewer").expanduser())
 TOOLS_ROOT = Path(__file__).resolve().parents[3]
 CLASSES = {"成立需修", "接受取舍", "契约误读", "噪音"}
 VALID_CLASSES = {"成立需修", "接受取舍"}
@@ -160,15 +163,19 @@ def test_case_checks(base: Path) -> dict | None:
     covered = set().union(*refs.values()) if refs else set()
     trace = re.search(r"^## 3\..*?(?=^## 4\.)", tc, re.S | re.M)
     # only mapping rows (| AC-... |); the closure summary table restates TC-001～TC-N and would mask omissions
-    trace_rows = "\n".join(re.findall(r"^\| AC-.*$", trace.group(0), re.M)) if trace else ""
-    in_trace = sorted(i for i in expand_ids(trace_rows) if i.startswith("TC-"))
-    # row-level CHG agreement: trace row | AC | CHG / 章节 | TC 列表 | vs item row | TC | AC | CHG / 章节 |
-    trace_chg = {}
-    for row in trace_rows.splitlines():
+    # the template puts 需求 ID before the AC column, so locate the AC cell instead of assuming column 1
+    mapping = []
+    for row in (re.findall(r"^\|.*$", trace.group(0), re.M) if trace else []):
         cells = row.split("|")
-        if len(cells) > 3:
-            for t in (i for i in expand_ids(cells[3]) if i.startswith("TC-")):
-                trace_chg.setdefault(t, set()).update(i for i in expand_ids(cells[2]) if i.startswith("CHG-"))
+        k = next((i for i, c in enumerate(cells[:3]) if re.match(r"\s*AC-\d+", c)), None)
+        if k is not None and len(cells) > k + 2:
+            mapping.append((cells[k + 1], cells[k + 2]))
+    in_trace = sorted({i for _, tcs in mapping for i in expand_ids(tcs) if i.startswith("TC-")})
+    # row-level CHG agreement: trace row | [需求 |] AC | CHG / 章节 | TC 列表 | vs item row | TC | AC | CHG / 章节 |
+    trace_chg = {}
+    for chg_cell, tc_cell in mapping:
+        for t in (i for i in expand_ids(tc_cell) if i.startswith("TC-")):
+            trace_chg.setdefault(t, set()).update(i for i in expand_ids(chg_cell) if i.startswith("CHG-"))
     item_chg = {t: {i for i in expand_ids(row.split("|")[3]) if i.startswith("CHG-")} for t, row in rows.items() if row.count("|") > 3}
     chg_mismatch = {t: {"trace_table": sorted(trace_chg[t]), "item": sorted(item_chg[t])}
                     for t in sorted(trace_chg) if t in item_chg and trace_chg[t] != item_chg[t]}
@@ -259,7 +266,7 @@ def cmd_envelope(args) -> None:
     inputs.update({"review_mode": "targeted" if args.prior_round else "full", "scope": args.scope,
                    "necessary_evidence": args.evidence, "review_instructions": args.instruction or [
                        "按对应 dev-review skill 的模板输出中文评审正文，最后只输出 delegation-result-v1 JSON 代码块。",
-                       "只用 Read/Glob/Grep；不写文件、不运行代码、不委派；不要自报 reviewer_agent_ref。"]})
+                       "只用 Read/Glob/Grep（codex 进程用 cat/sed/rg/ls/git show 等只读 shell 命令代替）；不写文件、不运行构建或测试、不委派；不要自报 reviewer_agent_ref。"]})
     env = {"task_id": args.task_id, "role": args.role, "producer_agent_refs": args.producer, "input_fingerprints": fps, "inputs": inputs,
            "runtime_requirements": {"tools": ["Read", "Grep", "Glob"], "mcp_servers": [], "nested_delegation": False, "write_workspace": False}}
     write_json(rd / "delegation-envelope.json", env)
@@ -331,9 +338,18 @@ def reviewer_run(args, env, out: Path, evdir: Path) -> dict:
         surface = {"effective_tools": meta.get("effective_tools"), "mcp_servers": meta.get("mcp_servers"),
                    "readonly": meta.get("readonly"), "exit_code": meta.get("exit_code"), "command": meta.get("command"),
                    "wall_s": meta.get("wall_s"), "input_tokens": meta.get("input_tokens"), "output_tokens": meta.get("output_tokens")}
-        surface_ok = bool(meta.get("session_id")) and meta.get("readonly") is True and meta.get("exit_code") == 0 \
-            and meta.get("mcp_servers") == [] and bool(meta.get("effective_tools")) \
-            and set(meta["effective_tools"]) <= EXTERNAL_TOOLS
+        allowed = ALLOWED_TOOLS
+        base_ok = bool(meta.get("session_id")) and meta.get("readonly") is True and meta.get("exit_code") == 0
+        if meta.get("backend") == "codex-vps":
+            # codex has no init event: the surface is fixed by launching through codex-reviewer (bwrap read-only home,
+            # -s read-only, approval never, --ignore-user-config so no MCP), checked against the executed tool calls.
+            surface.update(effective_tools=sorted(CODEX_TOOLS), mcp_servers=[], shell_commands=meta.get("shell_commands"))
+            surface_ok = base_ok and shlex.split(meta.get("command") or "x")[0] == CODEX_REVIEWER \
+                and tools <= CODEX_TOOLS
+            allowed = CODEX_TOOLS  # read-only shell is the codex equivalent of Read/Grep/Glob
+        else:
+            surface_ok = base_ok and meta.get("mcp_servers") == [] and bool(meta.get("effective_tools")) \
+                and set(meta["effective_tools"]) <= EXTERNAL_TOOLS
         kind, model, ref_source = "spawn-model-agent", meta.get("model") or "unknown", \
             f"spawn-model-agent meta.json session_id from the {meta.get('backend')} CLI runtime ({job})"
     else:
@@ -343,6 +359,7 @@ def reviewer_run(args, env, out: Path, evdir: Path) -> dict:
             text, tools = extract_report(Path(args.transcript))
         rejected = []
         reviewer_ref, surface, surface_ok = args.reviewer_ref, {"method": "reviewer agent tool allowlist"}, True
+        allowed = ALLOWED_TOOLS
         kind, model, ref_source = "claude-subagent", args.model, args.ref_source
     (out / "report.md").write_text(text.rstrip() + "\n")
     blocks = re.findall(r"```json\n(.*?)\n```", text, re.S)
@@ -355,7 +372,7 @@ def reviewer_run(args, env, out: Path, evdir: Path) -> dict:
                  "fingerprints_echo_exact": res.get("input_fingerprints") == env["input_fingerprints"],
                  "nothing_after_json_block": text.rstrip().endswith("```")}
     write_json(evdir / "structure-check.json", structure)
-    unexpected = sorted(t for t in tools if t not in ALLOWED_TOOLS)
+    unexpected = sorted(t for t in tools if t not in allowed)
     runtime = {"reviewer_agent_ref": reviewer_ref, "ref_source": ref_source, "reviewer_kind": kind, "role": env["role"],
                "model": model, "selected_by": args.selected_by, "tool_calls_observed": sorted(tools), "tool_calls_rejected": rejected, "unexpected_tools": unexpected,
                "runtime_surface": surface, "runtime_surface_ok": surface_ok, "producer_refs": env["producer_agent_refs"],
@@ -534,7 +551,9 @@ def cmd_persist(args) -> None:
            "secondary_reviewer": secondary,
            "checks": {"independence": {"passed": run["independent"], "evidence": ref(ev / "runtime-record.json")},
                       "read_only": {"passed": not unexpected and runtime["runtime_surface_ok"],
-                                    "method": "spawn --readonly --tools Read,Grep,Glob; init-event tool surface; observed tool calls"
+                                    "method": ("spawn --readonly via codex-reviewer (bwrap, -s read-only, approval never, no user config/MCP); "
+                                               "observed tool calls" if "shell_commands" in surface else
+                                               "spawn --readonly --tools Read,Grep,Glob; init-event tool surface; observed tool calls")
                                     if args.spawn_job else "reviewer tool allowlist; observed tool calls",
                                     "evidence": ref(ev / "runtime-record.json")},
                       "write_set_empty": {"passed": equal, "before": ref(ev / "snapshot-before.json"), "after": ref(ev / "snapshot-after.json"), "equal": equal},
@@ -581,7 +600,8 @@ def cmd_task(args) -> None:
 - 委派契约：`{TOOLS_ROOT}/skills/dev-workflow/references/delegation-contract.md`
 - 派发信封：`{rd}/delegation-envelope.json`（冻结输入、范围、上一轮材料都在这里）
 
-只读取信封列出的冻结输入和必要代码证据。用中文写评审正文；最后一段只输出 `delegation-result-v1` JSON 代码块，
+只读取信封列出的冻结输入和必要代码证据。没有 Read/Grep/Glob 工具的运行时（如 codex）用 `cat`、`sed -n`、`rg`、`ls`、`git show`/`git diff` 等只读命令读取，
+不执行构建、测试或任何写操作。用中文写评审正文；最后一段只输出 `delegation-result-v1` JSON 代码块，
 其中 `task_id` 为 `{env['task_id']}`、`role` 为 `{role}`、`input_fingerprints` 逐项原样回显信封中的映射，之后不得再输出任何文字。
 """
     path = rd / "evidence" / f"external-task-{args.slot}.md"
