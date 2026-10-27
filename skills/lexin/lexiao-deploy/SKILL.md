@@ -2,7 +2,7 @@
 name: lexiao-deploy
 description: 在乐效需求/版本中集成分支、构建、部署并验收项目环境、预发布或用户明确指定的灰度应用。Use when 用户要求集成分支、构建、部署到项目环境或预发布并验收结果；默认每应用一个目标，支持显式灰度全目标；部署后核验制品与实例日志。不用于 OA/线上部署或独立日志查询。
 metadata:
-  version: 1.2.9
+  version: 1.2.10
 ---
 
 # Lexiao Deploy
@@ -75,7 +75,7 @@ For multiple apps, split the work into two phases: branch integration and build 
    - If `批量集成分支` is disabled and the target row already shows the success statuses above, report it as "already integrated" and continue.
    - If the target row is not integrated but the button is disabled or missing, stop before build and report the blocker.
 3. Build:
-   - **Library-module prerequisite.** If the change touches a module that other apps consume by Maven coordinate (a `*-common`, `*-engine`, `*-kernel`, or any module whose artifactId appears in another repo's pom), the app build does NOT publish that jar: neither `integration-pipeline-*` nor `feature-pipeline-*` has a jar-deploy stage. Downstream apps rebuilt before the jar is republished will silently pick up the OLD jar and every later step (build success, deploy success, app startup) will still look fine. Before building any downstream app: publish the jar to Nexus (Lexiao 包管理 or the team's jar pipeline), then confirm `.../repositories/snapshots/<group path>/<artifactId>/<version>/maven-metadata.xml` shows a new `<timestamp>` / `<buildNumber>`. Only a metadata jump counts as published; the build dialog text "如依赖Jar包有变更，请先上传依赖Jar到Nexus，然后重新构建" refers to exactly this.
+   - **Library-module prerequisite.** If the change touches a module that other apps consume by Maven coordinate (a `*-common`, `*-engine`, `*-kernel`, or any module whose artifactId appears in another repo's pom), the app build does NOT publish that jar: neither `integration-pipeline-*` nor `feature-pipeline-*` has a jar-deploy stage. Downstream apps rebuilt before the jar is republished will silently pick up the OLD jar and every later step (build success, deploy success, app startup) will still look fine. Before building any downstream app: publish the jar to Nexus with `upload-lexiao-nexus-jar` (Lexiao 包管理 → 新建上传单; upstream jars first, e.g. console before engine), then confirm `.../repositories/snapshots/<group path>/<artifactId>/<version>/maven-metadata.xml` shows a new `<timestamp>` / `<buildNumber>`. Only a metadata jump counts as published; the build dialog text "如依赖Jar包有变更，请先上传依赖Jar到Nexus，然后重新构建" refers to exactly this.
    - **The repo that owns a changed module is not exempt.** An app compiles its own module in-reactor (new code) but still pulls every *other* changed jar from Nexus (old code until republished). The two halves can disagree: e.g. `server_hawk_decision_executor` had a new `executor-engine` (in-reactor) and an old `hawk-common` (Nexus) in the same artifact, and only the Nexus half failed in gray. Rebuild every app whose Jenkins build timestamp is earlier than the Nexus `maven-metadata.xml` timestamp of *any* changed jar it consumes, directly or transitively — decide with `mvn dependency:tree -Dincludes=<changed coordinates>` (online, never `-o`), not by reading poms. A consumer registering on a Hippo namespace proves that *one* class read it, not that all of them did.
    - For one app, click only the target app row's `构建` button and confirm the build dialog.
    - For multiple apps, click each target app row's `构建` button first, without waiting for previous target apps to finish. Then poll the build API for all target apps together.

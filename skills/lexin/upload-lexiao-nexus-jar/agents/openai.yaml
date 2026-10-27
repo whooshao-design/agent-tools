@@ -1,0 +1,6 @@
+interface:
+  display_name: "upload-lexiao-nexus-jar"
+  short_description: "在乐效包管理新建上传单，把需求分支的 jar 上传到 Nexus"
+  default_prompt: "使用 $upload-lexiao-nexus-jar 把需求分支的 jar 上传到 Nexus"
+policy:
+  allow_implicit_invocation: true
