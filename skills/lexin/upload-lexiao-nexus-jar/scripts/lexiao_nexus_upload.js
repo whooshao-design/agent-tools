@@ -65,11 +65,18 @@ function parseRequest(argv) {
     req.versionType = args['version-type'] || 'snapshot';
     if (!['snapshot', 'release'].includes(req.versionType)) throw new Error('--version-type 只支持 snapshot / release');
   }
-  if (command === 'upload' || command === 'status') {
+  if (command === 'upload') {
     req.deployId = positiveInt(args['deploy-id'], 'deploy-id');
-    if (command === 'upload') req.jarId = positiveInt(args['jar-id'], 'jar-id');
-    req.timeoutSec = args.timeout ? positiveInt(args.timeout, 'timeout') : 1200;
+    req.jarId = positiveInt(args['jar-id'], 'jar-id');
+    req.noWait = args['no-wait'] === true;
   }
+  if (command === 'status') {
+    const ids = typeof args['deploy-id'] === 'string' ? args['deploy-id'].split(',').map((v) => v.trim()) : [];
+    if (!ids.length) throw new Error('缺少 --deploy-id（多个用逗号分隔）');
+    req.deployIds = ids.map((v) => positiveInt(v, 'deploy-id'));
+    req.wait = args.wait === true;
+  }
+  if (command === 'upload' || command === 'status') req.timeoutSec = args.timeout ? positiveInt(args.timeout, 'timeout') : 1200;
   return req;
 }
 
@@ -186,11 +193,13 @@ async function create(page, req) {
   return { command: 'create', applied: true, plan, deploy: d, verified };
 }
 
-async function waitDone(page, deployId, timeoutSec, sleep) {
+/** 轮询多张上传单，直到都不在待上传/上传中或超时；超时仍在运行的单保持原状态返回 */
+async function waitAll(page, deployIds, timeoutSec, sleep) {
   const deadline = Date.now() + timeoutSec * 1000;
   for (;;) {
-    const d = briefDeploy(await detail(page, deployId));
-    if (!RUNNING_STATUS.has(d.status) || Date.now() > deadline) return d;
+    const all = [];
+    for (const id of deployIds) all.push(briefDeploy(await detail(page, id)));
+    if (all.every((d) => !RUNNING_STATUS.has(d.status)) || Date.now() > deadline) return all;
     await sleep(20000);
   }
 }
@@ -212,8 +221,14 @@ async function upload(page, req) {
   await page.waitForTimeout(1500);
   const box = page.locator('.el-message-box:visible');
   if (await box.count()) await box.getByRole('button', { name: /确\s*定/ }).click();
-  const after = await waitDone(page, req.deployId, req.timeoutSec, (ms) => page.waitForTimeout(ms));
-  return { command: 'upload', clicked: true, before, after, success: DONE_STATUS.has(after.status) };
+  await page.waitForTimeout(3000);
+  if (req.noWait) {
+    // 只确认上传已触发就释放浏览器 profile，供同一层的其他上传单并行；结果用 status --wait 统一轮询
+    const after = briefDeploy(await detail(page, req.deployId));
+    return { command: 'upload', clicked: true, before, after, waited: false, success: after.status !== 'DEPLOY_INIT' };
+  }
+  const [after] = await waitAll(page, [req.deployId], req.timeoutSec, (ms) => page.waitForTimeout(ms));
+  return { command: 'upload', clicked: true, before, after, waited: true, success: DONE_STATUS.has(after.status) };
 }
 
 async function main(argv = process.argv.slice(2), openBrowser = openContext) {
@@ -233,12 +248,16 @@ async function main(argv = process.argv.slice(2), openBrowser = openContext) {
     } else if (req.command === 'create') {
       out = await create(page, req);
     } else if (req.command === 'status') {
-      out = { command: 'status', deploy: briefDeploy(await detail(page, req.deployId)) };
+      const deploys = req.wait
+        ? await waitAll(page, req.deployIds, req.timeoutSec, (ms) => page.waitForTimeout(ms))
+        : await Promise.all(req.deployIds.map(async (id) => briefDeploy(await detail(page, id))));
+      out = { command: 'status', allDone: deploys.every((d) => DONE_STATUS.has(d.status)), deploys };
     } else {
       out = await upload(page, req);
     }
     console.log(JSON.stringify(out, null, 2));
     if (out.command === 'upload' && out.clicked && !out.success) throw new Error(`上传未成功：${out.after.statusDesc} ${out.after.message || ''}`);
+    if (out.command === 'status' && req.wait && !out.allDone) throw new Error('有上传单未成功或仍在上传，见上方 deploys');
   } finally {
     await ctx.close().catch(() => {});
   }

@@ -2,7 +2,7 @@
 name: upload-lexiao-nexus-jar
 description: 在乐效「包管理」把需求分支的 jar 发布到 Nexus：查包、新建上传单、点上传并轮询到上传成功，复用浏览器登录态。Use when 修改了被其他应用按 Maven 坐标依赖的模块（如控制台 service/common、引擎 core/app），需要先把 SNAPSHOT jar 上传到 Nexus 再构建下游应用；用户说“打包”“上传 jar”“新建上传单”“发 jar 到 nexus”；或乐效构建因找不到新版本依赖失败。
 metadata:
-  version: 1.0.0
+  version: 1.1.0
 ---
 
 # upload-lexiao-nexus-jar
@@ -19,11 +19,19 @@ metadata:
 
 ## 何时需要上传
 
-改动的模块被其他仓库按 Maven 坐标引用时（例：引擎依赖控制台 `process-engine-console-service`，壳工程依赖引擎 `process-app`），先按依赖顺序上传 jar，再构建下游应用：
+修改的模块被其他仓库按 Maven 坐标引用时（例：引擎依赖控制台 `process-engine-console-service`，壳工程依赖引擎 `process-app`），先上传 jar，再构建下游应用。版本号由服务端从分支的 pom 读取，不在上传单里填；改版本号要改 pom 后推送。
 
-1. 被依赖方先上传（例：控制台 → 引擎）。上传流水线本身也要编译，上游 jar 不在 Nexus 时同样会失败。
-2. 全部上传成功后，再在乐效触发下游应用构建。
-3. 版本号由服务端从分支的 pom 读取，不在上传单里填；改版本号要改 pom 后推送。
+## 多个 jar：按依赖分层，层内并行
+
+上传流水线本身也要编译。上游 jar 还不在 Nexus 时，下游上传单会编译失败；更糟的是 Nexus 里已有同版本旧 jar 时会“成功”编进旧代码。所以：
+
+1. **确定依赖：** 下游仓库的 pom 是否按坐标引用上游 artifactId；拿不准时在下游仓库在线执行 `mvn dependency:tree -Dincludes=<groupId:artifactId>`（不要加 `-o`）。
+2. **分层：** 同一层内互不依赖；下一层只依赖前面已上传的层。例：第 1 层控制台，第 2 层引擎。
+3. **层内并行：** 先对本层每个 jar 依次 `create --apply`，再依次 `upload --no-wait`（点完上传立即释放浏览器 profile），最后 `status --deploy-id=<本层全部ID> --wait` 一次轮询到结束。
+4. **层间串行：** 本层全部“上传成功”后才处理下一层；有一个失败就停下，修复后为失败的 jar 新建上传单重传，再继续。
+5. 所有 jar 上传完再触发应用构建；应用构建之间不用按 jar 的层次排队。
+
+不加 `--no-wait` 的 `upload` 会在轮询期间（默认最长 1200 秒）一直占用 profile 锁，同一 profile 上的其他命令只能等它结束。
 
 一个仓库通常只登记了根 pom 一个包（例：`process-engine-console-java` id 2418、`process-engine` id 2416），上传根 pom 会发布全部子模块。只有当前账号是包关注人时才能建上传单，否则页面行上只有「权限申请」。
 
@@ -50,7 +58,11 @@ node $S create ...同上... --apply
 # 5. 点「上传」并轮询到结束（默认最多 1200 秒，--timeout=秒）
 node $S upload --deploy-id=133177 --jar-id=2418
 
-# 随时查状态
+# 并行：只点上传、不等待；再一次轮询多张单到结束（有一张不成功则退出码非 0）
+node $S upload --deploy-id=133177 --jar-id=2418 --no-wait
+node $S status --deploy-id=133177,133180 --wait
+
+# 随时查状态（可多个）
 node $S status --deploy-id=133177
 ```
 

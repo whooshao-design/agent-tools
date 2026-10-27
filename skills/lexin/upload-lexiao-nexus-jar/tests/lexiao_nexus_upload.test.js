@@ -67,3 +67,18 @@ test('upload refuses an order of another jar or one already running', async () =
   await assert.rejects(main(['upload', '--deploy-id=9', '--jar-id=1'], browser([deploy(2, 'DEPLOY_INIT')]).open), /不是 1/);
   await assert.rejects(main(['upload', '--deploy-id=9', '--jar-id=2'], browser([deploy(2, 'DEPLOYING')]).open), /不要重复点上传/);
 });
+
+test('status takes several deploy ids; upload --no-wait is parsed', () => {
+  assert.deepEqual(parseRequest(['status', '--deploy-id=11,12']).deployIds, [11, 12]);
+  assert.throws(() => parseRequest(['status', '--deploy-id=11,x']));
+  assert.equal(parseRequest(['upload', '--deploy-id=9', '--jar-id=2', '--no-wait']).noWait, true);
+});
+
+test('status --wait polls every order until none is running and fails if one did not succeed', async () => {
+  const d = (id, status) => ok([{ id, jar_id: 1, deploy_status: status }]);
+  const b = browser([d(11, 'DEPLOYING'), d(12, 'DEPLOYED'), d(11, 'DEPLOYED'), d(12, 'DEPLOYED')]);
+  await main(['status', '--deploy-id=11,12', '--wait'], b.open);
+  assert.equal(b.calls.length, 4);
+  const failed = browser([d(11, 'DEPLOY_FAILED'), d(12, 'DEPLOYED')]);
+  await assert.rejects(main(['status', '--deploy-id=11,12', '--wait'], failed.open), /未成功/);
+});
