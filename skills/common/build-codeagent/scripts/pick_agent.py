@@ -71,11 +71,54 @@ def append_record(task: str, entry: dict) -> Path:
     return p
 
 
+def _read_env(path: Path) -> dict:
+    """Minimal parse of the KEY="value" lines that claude-profile / codex-profile source."""
+    values = {}
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return values
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.removeprefix("export ").partition("=")
+        values[key.strip()] = value.split(" #")[0].strip().strip("\"'")
+    return values
+
+
+def profile_model(backend: str) -> str:
+    """Model configured in ~/.config/ai-providers for a lexin wrapper, in the load order of claude-profile / codex-profile."""
+    client, _, family = backend.partition("-")
+    root = Path(os.path.expanduser(os.environ.get("AI_PROVIDERS_HOME", "~/.config/ai-providers")))
+    claude = root / "claude"
+    if client == "claude":
+        own = claude / f"{family}.env"
+        config = own if own.exists() else claude / f"lexin-{family}.env"
+        provider = config.stem.split("-")[0] if "-" in config.stem else None
+        files = ([claude / f"_{provider}.env", claude / f"_{provider}.local.env"] if provider else []) + \
+                [config, config.with_name(config.stem + ".local.env")]
+        keys = ("ANTHROPIC_MODEL", "CLAUDE_PROFILE_MODEL")
+    elif client == "codex":
+        codex = root / "codex"
+        files = [codex / "_lexin.env", codex / "_lexin.local.env", claude / f"lexin-{family}.env",
+                 codex / f"lexin-{family}.env", codex / f"lexin-{family}.local.env"]
+        keys = ("CODEX_PROFILE_MODEL", "CLAUDE_PROFILE_MODEL")
+    else:
+        return "(未知)"
+    env = {}
+    for f in files:
+        env.update(_read_env(f))
+    return next((env[k] for k in keys if env.get(k)), f"(读不到 {backend} 的 profile 模型)")
+
+
 def resolve_model(backend: str, spec: dict) -> str:
     """读取配置模型名；不把它当作本次运行时模型证明。"""
     if "model" in spec:
         return spec["model"]
     src = spec.get("model_source", "")
+    if src == "profile":
+        return profile_model(backend)
     if not src.startswith("dynamic:"):
         return "(未知)"
     path_part, _, key = src[len("dynamic:"):].partition("#")

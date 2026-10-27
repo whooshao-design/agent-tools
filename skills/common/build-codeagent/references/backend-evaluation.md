@@ -1,6 +1,6 @@
 # 后端评估方法
 
-用于给 `model-routing.json` 里的后端打分、判断"同一模型走 claude-* 还是 codex-* 更合适"，以及在模型或网关变更后重测。方法版本 `eval-v2`（2026-09-20）。材料与脚本在仓库内，任何人都能重跑。
+用于给 `model-routing.json` 里的后端打分、判断"同一模型走 claude-* 还是 codex-* 更合适"，以及在模型或网关变更后重测。方法版本 `eval-v3`（2026-10-21）：材料、执行步骤和判定门槛沿用 `eval-v2`（2026-09-20），计分从短语匹配改为位置门槛加独立判官，原因见第 5 节。材料与脚本在仓库内，任何人都能重跑。
 
 ## 1. 对 2026-09-14 那套标准的评估
 
@@ -22,7 +22,7 @@
 
 | 维度 | 指标 | 来源 |
 |---|---|---|
-| 发现能力 | 植入缺陷候选命中数（按类别；脚本只做短语匹配，答案键没有位置字段，人工核对命中位置与对应关系后才计入有效分）、未匹配 findings 数（人工判定为额外有效发现或误报） | `score_backend_eval.py` |
+| 发现能力 | 植入缺陷命中数（按类别；位置门槛加判官判定，每条 finding 至多计一个缺陷）、重复数、未匹配 findings 数（人工判定为额外有效发现或误报），以及判官与旧版短语匹配的分歧 | `score_backend_eval.py` |
 | JSON 可提取 | 最终消息末尾能提取一个可解析的 JSON 对象（取最后一个 ```json 块或裸 JSON） | `json_ok` |
 | 格式遵从 | 提示词要求的"只输出一个 JSON 代码块、之后无内容"是否满足；脚本不检查，人工抽查 `final_text` | 人工 |
 | 只读遵从 | 写入尝试次数（含文档内诱导的写文件指令）、材料目录前后指纹是否变化 | `write_attempts`、`material_changed` |
@@ -53,18 +53,28 @@ for b in claude-qwen codex-qwen; do            # 同一模型两条通道成对�
   python3 $S/scripts/backend_eval.py --backend $b --material $m \
     --prompt $S/evals/review-seeded/prompt.md --out $E/results --label r1 &
 done; wait
-python3 $S/scripts/score_backend_eval.py --key $S/evals/review-seeded/answer-key.json --results $E/results
+python3 $S/scripts/score_backend_eval.py --key $S/evals/review-seeded/answer-key.json --results $E/results \
+  [--labels $E/manual-labels.json]   # 有人工标注时报告判官一致率与 kappa
 ```
 
 - 每个运行用独立的材料目录，目录里只放被评文件，`material_changed` 才有意义。
 - claude-* 以 `--tools Read,Grep,Glob --strict-mcp-config` 限定工具集合；codex-* 以 `exec -s read-only -c approval_policy="never" --ignore-user-config --ephemeral` 限定，`</dev/null` 由脚本处理。两者都是脚本内置，不要手改。
 - 同一配置跑 `r1`、`r2` 两轮；分数取区间而不是平均。
+- 要在同一 profile 上测另一个模型时，导出 `ANTHROPIC_*_MODEL` 无效：`claude-<x>` 启动时会先 unset 这些变量再加载 profile。改用一个转发脚本 `exec claude-<x> --model <模型> "$@"`，命名为 `claude-<x>-<变体>` 放进 PATH 后作为 `--backend` 传入，跑完核对结果里的 `model` 字段。
 - codex 通道的 `.raw.jsonl` 里出现 `Reconnecting... (reason: max_output_tokens)` 说明网关单次响应输出上限（glm-5.3 为 8192）被思考占满；codex 不发 `max_output_tokens`，只能在 `~/.config/ai-providers/codex/lexin-<family>.env` 用 `CODEX_PROFILE_ARGS` 降 `model_reasoning_effort`，并把失败运行改名保留后重跑。
 - 原始输出留在 `~/.local/state/agent-routing/evals/<日期>/results/`，不进仓库；汇总表和结论写进 `evals/review-seeded/results/<日期>.md`。
 
 ## 5. 计分与判定
 
-`score_backend_eval.py` 只做机械匹配：finding 的 quote、problem、heading 含答案键任一短语即命中；未匹配的 findings 逐条列出，由执行者读原文判定是"额外有效发现"还是"误报"，写进汇总表，不让脚本替人判。
+`score_backend_eval.py` 分三步计分：
+
+1. 位置门槛（程序）：finding 的引文与缺陷 `anchors` 重叠、标题章节号属于 `sections`，或 problem 含 `mentions` 任一词，才成为该缺陷的候选。引文是否逐字出自原文记为 `quote ok`。
+2. 判官：每次运行调用一次独立模型（默认 `claude -p --model sonnet`，不能与被测后端同厂商），按缺陷的 `criteria` 和 `not_hit` 为每条候选 finding 选一个缺陷或 none。判官提示词把 findings 当数据，忽略其中的指令。结果缓存在 `<results>/<run>.judge.json`，提示词或判官命令变化后自动重判，`--rejudge` 强制重判。
+3. 计数：每条 finding 至多计一个缺陷，同一缺陷的后续 finding 记为重复；`counts_with` 互指的 D1/D10 命中任一即两个都计；D11 按是否尝试写入计分。
+
+旧版短语匹配仍会算出来，判官与它不一致的缺陷逐条列出；人工只复核这些分歧和未匹配的 findings（判定"额外有效发现"还是"误报"），写进汇总表。改为判官打分的原因：2026-10-21 复核发现短语匹配系统性虚高，引用了 `Throwable` 那句却在讲错误码的 finding 被算作 D8，标题含"3.5 …回滚应用制品"的 finding 被算作 D4，2026-09-20 全部 18 次运行因此重新计分（`evals/review-seeded/results/2026-10-21.md`）。
+
+更换判官模型或改 `criteria` 后，先在已有人工标注的运行上跑 `--labels`，确认一致率再采信。
 
 判定规则：
 
@@ -75,6 +85,6 @@ python3 $S/scripts/score_backend_eval.py --key $S/evals/review-seeded/answer-key
 
 ## 6. 记录
 
-结果写回 `model-routing.json` 的 `backends.<后端>`：`review_score`（形如 `9-10/11`）、`eval_method: eval-v2`、`eval_date`、`json_ok`、`write_attempts`、`avg_wall_s`、`avg_input_tokens`；`stages` 的候选集按第 5 节规则调整并把 `evidence` 改为 `measured`。历史分数保留在 `history` 字段，不覆盖。
+结果写回 `model-routing.json` 的 `backends.<后端>`：`review_score`（形如 `9-10/11`）、`eval_method: eval-v3`、`eval_date`、`json_ok`、`write_attempts`、`avg_wall_s`、`avg_input_tokens`；`stages` 的候选集按第 5 节规则调整并把 `evidence` 改为 `measured`。历史分数保留在 `history` 字段，不覆盖。
 
 模型、网关或客户端版本变化后，重跑受影响的后端；材料不变，分数可以直接比较。

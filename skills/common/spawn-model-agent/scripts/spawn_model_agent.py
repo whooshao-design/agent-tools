@@ -36,6 +36,17 @@ def wrappers_on_path():
     return sorted(found)
 
 
+def configured_model(backend, spec=None):
+    """Model currently configured for the backend (profile env / dynamic config), via build-codeagent's resolver."""
+    sys.path.insert(0, os.path.join(os.path.dirname(ROUTING), 'scripts'))
+    try:
+        from pick_agent import resolve_model
+    finally:
+        sys.path.pop(0)
+    spec = spec if spec is not None else routing_backends().get(backend, {})
+    return resolve_model(backend, spec or {'model_source': 'profile'})
+
+
 def routing_backends():
     try:
         return json.load(open(ROUTING, encoding='utf-8')).get('backends', {})
@@ -97,10 +108,11 @@ def ledger_stats(path=None):
             rows = [json.loads(l) for l in f if l.strip()]
     except OSError:
         return {}
-    owner = {r['approval_id']: r['backend'] for r in rows if r.get('slot') == 'primary'}
+    owner = {r['approval_id']: (r['backend'], r.get('model')) for r in rows if r.get('slot') == 'primary'}
     stats = {}
     for r in rows:
-        st = stats.setdefault(r['backend'], {'n': 0, 'invalid': 0, 'env_void': 0, 'findings': 0, 'valid': 0, 'noise': 0, 'escaped': 0})
+        # keyed by backend AND model: a wrapper's model can be swapped, and its field record does not carry over
+        st = stats.setdefault((r['backend'], r.get('model')), {'n': 0, 'invalid': 0, 'env_void': 0, 'findings': 0, 'valid': 0, 'noise': 0, 'escaped': 0})
         if not r.get('execution_valid'):
             # a round voided by another writer still holds the reviewer's real work; only reviewer-caused failures count against it
             if r.get('invalid_cause') != 'environment':
@@ -131,13 +143,24 @@ def format_stats(st):
 def list_backends():
     routing = routing_backends()
     stats = ledger_stats()
-    print('| 后端 | 模型 | 评审分（eval-v2） | 实战（评审记录） | 适用性 / 备注 |\n|---|---|---|---|---|')
+    print('| 后端 | 当前模型 | 评审分（eval-v2） | 实战（评审记录） | 适用性 / 备注 |\n|---|---|---|---|---|')
+    stale = []
     for b in wrappers_on_path():
         r = routing.get(b, {})
-        print(f"| {b} | {r.get('model') or r.get('model_source', '?')} | {r.get('review_score', '未测')} | {format_stats(stats.get(b))} | "
+        model = configured_model(b, r)
+        tested = r.get('review_test_model')
+        score = r.get('review_score', '未测')
+        if tested and score != '未测' and model != tested:
+            score = f"未测（{score} 测于 {tested}）"
+            stale.append(b)
+        print(f"| {b} | {model} | {score} | {format_stats(stats.get((b, model)))} | "
               f"{(r.get('fit') or r.get('warn') or r.get('note') or '')[:70]} |")
-    if stats.get('claude-subagent'):
-        print(f"\n同模型子 agent（agent-tools-*-reviewer）实战：{format_stats(stats['claude-subagent'])}")
+    sub = {k: v for k, v in stats.items() if k[0] == 'claude-subagent'}
+    for (_, model), st in sorted(sub.items(), key=lambda kv: str(kv[0][1])):
+        print(f"\n同模型子 agent（agent-tools-*-reviewer，{model}）实战：{format_stats(st)}")
+    if stale:
+        print(f"\n当前模型与评审基准模型不同：{', '.join(stale)}；它们的分数不适用，不进推荐排序。"
+              "重测：build-codeagent/scripts/backend_eval.py。")
     print('\n短名（qwen/deepseek/kimi/…）按宿主补成 claude-* 或 codex-*；分数与备注来自 build-codeagent/model-routing.json；'
           '实战列来自 ~/.local/state/agent-tools/reviewer-ledger.jsonl（只计各轮新提出的 finding；漏检 = 后续轮次标记 escaped_from 的问题数；'
           '无效 = reviewer 自身原因的无效轮，环境作废轮照常计入）。')
@@ -177,8 +200,14 @@ def parse_claude(raw):
     if not isinstance(d, dict):
         return {}, ''
     init = next((e for e in events if e.get('type') == 'system' and e.get('subtype') == 'init'), {})
-    used = sorted({b.get('name') for e in events if e.get('type') == 'assistant'
-                   for b in (e.get('message') or {}).get('content') or [] if b.get('type') == 'tool_use'})
+    calls = [b for e in events if e.get('type') == 'assistant'
+             for b in (e.get('message') or {}).get('content') or [] if b.get('type') == 'tool_use']
+    # a call the runtime refused because the tool is not in the session never ran; keep it apart from tools that executed
+    refused = {b.get('tool_use_id') for e in events if e.get('type') == 'user'
+               for b in (e.get('message') or {}).get('content') or [] if isinstance(b, dict) and b.get('type') == 'tool_result'
+               and b.get('is_error') and 'No such tool available' in str(b.get('content'))}
+    used = sorted({b.get('name') for b in calls if b.get('id') not in refused})
+    rejected = sorted({b.get('name') for b in calls if b.get('id') in refused})
     mu = d.get('modelUsage') or {}
     model = next(iter(mu), None)
     u = mu.get(model, {}) if model else {}
@@ -187,7 +216,7 @@ def parse_claude(raw):
             'input_tokens': (u.get('inputTokens') or 0) + (u.get('cacheReadInputTokens') or 0) + (u.get('cacheCreationInputTokens') or 0),
             'output_tokens': u.get('outputTokens'), 'permission_denials': [x.get('tool_name') for x in d.get('permission_denials', [])],
             'effective_tools': init.get('tools'), 'mcp_servers': [m.get('name') for m in init.get('mcp_servers') or []],
-            'tools_used': used}
+            'tools_used': used, 'tools_rejected': rejected}
     return meta, d.get('result', '') or ''
 
 
@@ -261,7 +290,7 @@ def run_child(job, backend, task, cwd, readonly, slim, timeout, resume_id, tools
     wall = round(time.time() - t0, 1)
     open(os.path.join(job, 'raw.jsonl'), 'w').write(p.stdout)
     meta, result = (parse_claude if backend.startswith('claude-') else parse_codex)(p.stdout)
-    meta['model'] = meta.get('model') or routing_backends().get(backend, {}).get('model')
+    meta['model'] = meta.get('model') or configured_model(backend)
     meta.update(backend=backend, cwd=cwd, readonly=readonly, tools=tools, slim=slim, resumed_from=resume_id,
                 exit_code=p.returncode, wall_s=wall,
                 command=' '.join('"<task>"' if c == task else shlex.quote(c) for c in cmd),

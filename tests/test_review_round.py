@@ -247,6 +247,8 @@ class ReviewRoundTest(unittest.TestCase):
         failed, out, _ = self.review_round(base1, "t1", [f1], "job1")
         self.assertFalse(failed)
         self.assertIn("## 评审打分", out)
+        card = self.req / "requirements-review/rounds/round-1/scorecard.md"
+        self.assertTrue(out.rstrip().endswith(card.read_text().rstrip()))  # the printed scorecard is kept in the round
         base2 = ["--req-dir", str(self.req), "--stage", "requirements-review", "--round", "2"]
         f2 = {"id": "RR-002", "severity": "Low", "status": "Open", "classification": "噪音", "evidence": "summary.md:3"}
         other_writer = lambda: (self.req / "requirements/notes.md").write_text("另一会话写入\n")
@@ -258,7 +260,7 @@ class ReviewRoundTest(unittest.TestCase):
         self.assertEqual(rows[1]["carried_findings"], 1)
         self.assertIn("作废（环境原因", out)
         self.assertIn("RR-002 噪音（summary.md:3）", out)
-        self.assertIn("累计实战 claude-qwen：n=2 成立 1/2 噪音 1", out)
+        self.assertIn("累计实战 claude-qwen（claude-qwen-model）：n=2 成立 1/2 噪音 1", out)
         self.assertIn("环境作废 1", out)
 
     def test_requirements_review_targeted_rereview_diffs_archived_version(self):

@@ -326,6 +326,7 @@ def reviewer_run(args, env, out: Path, evdir: Path) -> dict:
         job = Path(args.spawn_job)
         meta = json.loads((job / "meta.json").read_text())
         text, tools = (job / "result.md").read_text(), set(meta.get("tools_used") or [])
+        rejected = sorted(meta.get("tools_rejected") or [])
         reviewer_ref = f"spawn:{meta.get('backend')}:{meta.get('session_id')}"
         surface = {"effective_tools": meta.get("effective_tools"), "mcp_servers": meta.get("mcp_servers"),
                    "readonly": meta.get("readonly"), "exit_code": meta.get("exit_code"), "command": meta.get("command"),
@@ -340,6 +341,7 @@ def reviewer_run(args, env, out: Path, evdir: Path) -> dict:
             text, tools = Path(args.report_file).read_text(), set(args.tools_used or [])
         else:
             text, tools = extract_report(Path(args.transcript))
+        rejected = []
         reviewer_ref, surface, surface_ok = args.reviewer_ref, {"method": "reviewer agent tool allowlist"}, True
         kind, model, ref_source = "claude-subagent", args.model, args.ref_source
     (out / "report.md").write_text(text.rstrip() + "\n")
@@ -355,7 +357,7 @@ def reviewer_run(args, env, out: Path, evdir: Path) -> dict:
     write_json(evdir / "structure-check.json", structure)
     unexpected = sorted(t for t in tools if t not in ALLOWED_TOOLS)
     runtime = {"reviewer_agent_ref": reviewer_ref, "ref_source": ref_source, "reviewer_kind": kind, "role": env["role"],
-               "model": model, "selected_by": args.selected_by, "tool_calls_observed": sorted(tools), "unexpected_tools": unexpected,
+               "model": model, "selected_by": args.selected_by, "tool_calls_observed": sorted(tools), "tool_calls_rejected": rejected, "unexpected_tools": unexpected,
                "runtime_surface": surface, "runtime_surface_ok": surface_ok, "producer_refs": env["producer_agent_refs"],
                "trust_limits": args.trust_limit}
     independent = reviewer_ref not in env["producer_agent_refs"]
@@ -464,12 +466,19 @@ def scorecard(rows: list) -> str:
         lines.append(f"| {r['slot']} {r['backend']} | {r['model']} | {r['selected_by'] or '—'} | {status} | {found} | {r['carried_findings']} |")
     checks = [c for r in rows for c in r["spot_check"]]
     lines += ["", "需抽查（噪音 / 契约误读）：" + ("；".join(f"{c['id']} {c['classification']}（{c['evidence']}）" for c in checks) if checks else "无")]
-    lines += [f"累计实战 {b}：{sma.format_stats(stats.get(b))}" for b in dict.fromkeys(r["backend"] for r in rows)]
+    lines += [f"累计实战 {b}（{m}）：{sma.format_stats(stats.get((b, m)))}" for b, m in dict.fromkeys((r["backend"], r["model"]) for r in rows)]
     return "\n".join(lines)
 
 
+def write_scorecard(rd: Path, rows: list) -> str:
+    """Keep the scorecard in the round directory so the report to the user can be checked against it."""
+    text = scorecard(rows)
+    (rd / "scorecard.md").write_text(text + "\n")
+    return text
+
+
 def cmd_ledger(args) -> None:
-    print(scorecard(append_ledger(round_dir(args), Path(args.req_dir))))
+    print(write_scorecard(round_dir(args), append_ledger(round_dir(args), Path(args.req_dir))))
 
 
 def cmd_persist(args) -> None:
@@ -546,7 +555,7 @@ def cmd_persist(args) -> None:
                       "open": counts, "material_gaps": rec["material_gaps"], "unexpected_tools": unexpected, "write_set_equal": equal,
                       "runtime_surface_ok": runtime["runtime_surface_ok"],
                       "structure_failures": [k for k, v in structure.items() if k != "status" and not v]}, ensure_ascii=False))
-    print(scorecard(rows))
+    print(write_scorecard(rd, rows))
     if not valid:
         sys.exit(1)
 

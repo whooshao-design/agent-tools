@@ -19,7 +19,7 @@
 - reviewer 必须处于有效只读 sandbox，且不可访问任何有写入或外部变更能力的工具/MCP。父会话处于全权限/跳过权限模式，或 reviewer 仍能继承写能力 MCP 时，本轮执行必须 `blocked`。
 - reviewer 一旦写入即成为新状态的 producer，本轮结果失效；`changed_files` 等模型自报不能作为未写入证明。
 - reviewer 返回的 `changed_files` 必须严格为 `[]`。
-- 经 `spawn-model-agent` 派发的外部 reviewer 不继承父会话权限，有效能力面由其自身启动参数决定：必须带 `--readonly --tools Read,Grep,Glob`（Claude 通道同时 `--strict-mcp-config`），并以运行流 init 事件记录的实际工具集与 MCP 列表为准；该集合超出 `Read/Grep/Glob` 或 MCP 非空时本轮无效。
+- 经 `spawn-model-agent` 派发的外部 reviewer 不继承父会话权限，有效能力面由其自身启动参数决定：必须带 `--readonly --tools Read,Grep,Glob`（Claude 通道同时 `--strict-mcp-config`），并以运行流 init 事件记录的实际工具集与 MCP 列表为准；该集合超出 `Read/Grep/Glob` 或 MCP 非空时本轮无效。reviewer 调用会话中不存在的工具时，运行时直接拒绝、不执行，`persist` 把它记入运行记录的 `tool_calls_rejected`，不计为越界；越界判定只看实际执行的工具调用。
 
 ### 写入证明
 
@@ -61,8 +61,8 @@ spawn/stop 后，编排器另外生成可信运行记录，至少包含：派发
 
 每轮正式评审派发前，编排器让用户选择 reviewer 模型，而不是默认使用与 producer 相同的模型：
 
-1. 运行 `python3 /home/joney/projects/ai/agent-tools/skills/common/spawn-model-agent/scripts/spawn_model_agent.py --list`，候选只取宿主通道（Claude Code 取 `claude-*`，Codex 取 `codex-*`）中评审分为满分或最高档的后端；未测、低分或适用性备注不适合多缺陷评审的后端不进默认选项（用户点名时照常可用）。与 producer 同 provider 的后端不作推荐项。
-2. 用选择题列出 2～3 个候选（模型、评审分、关键备注），推荐项放第一位并写明理由；另外固定提供“同模型子 agent（`agent-tools-*-reviewer`）”和“双评审（推荐项 + 同模型子 agent）”两项。推荐项按评审分、再按备注中的缺陷捕获记录排序，有可靠性警告（如空返回）时在描述里写出处置。`--list` 的“实战”列（§3.2 评审记录）只在同一阶段累计不少于 5 轮有效记录后参与同分排序，样本不足时只展示；实战记录出现漏检或模型版本更新时，提示用户用 `build-codeagent/scripts/backend_eval.py` 重跑基准，不据实战记录单独换模型。
+1. 运行 `python3 /home/joney/projects/ai/agent-tools/skills/common/spawn-model-agent/scripts/spawn_model_agent.py --list`，候选只取宿主通道（Claude Code 取 `claude-*`，Codex 取 `codex-*`）中评审分为满分或最高档的后端；未测、低分或适用性备注不适合多缺陷评审的后端不进默认选项（用户点名时照常可用）。后端背后的模型可由用户随时在 profile 中更换：`--list` 显示的是当前配置的模型，与评审基准模型（`review_test_model`）不同时分数标为“未测”，该后端按未测处理。与 producer 同 provider 的后端不作推荐项。
+2. 用选择题列出 2～3 个候选（模型、评审分、关键备注），推荐项放第一位并写明理由；另外固定提供“同模型子 agent（`agent-tools-*-reviewer`）”和“双评审（推荐项 + 同模型子 agent）”两项。推荐项按评审分、再按备注中的缺陷捕获记录排序，有可靠性警告（如空返回）时在描述里写出处置。方案评审的核心机制涉及缓存、并发、状态流转或外部依赖失败处理时，推荐项改为“双评审”，因为单个 reviewer 对隐含前提的漏检在实战中出现过；用户仍可选单评审。`--list` 的“实战”列（§3.2 评审记录）只在同一阶段累计不少于 5 轮有效记录后参与同分排序，样本不足时只展示；实战记录出现漏检或模型版本更新时，提示用户用 `build-codeagent/scripts/backend_eval.py` 重跑基准，不据实战记录单独换模型。
 3. 同一需求已有用户选择时，后续轮次与后续阶段默认沿用（`--selected-by carried-over`），不再重复提问；复审中途换 reviewer 会让 findings 口径不一致，只在用户明确要求时更换。沿用来源是最近一轮审批记录的 `reviewer` 字段。
 4. 无人值守编排（如 `dev-auto-loop`）不提问：沿用该需求已有选择，否则用推荐项，并以 `--selected-by default-unattended` 记入审批记录。
 
@@ -78,7 +78,7 @@ spawn/stop 后，编排器另外生成可信运行记录，至少包含：派发
 
 - 复审信封里沿用往轮 ID 的 finding（无论 Open 还是 Resolved）只计入"往轮带入"，不重复计分；分类计数只覆盖本轮首次提出的 finding。
 - reviewer 的身份、只读、工具面和结果结构全部通过，仅因前后快照不一致而作废的轮次，无效原因记为 `environment`：它由其他写入方造成，照常计入该 reviewer 的实战，不记"无效"；其余无效轮次记为 `reviewer`。环境作废仍不能形成审批事实，按 §2 重新冻结。
-- `persist` 与 `ledger` 收口时在终端打印本轮评分卡（reviewer 与模型、选择方式、执行状态、本轮新提出的分类计数、往轮带入数、待抽查条目、该后端累计实战）。编排器每轮向用户汇报时原样展示评分卡，不等用户追问。编排器往往也是产出者，判定 reviewer 意见为噪音存在利益冲突，评分卡中的 `噪音` 与 `契约误读` 条目就是供用户抽查的清单。
+- `persist` 与 `ledger` 收口时在终端打印本轮评分卡（reviewer 与模型、选择方式、执行状态、本轮新提出的分类计数、往轮带入数、待抽查条目、该后端累计实战）。评分卡同时写入 `rounds/round-<N>/scorecard.md`；编排器每轮向用户汇报时原样粘贴该文件内容，不改写、不删行，不等用户追问。编排器往往也是产出者，判定 reviewer 意见为噪音存在利益冲突，评分卡中的 `噪音` 与 `契约误读` 条目就是供用户抽查的清单。
 
 ## 4. `delegation-result-v1`
 

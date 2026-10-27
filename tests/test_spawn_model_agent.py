@@ -113,22 +113,51 @@ class SpawnModelAgentTest(unittest.TestCase):
         meta, text = sma.parse_codex(raw)
         self.assertEqual((meta["session_id"], meta["input_tokens"], text), ("t1", 3, "hi"))
 
+    def test_refused_tool_calls_are_kept_apart_from_executed_ones(self):
+        raw = "\n".join([
+            '{"type":"system","subtype":"init","tools":["Glob","Grep","Read"],"mcp_servers":[]}',
+            '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"a","name":"Bash","input":{}}]}}',
+            '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"a","is_error":true,"content":"<tool_use_error>Error: No such tool available: Bash</tool_use_error>"}]}}',
+            '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"b","name":"Grep","input":{}}]}}',
+            '{"type":"result","session_id":"s","result":"ok"}'])
+        meta, _ = sma.parse_claude(raw)
+        self.assertEqual((meta["tools_used"], meta["tools_rejected"]), (["Grep"], ["Bash"]))
+
     def test_ledger_stats_attribute_escapes_to_the_passing_reviewer(self):
         import json, os, tempfile
         rows = [
-            {"approval_id": "a1", "slot": "primary", "backend": "claude-qwen", "execution_valid": True,
+            {"approval_id": "a1", "slot": "primary", "backend": "claude-qwen", "model": "q1", "execution_valid": True,
              "finding_counts": {"成立需修/Low": 2, "噪音/Low": 1}, "escaped_from": []},
-            {"approval_id": "a2", "slot": "primary", "backend": "claude-subagent", "execution_valid": True,
+            {"approval_id": "a2", "slot": "primary", "backend": "claude-subagent", "model": "s", "execution_valid": True,
              "finding_counts": {"成立需修/High": 1}, "escaped_from": ["a1"]},
-            {"approval_id": "a3", "slot": "primary", "backend": "claude-qwen", "execution_valid": False, "finding_counts": {}},
+            {"approval_id": "a3", "slot": "primary", "backend": "claude-qwen", "model": "q1", "execution_valid": False, "finding_counts": {}},
+            {"approval_id": "a4", "slot": "primary", "backend": "claude-qwen", "model": "q2", "execution_valid": True,
+             "finding_counts": {"成立需修/Medium": 1}, "escaped_from": []},
         ]
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "ledger.jsonl")
             open(path, "w").write("\n".join(json.dumps(r, ensure_ascii=False) for r in rows))
             st = sma.ledger_stats(path)
-        self.assertEqual(sma.format_stats(st["claude-qwen"]), "n=1 成立 2/3 噪音 1 漏检 1 无效 1")
-        self.assertEqual(sma.format_stats(st["claude-subagent"]), "n=1 成立 1/1 噪音 0 漏检 0")
+        self.assertEqual(sma.format_stats(st[("claude-qwen", "q1")]), "n=1 成立 2/3 噪音 1 漏检 1 无效 1")
+        self.assertEqual(sma.format_stats(st[("claude-qwen", "q2")]), "n=1 成立 1/1 噪音 0 漏检 0")  # a swapped model starts fresh
+        self.assertEqual(sma.format_stats(st[("claude-subagent", "s")]), "n=1 成立 1/1 噪音 0 漏检 0")
         self.assertEqual(sma.format_stats(None), "—")
+
+    def test_list_marks_score_stale_when_profile_model_changed(self):
+        import io, os, tempfile, contextlib
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "claude"))
+            open(os.path.join(d, "claude", "lexin-deepseek.env"), "w").write('# note\nCLAUDE_PROFILE_MODEL="ds-new"\n')
+            routing = {"claude-deepseek": {"model_source": "profile", "review_score": "11/11", "review_test_model": "ds-old"}}
+            out = io.StringIO()
+            with mock.patch.dict(os.environ, {"AI_PROVIDERS_HOME": d}), \
+                    mock.patch.object(sma, "routing_backends", return_value=routing), \
+                    mock.patch.object(sma, "wrappers_on_path", return_value=["claude-deepseek"]), \
+                    mock.patch.object(sma, "ledger_stats", return_value={}), contextlib.redirect_stdout(out):
+                sma.list_backends()
+        text = out.getvalue()
+        self.assertIn("| claude-deepseek | ds-new | 未测（11/11 测于 ds-old） |", text)
+        self.assertIn("不进推荐排序", text)
 
     def test_fit_hint_comes_from_routing(self):
         with mock.patch.object(sma, "routing_backends", return_value={"codex-glm": {"fit": "只派轻任务", "output_cap_tokens": 8192}}):

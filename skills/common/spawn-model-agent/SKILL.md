@@ -2,7 +2,7 @@
 name: spawn-model-agent
 description: Use when 用户点名用某个国内模型或其他后端（qwen、deepseek、kimi、glm 等）做一个子任务，例如"用 kimi 总结这个文件""让 deepseek 起草说明""用 qwen 联网查一下"，或显式调用 /spawn-model-agent；在 Claude Code 与 Codex 里都另起一个该模型的 agent 进程执行，主会话只读结果。不做模型自动路由。
 metadata:
-  version: 1.3.0
+  version: 1.4.0
 ---
 
 # spawn-model-agent
@@ -21,7 +21,7 @@ python3 /home/joney/projects/ai/agent-tools/skills/common/spawn-model-agent/scri
 ```
 
 - `--backend`：短名（`qwen` / `deepseek` / `kimi` / `glm` / `minimax` / `doubao` / `vps`）按宿主补成 `claude-<名>` 或 `codex-<名>`；也可以写完整包装器名如 `claude-qwen`、`codex-vps`。可用列表来自 PATH 上指向 `claude-profile` / `codex-profile` 的包装器，不是写死的。
-- `--list`：列出可用后端，附 `build-codeagent/model-routing.json` 里的评审分与备注（未评测的显示"未测"，仍可用）。
+- `--list`：列出可用后端、每个后端当前配置的模型（乐信后端读 `~/.config/ai-providers` 下的 profile，用户可随时更换），附 `build-codeagent/model-routing.json` 里的评审分与备注。未评测、或当前模型与评审基准模型不同的后端显示"未测"，仍可用；实战记录按“后端 + 模型”分开累计。
 - `--task`：任务文本，或 `@文件路径` 从文件读。写清目标、输入位置、期望输出形式。
 - `--cwd`：agent 的工作目录，默认当前目录。它能读写这个目录（默认权限见“边界”）。
 - `--slim`：仅 claude-*。用空配置目录启动，不加载全局 CLAUDE.md、记忆、skill 索引和 MCP；实测同一小任务 20.7s/66k token 降到 10.6s/34k。任务不依赖全局规则或 MCP 时默认加上。

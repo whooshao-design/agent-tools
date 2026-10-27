@@ -221,6 +221,18 @@ class PickAgentTest(unittest.TestCase):
         self.routing["backends"]["claude-qwen"]["model"] = "shared-model"
         self.assertEqual(self.call()["backend"], "codex-vps")
 
+
+    def test_resolve_model_reads_lexin_profile_env(self):
+        import os, tempfile
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "claude")); os.makedirs(os.path.join(d, "codex"))
+            open(os.path.join(d, "claude", "lexin-ds.env"), "w").write('CLAUDE_PROFILE_MODEL="ds-1"\n')
+            open(os.path.join(d, "claude", "lexin-ds.local.env"), "w").write("CLAUDE_PROFILE_MODEL=ds-2\n")
+            open(os.path.join(d, "codex", "lexin-ds.env"), "w").write('CODEX_PROFILE_MODEL="ds-codex"\n')
+            with patch.dict(os.environ, {"AI_PROVIDERS_HOME": d}):
+                self.assertEqual(picker.resolve_model("claude-ds", {"model_source": "profile"}), "ds-2")
+                self.assertEqual(picker.resolve_model("codex-ds", {"model_source": "profile"}), "ds-codex")
+                self.assertTrue(picker.resolve_model("claude-none", {"model_source": "profile"}).startswith("(读不到"))
     def test_toml_model_key_is_exact_and_json_model_is_supported(self):
         toml = self.root / "config.toml"
         toml.write_text('model_provider = "provider-name"\nmodel = "real-model"\n')

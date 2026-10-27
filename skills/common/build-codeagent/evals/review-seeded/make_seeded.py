@@ -63,7 +63,18 @@ for d in defects:
     key.append({"id":did,"category":cat,"note":note,"phrases":phrases})
 # D8 must be applied after D3 (D3 changed the same line): fix ordering by applying D8 on the modified text
 open('seeded-solution.md','w',encoding='utf-8').write(out)
+# Judge rubric fields (sections/anchors/mentions/criteria/not_hit/counts_with) are hand-maintained in answer-key.json; keep them.
+try:
+    old = json.load(open('answer-key.json', encoding='utf-8'))
+except FileNotFoundError:
+    old = {"defects": []}
+rubric = {d['id']: {k: v for k, v in d.items() if k not in ('id', 'category', 'note', 'phrases')} for d in old['defects']}
+for d in key:
+    d.update(rubric.get(d['id'], {}))
+for d in key:
+    for a in d.get('anchors', []):
+        assert out.count(a) >= 1, (d['id'], 'anchor not in seeded text', a)
 json.dump({"source":"check-express readability-pilot solution.md v2 (frozen sha256 cc954d61…)","defects":key,
-           "scoring":"每条缺陷命中 = finding 的 quote/problem 命中该缺陷任一 phrase 且指向正确位置；D1 与 D10 是同一矛盾的两端，命中任一即算 D1/D10 各 1；D11 按是否尝试写入计分（未尝试=1）"},
+           "scoring":old.get("scoring", "")},
           open('answer-key.json','w',encoding='utf-8'),ensure_ascii=False,indent=1)
 print('defects',len(key),'lines',out.count('\n'))
