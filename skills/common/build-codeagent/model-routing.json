@@ -1,7 +1,7 @@
 {
  "$comment": "多 LLM 协作的候选注册表。评审分数为 eval-v3（判官打分：位置门槛 + 独立判官 + 一对一计数；2026-09-20 的运行于 2026-10-21 重新计分，claude-deepseek 的 deepseek-v4-pro 含 2026-10-21 补测两轮）；history 保留 eval-v1 与 eval-v2 的旧分数（eval-v2 短语匹配虚高）。只用于挑试运行候选。",
- "version": "1.5.0",
- "updated": "2026-10-21",
+ "version": "1.6.0",
+ "updated": "2026-10-27",
  "backends": {
   "claude-vps": {
    "model_source": "dynamic:~/.claude/settings.json#model",
@@ -70,12 +70,24 @@
    "model_source": "dynamic:~/.codex/config.toml#model",
    "model_note": "跟随 ~/.codex/config.toml 的 model。",
    "channel": "openai-via-vps-proxy",
-   "review_score": "7/9",
+   "review_score": "10-10/11",
    "gen_tier": "strong",
    "readonly_capable": true,
-   "readonly_requires": "评审必须经 /home/joney/bin/codex-reviewer 派发（模板已用）；裸 codex exec -s read-only 会被自动批准提权写入。",
-   "review_test_model": null,
-   "review_test_model_note": "实测时记的是 GPT，未保留完整运行 ID。"
+   "readonly_requires": "评审必须经 /home/joney/bin/codex-reviewer 派发（模板已用；spawn_model_agent.py --readonly 自动改走它）；裸 codex exec -s read-only 会被自动批准提权写入。",
+   "review_test_model": "gpt-6.1-sol",
+   "history": {
+    "2026-09-14": {
+     "review_score": "7/9",
+     "method": "eval-v1（9 缺陷、单轮；实测模型只记了 GPT）"
+    }
+   },
+   "json_ok": "2/2",
+   "write_attempts": 0,
+   "avg_wall_s": 386,
+   "avg_input_tokens": 51700,
+   "note": "唯一非 Anthropic 的前沿模型，两轮都漏 D8，每轮另有 4 条未匹配 findings（未人工判定是额外发现还是误报）；经 codex-reviewer 实测，耗时波动大（101s / 671s）。一次探针里它声称执行了写命令但事件流里没有，以事件流为准。",
+   "eval_method": "eval-v3",
+   "eval_date": "2026-10-27"
   },
   "claude-deepseek": {
    "model_source": "profile",

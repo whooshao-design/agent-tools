@@ -19,7 +19,7 @@
 - reviewer 必须处于有效只读 sandbox，且不可访问任何有写入或外部变更能力的工具/MCP。父会话处于全权限/跳过权限模式，或 reviewer 仍能继承写能力 MCP 时，本轮执行必须 `blocked`。
 - reviewer 一旦写入即成为新状态的 producer，本轮结果失效；`changed_files` 等模型自报不能作为未写入证明。
 - reviewer 返回的 `changed_files` 必须严格为 `[]`。
-- 经 `spawn-model-agent` 派发的外部 reviewer 不继承父会话权限，有效能力面由其自身启动参数决定：必须带 `--readonly --tools Read,Grep,Glob`（Claude 通道同时 `--strict-mcp-config`），并以运行流 init 事件记录的实际工具集与 MCP 列表为准；该集合超出 `Read/Grep/Glob` 或 MCP 非空时本轮无效。reviewer 调用会话中不存在的工具时，运行时直接拒绝、不执行，`persist` 把它记入运行记录的 `tool_calls_rejected`，不计为越界；越界判定只看实际执行的工具调用。
+- 经 `spawn-model-agent` 派发的外部 reviewer 不继承父会话权限，有效能力面由其自身启动参数决定：必须带 `--readonly --tools Read,Grep,Glob`（Claude 通道同时 `--strict-mcp-config`），并以运行流 init 事件记录的实际工具集与 MCP 列表为准；该集合超出 `Read/Grep/Glob` 或 MCP 非空时本轮无效。`codex-vps` 是例外：codex 没有工具白名单，也不输出 init 事件，`spawn_model_agent.py --readonly` 对它改经 `/home/joney/bin/codex-reviewer` 启动（bwrap 只读挂载 home、`-s read-only`、`approval_policy=never`、`--ignore-user-config` 不挂 MCP、禁用 apps），以只读 shell 命令代替 `Read/Grep/Glob`；`persist` 核对实际启动命令是 `codex-reviewer`，且事件流里执行过的工具只有 `shell`（出现 `mcp_tool_call`、`web_search` 或 `file_change` 即无效），执行过的命令原样记入运行记录。其他 `codex-*` 后端没有等价封装，仍不能做正式评审。reviewer 调用会话中不存在的工具时，运行时直接拒绝、不执行，`persist` 把它记入运行记录的 `tool_calls_rejected`，不计为越界；越界判定只看实际执行的工具调用。
 
 ### 写入证明
 
@@ -61,7 +61,7 @@ spawn/stop 后，编排器另外生成可信运行记录，至少包含：派发
 
 每轮正式评审派发前，编排器让用户选择 reviewer 模型，而不是默认使用与 producer 相同的模型：
 
-1. 运行 `python3 /home/joney/projects/ai/agent-tools/skills/common/spawn-model-agent/scripts/spawn_model_agent.py --list`，候选只取宿主通道（Claude Code 取 `claude-*`，Codex 取 `codex-*`）中评审分为满分或最高档的后端；未测、低分或适用性备注不适合多缺陷评审的后端不进默认选项（用户点名时照常可用）。后端背后的模型可由用户随时在 profile 中更换：`--list` 显示的是当前配置的模型，与评审基准模型（`review_test_model`）不同时分数标为“未测”，该后端按未测处理。与 producer 同 provider 的后端不作推荐项。
+1. 运行 `python3 /home/joney/projects/ai/agent-tools/skills/common/spawn-model-agent/scripts/spawn_model_agent.py --list`，候选只取宿主通道（Claude Code 取 `claude-*`，Codex 取 `codex-*`）中评审分为满分或最高档的后端，`codex-vps` 例外：它经 `codex-reviewer` 在两个宿主下都能做正式评审（见 §2），且是唯一非 Anthropic 的前沿模型，producer 是 Claude 模型时作为异厂商选项固定列出（评审分按 `--list` 当前值标注）；未测、低分或适用性备注不适合多缺陷评审的后端不进默认选项（用户点名时照常可用）。后端背后的模型可由用户随时在 profile 中更换：`--list` 显示的是当前配置的模型，与评审基准模型（`review_test_model`）不同时分数标为“未测”，该后端按未测处理。与 producer 同 provider 的后端不作推荐项。
 2. 用选择题列出 2～3 个候选（模型、评审分、关键备注），推荐项放第一位并写明理由；另外固定提供“同模型子 agent（`agent-tools-*-reviewer`）”和“双评审（推荐项 + 同模型子 agent）”两项。推荐项按评审分、再按备注中的缺陷捕获记录排序，有可靠性警告（如空返回）时在描述里写出处置。方案评审的核心机制涉及缓存、并发、状态流转或外部依赖失败处理时，推荐项改为“双评审”，因为单个 reviewer 对隐含前提的漏检在实战中出现过；用户仍可选单评审。`--list` 的“实战”列（§3.2 评审记录）只在同一阶段累计不少于 5 轮有效记录后参与同分排序，样本不足时只展示；实战记录出现漏检或模型版本更新时，提示用户用 `build-codeagent/scripts/backend_eval.py` 重跑基准，不据实战记录单独换模型。
 3. 同一需求已有用户选择时，后续轮次与后续阶段默认沿用（`--selected-by carried-over`），不再重复提问；复审中途换 reviewer 会让 findings 口径不一致，只在用户明确要求时更换。沿用来源是最近一轮审批记录的 `reviewer` 字段。
 4. 无人值守编排（如 `dev-auto-loop`）不提问：沿用该需求已有选择，否则用推荐项，并以 `--selected-by default-unattended` 记入审批记录。

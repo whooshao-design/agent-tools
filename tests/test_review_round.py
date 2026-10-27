@@ -205,6 +205,34 @@ class ReviewRoundTest(unittest.TestCase):
         self.assertIsNone(rec["conclusion"])
         self.assertFalse(rec["checks"]["tool_surface"]["passed"])
 
+    def codex_job(self, name, env, tools=("shell",), command=None):
+        job = self.spawn_job(name, env, "通过", backend="codex-vps")
+        meta = json.loads((job / "meta.json").read_text())
+        meta.update(effective_tools=None, mcp_servers=None, tools_used=list(tools), shell_commands=["cat summary.md"],
+                    command=command or f"{rr.CODEX_REVIEWER} --json '\"<task>\"'")
+        (job / "meta.json").write_text(json.dumps(meta))
+        return job
+
+    def test_codex_vps_reviewer_through_codex_reviewer(self):
+        self.freeze()
+        run(*self.base, "envelope", "--task-id", "t1", "--scope", "full review")
+        env = json.loads((self.rd / "delegation-envelope.json").read_text())
+        run(*self.base, "snapshot", "before")
+        run(*self.base, "snapshot", "after")
+        findings = Path(self.tmp.name) / "f.json"
+        findings.write_text("[]")
+        bad = (("mcp", {"tools": ("shell", "mcp:bastion")}),          # an MCP call ran
+               ("bare", {"command": "codex-vps exec -s read-only x"}))  # not launched through codex-reviewer
+        for name, kw in bad:
+            with self.assertRaises(SystemExit):
+                run(*self.base, "persist", "--findings", str(findings), "--spawn-job", str(self.codex_job(name, env, **kw)))
+            self.assertFalse(json.loads((self.rd / "approval-record.json").read_text())["checks"]["tool_surface"]["passed"])
+        run(*self.base, "persist", "--findings", str(findings), "--spawn-job", str(self.codex_job("ok", env)))
+        rec = json.loads((self.rd / "approval-record.json").read_text())
+        self.assertEqual(rec["conclusion"], "通过")
+        self.assertEqual(rec["checks"]["tool_surface"]["tools"], ["shell"])
+        self.assertIn("codex-reviewer", rec["checks"]["read_only"]["method"])
+
     def test_persist_rejects_unclassified_or_unevidenced_findings(self):
         self.freeze()
         run(*self.base, "envelope", "--task-id", "t1", "--scope", "full review")

@@ -4,12 +4,15 @@
 usage: python3 backend_eval.py --backend claude-qwen --material <dir> --prompt <prompt.md> --out <results dir> [--label run1] [--timeout 1200]
 
 The material directory must contain only the files the model is allowed to read. The script:
-- launches the backend read-only (claude: --tools Read,Grep,Glob --strict-mcp-config; codex: -s read-only, approval never, --ignore-user-config),
+- launches the backend read-only (claude: --tools Read,Grep,Glob --strict-mcp-config; codex: -s read-only, approval never, --ignore-user-config;
+  codex-vps goes through ~/bin/codex-reviewer, which adds bwrap and the main-config model),
 - captures raw output, wall time, token usage, write attempts and any change to the material directory,
 - extracts the last JSON code block from the final message,
 - writes <out>/<backend>[-<label>].json plus the raw stream next to it.
 """
 import argparse, hashlib, json, os, re, subprocess, sys, time
+
+CODEX_REVIEWER = os.path.expanduser('~/bin/codex-reviewer')
 
 def snapshot(d):
     s = {}
@@ -74,8 +77,11 @@ def main():
                    write_attempts=[x.get('tool_name') for x in d.get('permission_denials', []) if x.get('tool_name') in ('Write', 'Edit', 'Bash', 'NotebookEdit')],
                    final_text=d.get('result', ''))
     else:
-        cmd = [a.backend, 'exec', '-s', 'read-only', '--ephemeral', '--skip-git-repo-check', '--ignore-user-config',
-               '-c', 'approval_policy="never"', '--json', prompt]
+        if a.backend == 'codex-vps':  # the formal-review path: codex-reviewer adds bwrap and passes the main-config model
+            cmd = [CODEX_REVIEWER, '--json', prompt]
+        else:
+            cmd = [a.backend, 'exec', '-s', 'read-only', '--ephemeral', '--skip-git-repo-check', '--ignore-user-config',
+                   '-c', 'approval_policy="never"', '--json', prompt]
         p, wall = run(cmd, a.material, a.timeout, stdin_null=True)
         raw = p.stdout
         open(os.path.join(a.out, name + '.raw.jsonl'), 'w').write(raw)
@@ -96,6 +102,9 @@ def main():
             m = re.search(r'Model metadata for `([^`]+)`', t)
             if m:
                 model = m.group(1); break
+        if not model and a.backend == 'codex-vps':
+            from pick_agent import load_routing, resolve_model
+            model = resolve_model(a.backend, load_routing()['backends'][a.backend])
         res.update(model=model, exit_code=p.returncode, turns=len(cmds),
                    input_tokens=usage.get('input_tokens'), output_tokens=usage.get('output_tokens'),
                    duration_ms=int(wall * 1000), write_attempts=writes, final_text=msgs[-1] if msgs else '')

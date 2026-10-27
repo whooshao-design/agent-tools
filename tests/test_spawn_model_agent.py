@@ -68,6 +68,11 @@ class SpawnModelAgentTest(unittest.TestCase):
         self.assertIn('approval_policy="never"', x)
         self.assertNotIn("--ephemeral", x)  # thread must persist for --resume
         self.assertIn("read-only", sma.build_command("codex-qwen", "do it", readonly=True))
+        # codex-vps read-only goes through codex-reviewer (bwrap, no user config/MCP) and cannot be resumed (--ephemeral)
+        self.assertEqual(sma.build_command("codex-vps", "review", readonly=True, tools=["Read"]), [sma.CODEX_REVIEWER, "--json", "review"])
+        with self.assertRaises(SystemExit):
+            sma.build_command("codex-vps", "more", readonly=True, resume_id="tid")
+        self.assertEqual(sma.build_command("codex-vps", "do it", readonly=False)[:3], ["codex-vps", "--search", "exec"])
 
     def test_resume_commands(self):
         c = sma.build_command("claude-kimi", "more", readonly=False, resume_id="sid")
@@ -112,6 +117,15 @@ class SpawnModelAgentTest(unittest.TestCase):
         raw = '{"type":"thread.started","thread_id":"t1"}\n{"type":"item.completed","item":{"type":"agent_message","text":"hi"}}\n{"type":"turn.completed","usage":{"input_tokens":3,"output_tokens":4}}'
         meta, text = sma.parse_codex(raw)
         self.assertEqual((meta["session_id"], meta["input_tokens"], text), ("t1", 3, "hi"))
+        raw = "\n".join([
+            '{"type":"thread.started","thread_id":"t2"}',
+            '{"type":"item.completed","item":{"type":"command_execution","command":"cat a.md"}}',
+            '{"type":"item.completed","item":{"type":"mcp_tool_call","server":"bastion","tool":"execute_command"}}',
+            '{"type":"item.completed","item":{"type":"reasoning","text":"r"}}',
+            '{"type":"item.completed","item":{"type":"new_tool_kind"}}',
+            '{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}'])
+        meta, _ = sma.parse_codex(raw)
+        self.assertEqual((meta["tools_used"], meta["shell_commands"]), (["mcp:bastion", "new_tool_kind", "shell"], ["cat a.md"]))
 
     def test_refused_tool_calls_are_kept_apart_from_executed_ones(self):
         raw = "\n".join([

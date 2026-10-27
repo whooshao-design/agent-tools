@@ -2,7 +2,7 @@
 name: spawn-model-agent
 description: Use when 用户点名用某个国内模型或其他后端（qwen、deepseek、kimi、glm 等）做一个子任务，例如"用 kimi 总结这个文件""让 deepseek 起草说明""用 qwen 联网查一下"，或显式调用 /spawn-model-agent；在 Claude Code 与 Codex 里都另起一个该模型的 agent 进程执行，主会话只读结果。不做模型自动路由。
 metadata:
-  version: 1.4.0
+  version: 1.5.0
 ---
 
 # spawn-model-agent
@@ -26,7 +26,7 @@ python3 /home/joney/projects/ai/agent-tools/skills/common/spawn-model-agent/scri
 - `--cwd`：agent 的工作目录，默认当前目录。它能读写这个目录（默认权限见“边界”）。
 - `--slim`：仅 claude-*。用空配置目录启动，不加载全局 CLAUDE.md、记忆、skill 索引和 MCP；实测同一小任务 20.7s/66k token 降到 10.6s/34k。任务不依赖全局规则或 MCP 时默认加上。
 - `--resume <作业目录>`：在上一次的 agent 会话里继续追问（claude 用 `--resume session_id`，codex 用 `exec resume thread_id`），不用重发材料。续接沿用上一作业的 `--cwd`、`--slim` 和 `--readonly`；要放宽权限就新起作业。
-- `--readonly`：可选，只读模式。`--tools Read,Grep,Glob` 只能与它合用，把只读工具再收窄（默认还含 WebSearch / WebFetch）；正式评审必须这样收窄，见下文“正式评审”。
+- `--readonly`：可选，只读模式。`--tools Read,Grep,Glob` 只能与它合用，把只读工具再收窄（默认还含 WebSearch / WebFetch）；正式评审必须这样收窄，见下文“正式评审”。codex 没有工具白名单：`codex-vps --readonly` 改经 `/home/joney/bin/codex-reviewer` 运行（bwrap 只读 + `--ignore-user-config` 不挂 MCP），`--tools` 对它不生效，作业也不能 `--resume`（`--ephemeral`）；其他 `codex-*` 只加 `-s read-only`，仍会挂用户级 MCP，不能做正式评审。
 - `--wait`：前台等待结束；默认后台运行，命令立即返回作业目录（`~/.local/state/spawn-model-agent/<时间>-<后端>-<随机后缀>/`，同秒启动也不会撞目录）。
 - `--client claude|codex`：宿主检测顺序是 `CLAUDECODE` / `CODEX_*` 环境变量、父进程链里的 claude / codex 进程；都判不出时短名报错，用完整名或加这个参数。
 - `--status <作业目录>`：查看一个后台作业的状态和结果。
@@ -56,5 +56,5 @@ python3 /home/joney/projects/ai/agent-tools/skills/common/spawn-model-agent/scri
 - 两条通道都能联网：claude-* 有 WebSearch / WebFetch，codex-* 由脚本加上全局 `--search`，乐信网关实测能用原生 `web_search` 工具。
 - 启动开销：claude-* 默认约 20 秒 / 65k token，`--slim` 约 10 秒 / 34k；codex-* 约 20 秒 / 45k。几秒钟能答的小问题不值得派发；追问用 `--resume` 省掉重发材料。
 - 乐信网关约 20 分钟会断连，长任务让 agent 边做边写文件；`meta.json` 的 `subtype`/`exit_code` 不正常时看 `raw.jsonl`。
-- 正式评审：`dev-review-*` 按 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/delegation-contract.md` §3.1 让用户选定 reviewer 模型后，用本脚本 `--readonly --tools Read,Grep,Glob` 派发，再由 `review_round.py persist --spawn-job` 校验运行面并生成审批记录。这是用户选择的结果，不算模型自动路由。
+- 正式评审：`dev-review-*` 按 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/delegation-contract.md` §3.1 让用户选定 reviewer 模型后，用本脚本 `--readonly --tools Read,Grep,Glob` 派发，再由 `review_round.py persist --spawn-job` 校验运行面并生成审批记录。可做正式评审的是 `claude-*` 和 `codex-vps`（契约 §2）。这是用户选择的结果，不算模型自动路由。
 - 后端能力与成本见 `build-codeagent/references/backend-evaluation.md` 与 `model-routing.json`。

@@ -9,7 +9,8 @@ usage:
 
 Host detection: CLAUDECODE / CODEX_* env, then the parent process tree (claude / codex), else --client.
 Default permissions are fixed, not inherited from the host session (claude-*: --dangerously-skip-permissions with MCP; codex-*: workspace-write, approval never);
---readonly narrows to read-only tools (--tools narrows further, e.g. Read,Grep,Glob for formal reviews); --slim skips the global CLAUDE.md/memory/skills for a faster start.
+--readonly narrows to read-only tools (--tools narrows further, e.g. Read,Grep,Glob for formal reviews; codex has no tool allowlist,
+so codex-vps --readonly runs through ~/bin/codex-reviewer and other codex-* only get -s read-only); --slim skips the global CLAUDE.md/memory/skills for a faster start.
 """
 import argparse, glob, json, os, re, shlex, subprocess, sys, tempfile, time
 
@@ -17,6 +18,9 @@ STATE = os.path.expanduser(os.environ.get('SPAWN_MODEL_AGENT_HOME', '~/.local/st
 ROUTING = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'build-codeagent', 'model-routing.json')
 SLIM_DIR = os.path.expanduser('~/.config/spawn-model-agent/claude-slim')
 READONLY_TOOLS = ['Read', 'Grep', 'Glob', 'WebSearch', 'WebFetch']
+# codex-vps read-only runs go through this wrapper: bwrap read-only home, -s read-only, approval never,
+# --ignore-user-config (no MCP) and apps disabled. It runs --ephemeral, so such a job cannot be resumed.
+CODEX_REVIEWER = os.path.expanduser('~/bin/codex-reviewer')
 
 
 def wrappers_on_path():
@@ -179,6 +183,10 @@ def build_command(backend, task, readonly, resume_id=None, tools=None):
         else:
             cmd += ['--dangerously-skip-permissions']
         return cmd
+    if backend == 'codex-vps' and readonly:
+        if resume_id:
+            raise SystemExit('codex-vps 只读作业经 codex-reviewer 以 --ephemeral 运行，不能续接；请新起作业')
+        return [CODEX_REVIEWER, '--json', task]
     # --search is a global codex flag (before the subcommand); the lexin gateway serves the web_search tool.
     # No --ephemeral: the thread must persist so --resume can continue it.
     sandbox = 'read-only' if readonly else 'workspace-write'
@@ -228,7 +236,13 @@ def parse_codex(raw):
         except json.JSONDecodeError:
             continue
     msgs = [e['item']['text'] for e in events if e.get('type') == 'item.completed' and e.get('item', {}).get('type') == 'agent_message']
-    cmds = [e['item'].get('command') for e in events if e.get('type') == 'item.completed' and e.get('item', {}).get('type') == 'command_execution']
+    items = [e['item'] for e in events if e.get('type') == 'item.completed' and isinstance(e.get('item'), dict)]
+    cmds = [i.get('command') for i in items if i.get('type') == 'command_execution']
+    # executed tool calls by kind; codex has no init event, so this is the only runtime view of its tool surface.
+    # Any item type that is not plain model output counts as a tool, so an unknown new kind fails the surface check.
+    kinds = {'command_execution': 'shell', 'web_search': 'WebSearch', 'file_change': 'FileChange'}
+    used = sorted({f"mcp:{i.get('server')}" if i.get('type') == 'mcp_tool_call' else kinds.get(i.get('type'), str(i.get('type')))
+                   for i in items if i.get('type') not in ('agent_message', 'reasoning', 'todo_list', 'error')})
     usage = next((e['usage'] for e in events if e.get('type') == 'turn.completed'), {})
     thread = next((e.get('thread_id') for e in events if e.get('type') == 'thread.started'), None)
     model = None
@@ -236,7 +250,7 @@ def parse_codex(raw):
         m = re.search(r'Model metadata for `([^`]+)`', str(e))
         if m:
             model = m.group(1); break
-    meta = {'model': model, 'session_id': thread, 'commands': len(cmds),
+    meta = {'model': model, 'session_id': thread, 'commands': len(cmds), 'shell_commands': cmds, 'tools_used': used,
             'input_tokens': usage.get('input_tokens'), 'output_tokens': usage.get('output_tokens')}
     return meta, msgs[-1] if msgs else ''
 
