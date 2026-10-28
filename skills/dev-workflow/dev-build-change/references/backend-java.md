@@ -12,6 +12,8 @@
 
 新增或迁移单测时，按仓库文档、Surefire/TestNG suite 配置或实际执行结果证明的布局放置。仅存在 `mock` 目录不能推出所有测试都必须进入 `mock.*` 包；只有证据表明 suite 或门禁按该包发现测试时才应用这条约束。
 
+应用由乐效构建时，测试还要放在流水线覆盖率统计得到被测类的模块：核对该模块 `jacoco-maven-plugin` 的 `includes`/`excludes`，被测类不在范围内就把测试放到整包统计的模块（例：流程引擎 `process-app` 只统计 `service`、`controller` 包，`component` 包的测试放 `process-engine-start`）。编码收尾前按 `verify-java-coverage` 的乐效口径确认改动行覆盖率 ≥90%。
+
 ## 3. 注释
 
 - 线程池、缓存等资源的归属与生命周期不明显时，在类或字段上说明谁创建、谁关闭、作用范围多大。
