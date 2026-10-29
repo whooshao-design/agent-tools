@@ -80,15 +80,29 @@ function normalizeAppName(value) {
   return String(value || '').toLowerCase().replace(/[-_]/g, '');
 }
 
-function pipelineMatchesApp(pipeline, appName) {
+const STANDARD_JOB = /job\/(?:integration|feature)-pipeline-([^/]+?)-rel[_-]/i;
+
+function pipelineMatchesAppExactly(pipeline, appName) {
   if (!pipeline || !appName) return false;
   const wanted = normalizeAppName(appName);
   if (normalizeAppName(pipeline.app_name) === wanted) return true;
   if (normalizeAppName(pipeline.project_name) === wanted) return true;
-  const jobUrl = String(pipeline.pipeline_job_url || '');
-  const match = jobUrl.match(/job\/integration-pipeline-([^/]+?)-rel[_-]/i);
-  if (match && normalizeAppName(match[1]) === wanted) return true;
-  return normalizeAppName(jobUrl).includes(wanted);
+  const match = String(pipeline.pipeline_job_url || '').match(STANDARD_JOB);
+  return Boolean(match && normalizeAppName(match[1]) === wanted);
+}
+
+// 标准命名的 job 只按精确名比较；子串匹配只用于非标准 job 名，且必须唯一命中。
+// process-engine 是 process-engine-console-java 的前缀，子串匹配曾把 process-engine（尚未构建、
+// 没有自己的流水线行）配到控制台流水线，等待一个不会再涨的构建号直到超时。
+function findPipelineForApp(rows, appName) {
+  const exact = rows.find((item) => pipelineMatchesAppExactly(item, appName));
+  if (exact) return exact;
+  const wanted = normalizeAppName(appName);
+  const loose = rows.filter((item) => {
+    const jobUrl = String(item.pipeline_job_url || '');
+    return wanted && !STANDARD_JOB.test(jobUrl) && normalizeAppName(jobUrl).includes(wanted);
+  });
+  return loose.length === 1 ? loose[0] : null;
 }
 
 async function openContext(args) {
@@ -353,7 +367,7 @@ async function listApps(page, url, versionId, env) {
       || '';
     const orderIndex = cells.findIndex((cell) => cell === appName) - 1;
     const publishOrder = maybeNumber(cells[orderIndex]) ?? maybeNumber(cells.find((cell) => /^\d+$/.test(cell)));
-    const pipeline = pipelineRows.find((item) => pipelineMatchesApp(item, appName)) || null;
+    const pipeline = findPipelineForApp(pipelineRows, appName);
     const envArtifact = pipeline?.artifact_status_list?.find((item) => item.env === env) || null;
     return {
       publish_order: publishOrder,
@@ -462,9 +476,8 @@ async function waitBuildMany(page, versionId, targets, env, timeoutMs = 900000, 
     last = targets.map((targetApp) => {
       const target = rows.find((item) => {
         if (targetApp.pipeline?.app_id && Number(item.app_id) === Number(targetApp.pipeline.app_id)) return true;
-        if (targetApp.pipeline?.project_id && Number(item.project_id) === Number(targetApp.pipeline.project_id)) return true;
-        return pipelineMatchesApp(item, targetApp.app_name);
-      }) || null;
+        return Boolean(targetApp.pipeline?.project_id && Number(item.project_id) === Number(targetApp.pipeline.project_id));
+      }) || findPipelineForApp(rows, targetApp.app_name);
       const envArtifact = target?.artifact_status_list?.find((item) => item.env === env) || null;
       return {
         app_name: targetApp.app_name,
@@ -824,7 +837,11 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(error.stack || error.message);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error.stack || error.message);
+    process.exit(1);
+  });
+}
+
+module.exports = { findPipelineForApp };
