@@ -2,7 +2,7 @@
 name: inspect-healthy-metrics
 description: 只读查看 Healthy/雷神/Nightingale 指标上报状态。Use when 用户要求确认指标是否有数据、最近是否正常上报、批量检查 stable 或线上指标、按 metric 列表或 app+suffix 展开查询 Prometheus 样本、区分未注册/无数据/已过期/正常上报。
 metadata:
-  version: 1.1.2
+  version: 1.1.3
 ---
 
 # inspect-healthy-metrics
@@ -111,6 +111,13 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/inspect-healthy-metrics/sc
 range 整批调用一次 `query-range-batch`；instant 在同一会话内查询。`--start/--end` 支持 Unix 秒回查历史窗口。
 `--output` 保存完整 JSON，终端输出每条 series 的首末样本和点数；目标文件存在时拒绝覆盖。查询 JSON 和结果可以保留，不需要为每个场景编写脚本。
 响应错误或批次结果缺项按查询失败处理，不能解释成无数据。
+
+结构差异：不带 `--output` 时 stdout 是完整结果，每条查询为 `results[].result[]`（instant 取 `value`，range 取 `values`）；带 `--output` 时文件是同样的完整结果，stdout 改为摘要 `results[].series[]`（`first`/`last`/`points`）。解析时按实际用的模式取字段，取错字段会得到空列表，看起来像“无数据”。
+
+轮询观察（发布后每隔几分钟查一次计数）时：
+- 不带 `--output`，直接解析 stdout；或每轮写新文件名。复用同一个 `--output` 文件时，第二轮会以退出码 1 拒绝覆盖，旧文件内容不变。
+- 每轮检查退出码，非 0 记为查询失败，不要把 stderr 丢进 `/dev/null` 后继续读旧结果。
+- 开始轮询前，先用一条确定有数据的查询（如 `count(up{env="prod"})`）走一遍同样的解析，确认解析方式能读出非空结果，再把“空结果”当作“没有发生”。
 
 ## 参数口径
 

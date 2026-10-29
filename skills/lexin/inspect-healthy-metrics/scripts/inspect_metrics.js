@@ -435,7 +435,12 @@ async function runQueries(client, args, queries) {
 
 function outputJson(output, args) {
   if (!args.output) return console.log(JSON.stringify(output, null, 2));
-  fs.writeFileSync(expandHome(args.output), JSON.stringify(output, null, 2), { flag: 'wx' });
+  try {
+    fs.writeFileSync(expandHome(args.output), JSON.stringify(output, null, 2), { flag: 'wx' });
+  } catch (error) {
+    if (error.code !== 'EEXIST') throw error;
+    throw new Error(`--output 目标文件已存在，拒绝覆盖，本次结果未写入：${expandHome(args.output)}`);
+  }
   const summary = { ...output, output: expandHome(args.output) };
   if (summary.results) summary.results = summary.results.map(({ result, ...item }) => ({
     ...item, series: result.map(series => ({ metric: series.metric, first: series.values?.[0] || series.value,
