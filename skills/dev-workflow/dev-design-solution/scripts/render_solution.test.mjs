@@ -100,6 +100,20 @@ test('renderBody marks change rows, keeps diagram source and binds F4 links thro
   assert.deepEqual(warnings, []);
 });
 
+test('renderBody keeps IDs on one line in text only, not in code, diagram source or data attributes', () => {
+  const md = '# T\n\n## 摘要\n\n见 DEC-001、**CR7-V01** 和 `AC-009`。\n\n1. 松散 AC-004\n\n2. 松散 AC-005\n\n'
+    + '```text\nAC-010\n```\n\n## 3. 详细设计\n\n### 3.1 机制\n\n```mermaid\nflowchart TD\n  A[AC-011 收到] --> B[结束]\n```\n\n'
+    + '| 步骤 | 变更 | 实现位置 |\n|---|---|---|\n| AC-011 收到 | 新增 | x |\n| 结束 | 现有 | y |\n';
+  const { body, f4 } = renderBody(md);
+  const wrapped = (id) => `<span class="nowrap">${id}</span>`;
+  for (const id of ['DEC-001', 'CR7-V01', 'AC-004', 'AC-005']) assert.ok(body.includes(wrapped(id)), id);
+  assert.ok(!body.includes('<span class="nowrap"><span'));   // 松散列表把已渲染的文字再包成段落，不重复包
+  assert.ok(body.includes('<code>AC-009</code>') && body.includes('AC-010\n</code></pre>'));
+  assert.ok(body.includes('A[AC-011 收到]'));
+  assert.ok(body.includes('data-name="AC-011 收到"') && body.includes(`<td>${wrapped('AC-011')} 收到</td>`));
+  assert.deepEqual(f4[0].links, { A: 'AC-011 收到', B: '结束' });
+});
+
 test('renderPage writes the source fingerprint and loads vendor by protocol', () => {
   const outDir = path.join(here, 'fixtures');
   const { html } = renderPage(sample, { outDir });

@@ -28,6 +28,7 @@ const slug = (s) => s.replace(/\s+/g, '-').replace(/[^\p{L}\p{N}_-]/gu, '');
 const CHANGE_WORDS = { '新增': 'new', '修改': 'mod', '删除': 'del', '现有': 'keep' };
 const CHANGE_COL = '变更';            // 2.4 变更总览表与第 3 章步骤表/对照表的"变更"列
 const SUMMARY_HEADING = '摘要';       // 模板固定的无编号 h2
+const ID_RE = /\b[A-Z][A-Z0-9]*-[A-Z]?\d+\b/g;   // AC-001、DEC-001、CHG-017、CR7-V01 这类编号
 
 /** "变更"列单元格 → new/mod/del/keep；不以四个词开头时为空串。 */
 export function changeOf(text) {
@@ -139,7 +140,16 @@ function parseHeading(text) {
  */
 export function renderBody(md, vendorDir = DEFAULT_VENDOR) {
   const marked = require(path.join(vendorDir, 'marked.min.js'));
-  marked.setOptions({ gfm: true, breaks: false });
+  // DEC-001、AC-009 这类编号在窄列里会从连字符处断行，所以正文文字里的编号包进不换行的 span。
+  // 只改叶子文本：带子 token 的文本会递归到叶子；escaped 的文本是 marked 把已渲染的 HTML 再包成段落，包过一次了。
+  // 代码、mermaid 源码，以及 plain() 生成的 data-* 属性、目录和页面标题不经过这里。
+  const renderer = new marked.Renderer();
+  const renderText = renderer.text;
+  renderer.text = function (token) {
+    const html = renderText.call(this, token);
+    return token.tokens || token.escaped ? html : html.replace(ID_RE, '<span class="nowrap">$&</span>');
+  };
+  marked.setOptions({ gfm: true, breaks: false, renderer });
   const inlineParser = new marked.Parser();
   const textRenderer = new marked.TextRenderer();
   const inline = (tokens) => inlineParser.parseInline(tokens || []);
@@ -306,7 +316,7 @@ blockquote{margin:0 0 1em;padding:6px 14px;border-left:4px solid var(--line);col
 table{border-collapse:collapse;margin:1em 0;width:100%;font-size:.95em}
 th,td{border:1px solid var(--line);padding:6px 10px;vertical-align:top;text-align:left}
 th{background:#f6f8fa}
-th.chg,td.chg{white-space:nowrap}
+th.chg,td.chg,.nowrap{white-space:nowrap}
 tr[data-change],g.node[data-change],.diagram-svg [data-change]{transition:opacity .25s}
 .topbar{position:sticky;top:0;z-index:20;height:var(--topbar);display:flex;align-items:center;gap:18px;padding:0 20px;background:#fff;border-bottom:1px solid var(--line)}
 .topbar .brand{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:34vw}
