@@ -15,7 +15,14 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/lexiao-deploy/scripts/lexi
 node /home/joney/projects/ai/agent-tools/skills/lexin/lexiao-deploy/scripts/lexiao_project_env.js \
   --action=deploy \
   --url=<lexiao-related-demand-url> \
-  --app=<app-name>
+  --app=<app-name> \
+  [--cluster=<cluster-id-or-set>] [--build-timeout=900000] [--deploy-timeout=900000] [--poll-ms=10000]
+
+node /home/joney/projects/ai/agent-tools/skills/lexin/lexiao-deploy/scripts/lexiao_project_env.js \
+  --action=build \
+  --url=<lexiao-related-demand-url> \
+  --app=<app-name> \
+  [--build-timeout=1200000] [--poll-ms=30000] [--start-timeout=180000]
 
 node /home/joney/projects/ai/agent-tools/skills/lexin/lexiao-deploy/scripts/lexiao_pre_release.js \
   --action=list-apps \

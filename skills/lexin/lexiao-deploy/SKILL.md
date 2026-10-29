@@ -2,7 +2,7 @@
 name: lexiao-deploy
 description: 在乐效需求/版本中集成分支、构建、部署并验收项目环境、预发布或用户明确指定的灰度应用。Use when 用户要求集成分支、构建、部署到项目环境或预发布并验收结果；默认每应用一个目标，支持显式灰度全目标；部署后核验制品与实例日志。不用于 OA/线上部署或独立日志查询。
 metadata:
-  version: 1.2.10
+  version: 1.5.0
 ---
 
 # Lexiao Deploy
@@ -16,7 +16,7 @@ metadata:
 
 Use this skill to deploy applications from Lexiao demand/version pages and verify the rollout. Supported flows:
 
-- `项目环境` / `PROJECT` / `prj` deployment.
+- `项目环境` / `PROJECT` / `prj` deployment. Since 2026-10 the deploy entry is the `发布` button of the `待发布` cluster row inside the app row's `部署详情` dialog (row-level `部署` still works when present); use `lexiao_project_env.js` / `lexiao_project_deploy`, see `references/flows.md`. A push auto-builds, so before deploying run `lexiao_project_build_check` (pass the Lexiao app name, not the repo name) and build with `lexiao_project_env.js --action=build` / `lexiao_project_build` only when it returns `build` (e.g. a dependency jar was republished to Nexus after the last build without a code push).
 - `预发布` single-machine deployment when the user asks to deploy one machine or specifically mentions pre-release machines. Prefer virtual-machine/KVM targets; only deploy a container target when no VM/KVM target exists or the user explicitly asks for container.
 - Full pre-release redeploy after code changes: branch integration, build, wait for artifact, create the correct publish order, deploy one VM/KVM, verify page/API and server logs, then triage errors and offer next-step choices.
 - `灰度` deployment when explicitly requested by the user: skip branch integration and build, then follow publish-order batching, log-first verification, and the sequential error gate. Default to one target per app unless the user explicitly asks for all gray machines/targets.
