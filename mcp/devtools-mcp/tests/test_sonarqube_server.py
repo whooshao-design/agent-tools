@@ -26,6 +26,36 @@ class SonarqubeServerTest(unittest.TestCase):
         self.assertTrue(result["truncated"])
         self.assertIn("reduce the page size", result["error"])
 
+    @patch.object(server, "_sonarqube_get")
+    @patch.object(server, "_sonarqube_post", return_value='{"total":2,"success":2,"ignored":0,"failures":0}')
+    def test_transition_posts_comment_and_reports_unresolved_keys(self, post, get):
+        get.return_value = json.dumps({"issues": [
+            {"key": "A", "status": "RESOLVED", "resolution": "FALSE-POSITIVE"},
+            {"key": "B", "status": "OPEN"},
+        ]})
+        result = json.loads(server.transition_sonarqube_issues(" A, B ", "falsepositive", " 误报说明 "))
+        form = post.call_args.args[2]
+        self.assertEqual(("api/issues/bulk_change", "A,B", "falsepositive", "误报说明"),
+                         (post.call_args.args[1], form["issues"], form["do_transition"], form["comment"]))
+        self.assertEqual((False, ["B"]), (result["verified"], result["not_transitioned"]))
+
+    @patch.object(server, "_sonarqube_post")
+    def test_transition_requires_comment_and_known_transition(self, post):
+        self.assertIn("comment is required", server.transition_sonarqube_issues("A", "falsepositive", " "))
+        self.assertIn("transition must be", server.transition_sonarqube_issues("A", "reopen", "x"))
+        post.assert_not_called()
+
+    @patch.object(server, "_headers", return_value={})
+    @patch.object(server, "urlopen")
+    def test_post_sends_form_body_not_query_string(self, urlopen, headers):
+        response = MagicMock()
+        response.read.return_value = b"{}"
+        urlopen.return_value.__enter__.return_value = response
+        server._sonarqube_post("https://example.test", "api/issues/bulk_change", {"issues": "A", "x": ""})
+        request = urlopen.call_args.args[0]
+        self.assertEqual(("POST", "https://example.test/api/issues/bulk_change", b"issues=A"),
+                         (request.get_method(), request.full_url, request.data))
+
 
 if __name__ == "__main__":
     unittest.main()

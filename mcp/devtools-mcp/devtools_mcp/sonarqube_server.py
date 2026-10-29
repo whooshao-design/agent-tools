@@ -1,13 +1,15 @@
-"""Read-only SonarQube MCP server."""
+"""SonarQube MCP server: read-only queries plus explicit issue resolution transitions."""
 
 from __future__ import annotations
 
+import json
 from http.cookies import SimpleCookie
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlencode, urljoin, urlparse
 from urllib.request import Request, urlopen
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 from devtools_mcp.common import browser_cookie_header, bounded_int, env_value, error_text, json_text, redact_cookie_header
 
@@ -55,13 +57,28 @@ def _query_params(query: dict[str, object]) -> dict[str, str]:
 
 
 def _sonarqube_get(base_url: str, path: str, query: dict[str, object], profile: str = "", max_chars: int = 100000) -> str:
+    return _sonarqube_request(base_url, path, query, profile, max_chars)
+
+
+def _sonarqube_post(base_url: str, path: str, form: dict[str, object], profile: str = "") -> str:
+    return _sonarqube_request(base_url, path, form, profile, method="POST")
+
+
+def _sonarqube_request(base_url: str, path: str, params_in: dict[str, object], profile: str = "",
+                       max_chars: int = 100000, method: str = "GET") -> str:
     base = _base_url(base_url)
-    params = _query_params(query)
+    params = _query_params(params_in)
     url = urljoin(base.rstrip("/") + "/", path.lstrip("/"))
-    if params:
+    data = None
+    if method == "POST":
+        data = urlencode(params).encode()
+    elif params:
         url += "?" + urlencode(params)
     try:
-        request = Request(url, headers=_headers(base, profile))
+        headers = _headers(base, profile)
+        if data is not None:
+            headers["Content-Type"] = "application/x-www-form-urlencoded"
+        request = Request(url, data=data, headers=headers, method=method)
         with urlopen(request, timeout=60) as response:
             body = response.read().decode("utf-8", errors="replace")
             limit = bounded_int(max_chars, 100000, 1000, 500000)
@@ -172,6 +189,54 @@ def list_sonarqube_pull_requests(issue_url: str = "", project_key: str = "", bas
     if not project:
         return error_text("project_key or issue_url with id= is required")
     return _sonarqube_get(base_url, "api/project_pull_requests/list", {"project": project}, profile)
+
+
+# Resolutions an evaluated issue may receive; reopening or confirming is left to the SonarQube UI.
+_ISSUE_TRANSITIONS = {"falsepositive": "FALSE-POSITIVE", "wontfix": "WONTFIX"}
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False))
+def transition_sonarqube_issues(
+    issue_keys: str,
+    transition: str,
+    comment: str,
+    base_url: str = "",
+    profile: str = "",
+) -> str:
+    """把已逐条评估的 issue 标记为误报(falsepositive)或不修复(wontfix)，附带评估说明并回读校验。
+
+    issue_keys 用逗号分隔；comment 必填，写清为什么不是真实问题。会改变服务端 issue 状态，
+    只在用户授权标记后调用。
+    """
+    keys = [key.strip() for key in issue_keys.split(",") if key.strip()]
+    if not keys:
+        return error_text("issue_keys is required")
+    if transition not in _ISSUE_TRANSITIONS:
+        return error_text("transition must be one of: " + ", ".join(sorted(_ISSUE_TRANSITIONS)))
+    if not comment.strip():
+        return error_text("comment is required: explain why the issue is not a real defect")
+    result = _sonarqube_post(base_url, "api/issues/bulk_change", {
+        "issues": ",".join(keys),
+        "do_transition": transition,
+        "comment": comment.strip(),
+        "sendNotifications": False,
+    }, profile)
+    try:
+        bulk = json.loads(result)
+    except ValueError:
+        return error_text("SonarQube bulk_change returned non-JSON", body=result[:1000])
+    if "error" in bulk:
+        return result
+    readback = _sonarqube_get(base_url, "api/issues/search", {"issues": ",".join(keys), "ps": len(keys)}, profile)
+    try:
+        issues = json.loads(readback).get("issues", [])
+    except ValueError:
+        return error_text("SonarQube readback returned non-JSON", bulk_change=bulk, body=readback[:1000])
+    expected = _ISSUE_TRANSITIONS[transition]
+    states = {issue["key"]: {"status": issue.get("status"), "resolution": issue.get("resolution")} for issue in issues}
+    pending = [key for key in keys if states.get(key, {}).get("resolution") != expected]
+    return json_text({"bulk_change": bulk, "expected_resolution": expected, "issues": states,
+                      "verified": not pending, "not_transitioned": pending})
 
 
 def main() -> None:
