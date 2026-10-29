@@ -5,7 +5,8 @@ Implements the mechanical parts of delegation-contract.md and artifact-identity.
 so the orchestrator does not hand-write them per round:
 
   freeze    fingerprint the artifacts (versions read from the files), snapshot code
-            repositories as repo-snapshot-v1, run mechanical checks
+            repositories as repo-snapshot-v1, run mechanical checks; in solution-review
+            exit 1 unless every reader_test file name carries the S version (-v<N>)
   envelope  write delegation-envelope.json from the frozen inputs (+ prior round)
   snapshot  workspace content snapshot before / after the reviewer runs
   task      write the prompt for an external reviewer run through spawn-model-agent
@@ -49,6 +50,9 @@ TOOLS_ROOT = Path(__file__).resolve().parents[3]
 CLASSES = {"成立需修", "接受取舍", "契约误读", "噪音"}
 VALID_CLASSES = {"成立需修", "接受取舍"}
 LEDGER = Path(os.environ.get("AGENT_TOOLS_REVIEWER_LEDGER", "~/.local/state/agent-tools/reviewer-ledger.jsonl")).expanduser()
+# solutions first reviewed before this date predate key-questions.md and are exempt from its checks
+KEY_QUESTIONS_SINCE = "2026-10-28"
+READER_TEST_VERSION_RE = re.compile(r"-v(\d+(?:\.\d+)*)")
 
 
 def sha(data: bytes) -> str:
@@ -113,7 +117,63 @@ def repo_snapshot(repo: str) -> dict:
             "exclusions": ["Git ignored files", ".git/"]}
 
 
-def solution_checks(base: Path) -> dict | None:
+def version_key(version: str) -> tuple[int, ...]:
+    """'v1.2.0' -> (1, 2): integer segments with trailing zeros dropped, so 1.2 == 1.2.0 but 1.2 != 12."""
+    parts = [int(p) for p in version.removeprefix("v").split(".")]
+    while len(parts) > 1 and parts[-1] == 0:
+        parts.pop()
+    return tuple(parts)
+
+
+def reader_test_mismatch(out: dict) -> str | None:
+    """Why the frozen reader test does not belong to the frozen S version, or None when it does."""
+    s_version = out["S"]["version"]
+    if s_version == "unversioned":
+        return "reader test version mismatch: S version unreadable (unversioned)"
+    if "reader_test" not in out:
+        return f"reader test version mismatch: S={s_version}, reader_test not frozen"
+    want = version_key(s_version)   # read_version() only yields digit segments or "unversioned"
+    found, bad = set(), []
+    for f in out["reader_test"]["files"]:
+        m = READER_TEST_VERSION_RE.search(Path(f["path"]).name)
+        if not m:
+            found.add("unversioned")
+            bad.append(f["path"])
+        elif version_key(m.group(1)) != want:
+            found.add("v" + m.group(1))
+            bad.append(f["path"])
+    if not bad:
+        return None
+    return f"reader test version mismatch: S={s_version}, reader_test=[{', '.join(sorted(found))}]\n  " + ", ".join(bad)
+
+
+def is_historic_solution(base: Path) -> bool:
+    """First reviewed, or earliest solution-design file dated, before KEY_QUESTIONS_SINCE (date part only)."""
+    rec = base / "solution-review/rounds/round-1/approval-record.json"
+    if rec.exists():
+        created = str(json.loads(rec.read_text()).get("created_at") or "")[:10]
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", created) and created < KEY_QUESTIONS_SINCE:
+            return True
+    sd = base / "solution-design"
+    dates = [datetime.date.fromtimestamp(p.stat().st_mtime).isoformat() for p in sd.rglob("*")
+             if p.is_file() and p.relative_to(sd).as_posix() not in ("key-questions.md", "solution.html")]
+    return bool(dates) and min(dates) < KEY_QUESTIONS_SINCE
+
+
+def html_warning(sol_dir: Path) -> str | None:
+    """solution.html is derived from solution.md; say which of the three stale cases applies."""
+    html = sol_dir / "solution.html"
+    if not html.exists():
+        return "warning: solution.html missing; render it before review"
+    m = re.search(r'<meta name="source-sha256" content="([^"]+)"', html.read_text(errors="replace"))
+    if not m:
+        return "warning: solution.html has no source-sha256 meta; re-render it"
+    if m.group(1) != fp(sol_dir / "solution.md"):
+        return "warning: solution.html is stale (source-sha256 differs from solution.md); re-render it"
+    return None
+
+
+def solution_checks(base: Path, legacy_reason: str | None = None) -> dict | None:
     sol_p, tr_p, req_p = base / "solution-design/solution.md", base / "solution-design/traceability.md", base / "requirements/summary.md"
     if not (sol_p.exists() and tr_p.exists()):
         return None
@@ -132,7 +192,12 @@ def solution_checks(base: Path) -> dict | None:
     cited = sorted(set(re.findall(r"\[E-(\d+)\]", sol)), key=int)
     defined = set(re.findall(r"^\| E-(\d+) \|", tr, re.M))
     ac_req, ac_tr = sorted(set(re.findall(r"AC-\d+", req))), sorted(set(re.findall(r"^\| (AC-\d+) \|", tr, re.M)))
-    return {"AC_ids_in_requirements": ac_req, "AC_ids_in_traceability": ac_tr, "AC_sets_equal": ac_req == ac_tr,
+    present = (base / "solution-design/key-questions.md").exists()
+    kq = {"key_questions_present": present,
+          "key_questions_required": present or not (legacy_reason or is_historic_solution(base))}
+    if legacy_reason:
+        kq["key_questions_legacy_override"] = {"reason": legacy_reason, "date": datetime.date.today().isoformat()}
+    return {**kq, "AC_ids_in_requirements": ac_req, "AC_ids_in_traceability": ac_tr, "AC_sets_equal": ac_req == ac_tr,
             "CHG_ids": chg, "CHG_count": len(chg), "CHG_unchanged": unchanged,
             "CHG_in_change_overview": ov_chg, "has_change_overview": ov is not None,
             "changed_CHG_missing_from_overview": [c for c in chg if ov and c not in ov_chg and c not in unchanged],
@@ -193,9 +258,16 @@ def cmd_freeze(args) -> None:
     base, rd = Path(args.req_dir), round_dir(args)
     ev = rd / "evidence"
     out = dict(artifact_identity(base, spec) for spec in args.artifact)
+    solution_review = args.stage == "solution-review" and "S" in out
+    if solution_review and (mismatch := reader_test_mismatch(out)):
+        # an envelope must never be built from an older freeze of this round
+        (ev / "frozen-inputs.json").unlink(missing_ok=True)
+        print(mismatch, file=sys.stderr)
+        sys.exit(1)
     write_json(ev / "code-baseline.json", {"schema": "repo-snapshot-set-v1", "repositories": [repo_snapshot(r) for r in args.repo]})
     out["B"] = ref(ev / "code-baseline.json")
-    checks = {"solution-review": solution_checks, "test-cases-review": test_case_checks}.get(args.stage, lambda b: None)(base)
+    checks = {"solution-review": lambda b: solution_checks(b, args.key_questions_legacy),
+              "test-cases-review": test_case_checks}.get(args.stage, lambda b: None)(base)
     if checks is not None:
         write_json(rd / "mechanical-checks.json", checks)
         out["mechanical_checks"] = ref(rd / "mechanical-checks.json")
@@ -206,8 +278,12 @@ def cmd_freeze(args) -> None:
                "evidence_cited_but_undefined") or k.startswith(("AC_unmapped", "CHG_unmapped", "TC_"))) and isinstance(v, list) and v}
         if checks.get("AC_sets_equal") is False:
             bad["AC_sets_equal"] = False
+        if checks.get("key_questions_required") and not checks.get("key_questions_present"):
+            bad["key_questions_required_but_missing"] = True
         if bad:
             print("mechanical check failures: " + json.dumps(bad, ensure_ascii=False), file=sys.stderr)
+    if solution_review and (warning := html_warning(Path(out["S"]["ref"]))):
+        print(warning, file=sys.stderr)
 
 
 # ---------- envelope ----------
@@ -618,6 +694,8 @@ def main(argv=None) -> None:
     f = sub.add_parser("freeze")
     f.add_argument("--artifact", action="append", required=True, help="NAME=subdir:file1,file2 (e.g. S=solution-design:solution.md,traceability.md)")
     f.add_argument("--repo", action="append", default=[], help="code repository for B (repeatable)")
+    f.add_argument("--key-questions-legacy", metavar="REASON",
+                   help="solution-review: treat a solution without key-questions.md as historic (the date heuristic misjudged it)")
     e = sub.add_parser("envelope")
     e.add_argument("--task-id", required=True)
     e.add_argument("--role", default="agent-tools-solution-reviewer")

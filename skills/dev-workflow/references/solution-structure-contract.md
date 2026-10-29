@@ -4,7 +4,7 @@
 
 ## 1. 核心壳、主 profile 与横切维度
 
-正式技术方案由三类文件组成，职责不重叠：
+正式技术方案由三类文件组成，职责不重叠；另有两个辅助文件，不进方案身份 `S`：
 
 ```text
 solution-design/solution.md        给人读的设计叙事
@@ -14,7 +14,12 @@ solution-design/solution.md        给人读的设计叙事
 └── 替代方案、影响、发布验证回滚、风险与未决
 
 solution-design/traceability.md    给评审和交付用的追踪台账
-└── 身份、AC 映射、CHG 矩阵、横切覆盖、风险登记、证据清单
+└── 身份、AC 映射、确认表、CHG 矩阵、横切覆盖、风险登记、证据清单
+
+solution-design/key-questions.md   写正文前与用户对齐的关键问题清单（不进 S）
+└── 待裁定、待选型、设计方已定、待查证；确认结果写进 traceability.md 的确认表
+
+solution-design/solution.html      由 solution.md 渲染的交互阅读页（派生文件，不进 S）
 
 solution-review/rounds/round-<N>/  每轮评审目录
 └── report.md、审批记录、resolution.md（处置）、diff（新旧版本差异）

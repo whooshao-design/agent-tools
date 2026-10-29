@@ -2,7 +2,7 @@
 name: dev-auto-loop
 description: Use when 任务目标和边界已明确，需要按审批基线自动串联设计评审、测试清单与开发交付，并在完成、预算耗尽、无进展或外部阻塞时停止。
 metadata:
-  version: 3.2.0
+  version: 3.2.1
 ---
 
 # dev-auto-loop

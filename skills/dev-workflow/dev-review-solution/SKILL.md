@@ -2,7 +2,7 @@
 name: dev-review-solution
 description: Use when 已有可评审的技术方案，需要在编码前基于需求、代码和约束做独立技术评审，识别阻断问题与风险，并给出通过、有条件通过、修改后复审、退回重设计或材料不足的明确结论。
 metadata:
-  version: 3.11.0
+  version: 3.12.0
 ---
 
 # dev-review-solution
@@ -93,6 +93,10 @@ metadata:
 - 自创中文术语是否与项目已有术语重名或丢失原意（如把 Redis Hash 的 field 译成项目里另有含义的“字段”）；造成误读时至少 Medium
 - 核心机制是否单列一节并足以照着实现（变更清单、前后对照示例、流程图加实现对照表、边界情况、依赖调用结果表、不变量及其静默破坏条件）；正文里满足图触发条件的内容是否有图或写明不画的理由。是否有 2.4 变更总览，图和第 3 章表格是否标出新增、修改与现有，且与 CHG 矩阵一致。这三项影响实施、评估和验证，缺失时按结构/可读性 finding 处理，不属于文风偏好
 - 技术选型：对照需求、2.4 变更总览和依赖清单，方案是否引入新的第三方库、框架、中间件或外部服务，或升级依赖主版本；有则核对是否有选型 `DEC-*` 和第 4 章选型对比表（候选、版本、运行环境约束、体积、许可证与维护状态、取舍理由），表中事实是否有证据。缺选型决策或对比表时至少 Medium，类别"结构/可读性"；选中项与已知运行环境约束冲突时 High，类别"可行性"
+- 决策追溯：每个 `DEC-*` 能追到 `traceability.md` 确认表的一行；待裁定、待选型行的默认答案不为空；`key-questions.md` 第 3 节和确认结果为"设计方已定"的行里没有引入新依赖的选择或需求偏差（待选型的 auto-loop 采用默认、auto-loop 改为由下一项和选型 `DEC-*` 规则核对）。不满足至少 Medium，类别"需求追踪"
+- 用户确认一致：确认表答案与 2.2、第 3 章一致；`versions/` 下有上一版归档时（定点复审取自 diff，完整复审由编排器传入上一版 `traceability.md`），按上一版确认表找出的已确认条目中答案变化的行有新的原话和日期，第 2 轮及以后缺上一版归档按材料不足处理；"改变需求"为是的行，冻结的 `R` 版本不低于表中所写且对应 AC 原文已体现确认答案；答案与 AC 原文不一致的行"改变需求"必须为是。不满足至少 High，类别"需求追踪"
+- 依赖行为表一致：`key-questions.md` 4.1 的每个"依赖 + 情形"在第 3 章核心机制的依赖调用结果表有对应行，证据列为代码或日志位置，非代码依赖写其行为定义位置（本方案新定的规则写"本方案规则：<章节>"）；代码依赖没写的情形有不会出现的理由。不满足至少 Medium，类别"可行性"。以上三项在 `mechanical-checks.json` 的 `key_questions_required` 为 true 时适用，否则 N/A；有 `key_questions_legacy_override` 时核对其理由有无事实支撑（首轮审批记录、`versions/` 归档或提交记录早于常量），不成立时按 true 执行三项并记一条 Medium（需求追踪）
+- 前端准入（所有方案适用）：2.4 有前端应用的行时，第 3 章有交互状态表和字段映射；有前后端发布顺序要求时，第 6 章有版本组合表或引用第 3 章中的该表（`dev-design-solution` 的 `frontend-design.md`）。缺失至少 Medium，类别"结构/可读性"
 - 30 秒、5 分钟、标题、双读者、唯一归属和范围隔离测试是否通过；篇幅阈值是否只被当作结构复核信号
 - 全称断言是否可复现：按 `solution-structure-contract.md` §5 附则，“唯一 / 全仓 0 命中 / 完整枚举 / 无其它 X”这类断言必须附可复跑检索命令、检索范围与命中计数。**未附命令的全称断言一律按 `Unknown` 处理，不得作为任何 finding 的关闭依据，也不得作为其它结论的支撑事实**
 
@@ -180,8 +184,9 @@ REQ=/home/joney/docs/requirements-development/<requirement-name>
 python3 $RR --req-dir $REQ --round <N> freeze --artifact R=requirements:summary.md \
   --artifact S=solution-design:solution.md,traceability.md \
   --artifact reader_test=solution-design:reader-test/agent-v<M>.md,reader-test/answer-key-v<M>.md \
-  --repo <代码仓库> [--repo <前端仓库>]
-python3 $RR --req-dir $REQ --round <N> envelope --task-id <id> --scope "<本轮范围>" [--prior-round <N-1>] [--evidence <路径>]
+  --repo <代码仓库> [--repo <前端仓库>] [--key-questions-legacy "<理由>"]
+python3 $RR --req-dir $REQ --round <N> envelope --task-id <id> --scope "<本轮范围>" [--prior-round <N-1>] \
+  --evidence $REQ/solution-design/key-questions.md [--evidence $REQ/solution-design/versions/<上一版>/traceability.md]
 python3 $RR --req-dir $REQ --round <N> snapshot before
 # 派发 agent-tools-solution-reviewer，提示词只给信封路径；停止后：
 python3 $RR --req-dir $REQ --round <N> snapshot after
@@ -196,7 +201,9 @@ python3 $RR --req-dir $REQ --round <N> persist --spawn-job <作业目录> --find
 
 `--findings` 中每条 finding 带编排器的 `classification`，`噪音` / `契约误读` 附原文证据，双评审标 `found_by`，漏检写 `escaped_from`（委派契约 §3.2）；`persist` 同时把本轮写入本机评审记录，汇报时列出被判为噪音或误读的 finding 供用户抽查。
 
-`freeze` 报出机械检查失败时先修产物再派发；`persist` 在结构、指纹回显、写入证明或工具面任一不通过时退出码非 0，审批记录的结论为空。
+`--evidence` 用绝对路径（外部 reviewer 以代码仓库为工作目录）；完整复审且 `versions/` 下有上一版时附上一版 `traceability.md`。用户的风险授权记录用 `freeze --artifact` 冻结，使其指纹进入信封，不用 `--evidence` 只传路径。
+
+`freeze` 在 `solution-review` 阶段要求冻结的读者测试文件名版本（`-v<N>`）与 `S` 版本相同，否则退出码 1、不写冻结文件，先重做读者测试或修正版本再冻结；`solution.html` 缺失或过期只打印警告。没有 `key-questions.md` 的历史方案被文件日期误判为新方案（机械检查报 `key_questions_required_but_missing`）时，编排器核实首轮审批或归档日期后加 `--key-questions-legacy "<理由>"` 改判。`freeze` 报出机械检查失败时先修产物再派发；`persist` 在结构、指纹回显、写入证明或工具面任一不通过时退出码非 0，审批记录的结论为空。
 
 ## 评审原则
 

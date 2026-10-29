@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import contextlib
+import datetime
 import io
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -79,6 +81,8 @@ class ReviewRoundTest(unittest.TestCase):
         (self.req / "solution-design").mkdir()
         (self.req / "solution-design/solution.md").write_text(SOLUTION)
         (self.req / "solution-design/traceability.md").write_text(TRACE)
+        (self.req / "solution-design/reader-test").mkdir()
+        (self.req / "solution-design/reader-test/agent-v2.md").write_text("# agent 读者测试 v2\n")
         self.base = ["--req-dir", str(self.req), "--round", "1"]
         self.ledger_patch = unittest.mock.patch.object(rr, "LEDGER", root / "ledger.jsonl")
         self.ledger_patch.start()
@@ -88,9 +92,95 @@ class ReviewRoundTest(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def freeze(self):
-        run(*self.base, "freeze", "--artifact", "R=requirements:summary.md",
-            "--artifact", "S=solution-design:solution.md,traceability.md", "--repo", str(self.repo))
+    def freeze_result(self, *extra, reader_test="reader-test/agent-v2.md"):
+        """(exit code, stderr) of a solution-review freeze; exit code 0 when it returns normally."""
+        rt = ["--artifact", f"reader_test=solution-design:{reader_test}"] if reader_test else []
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            try:
+                run(*self.base, "freeze", "--artifact", "R=requirements:summary.md",
+                    "--artifact", "S=solution-design:solution.md,traceability.md", *rt, "--repo", str(self.repo), *extra)
+            except SystemExit as e:
+                return e.code, err.getvalue()
+        return 0, err.getvalue()
+
+    def freeze(self, *extra, **kw):
+        code, err = self.freeze_result(*extra, **kw)
+        self.assertEqual(code, 0, err)
+        return err
+
+    def test_freeze_rejects_reader_test_of_another_version(self):
+        stale = self.rd / "evidence/frozen-inputs.json"
+        stale.parent.mkdir(parents=True)
+        stale.write_text("{}")
+        rt = self.req / "solution-design/reader-test"
+        for name in ("agent-v1.md", "agent-v1-head.raw.json"):
+            (rt / name).write_text("x\n")
+        code, err = self.freeze_result(reader_test="reader-test/agent-v1.md,reader-test/agent-v1-head.raw.json")
+        self.assertEqual(code, 1)
+        self.assertIn("reader test version mismatch: S=v2, reader_test=[v1]", err)
+        self.assertIn("reader-test/agent-v1-head.raw.json, reader-test/agent-v1.md", err)
+        self.assertFalse(stale.exists())  # the envelope cannot reuse an older freeze
+        self.assertFalse((self.rd / "mechanical-checks.json").exists())
+        self.assertFalse((self.rd / "evidence/code-baseline.json").exists())
+
+    def test_freeze_rejects_missing_or_unversioned_reader_test(self):
+        code, err = self.freeze_result(reader_test=None)
+        self.assertEqual(code, 1)
+        self.assertIn("S=v2, reader_test not frozen", err)
+        (self.req / "solution-design/reader-test/notes.md").write_text("x\n")
+        code, err = self.freeze_result(reader_test="reader-test/agent-v2.md,reader-test/notes.md")
+        self.assertEqual(code, 1)
+        self.assertIn("reader_test=[unversioned]", err)
+
+    def test_reader_test_versions_compare_by_integer_segments(self):
+        self.assertEqual(rr.version_key("v1.2"), rr.version_key("1.2.0"))
+        self.assertNotEqual(rr.version_key("1.2"), rr.version_key("12"))
+        (self.req / "solution-design/reader-test/agent-v2.0.md").write_text("x\n")
+        self.assertEqual(self.freeze_result(reader_test="reader-test/agent-v2.0.md")[0], 0)
+
+    def test_reader_test_check_only_in_solution_review(self):
+        base = ["--req-dir", str(self.req), "--stage", "test-cases-review", "--round", "1"]
+        with contextlib.redirect_stderr(io.StringIO()):
+            run(*base, "freeze", "--artifact", "S=solution-design:solution.md,traceability.md", "--repo", str(self.repo))
+        self.assertTrue((self.req / "test-cases-review/rounds/round-1/evidence/frozen-inputs.json").exists())
+
+    def key_questions_required(self, *extra):
+        code, err = self.freeze_result(*extra)
+        self.assertEqual(code, 0)  # a failing mechanical check never changes the exit code
+        return json.loads((self.rd / "mechanical-checks.json").read_text()), err
+
+    def test_key_questions_required(self):
+        old = datetime.datetime(2026, 9, 1).timestamp()
+        with unittest.mock.patch.object(rr, "KEY_QUESTIONS_SINCE", "2026-10-01"):
+            checks, err = self.key_questions_required()  # new solution, no list
+            self.assertEqual((checks["key_questions_present"], checks["key_questions_required"]), (False, True))
+            self.assertIn('"key_questions_required_but_missing": true', err)
+            checks, _ = self.key_questions_required("--key-questions-legacy", "migrated from another dir")
+            self.assertFalse(checks["key_questions_required"])
+            self.assertEqual(checks["key_questions_legacy_override"]["reason"], "migrated from another dir")
+            rec = self.req / "solution-review/rounds/round-1/approval-record.json"
+            for created in ("2026-09-02", "2026-09-02T10:00:00+08:00"):  # first reviewed before the constant
+                rec.parent.mkdir(parents=True, exist_ok=True)
+                rec.write_text(json.dumps({"created_at": created}))
+                self.assertFalse(self.key_questions_required()[0]["key_questions_required"])
+            rec.unlink()
+            os.utime(self.req / "solution-design/traceability.md", (old, old))  # oldest solution-design file
+            self.assertFalse(self.key_questions_required()[0]["key_questions_required"])
+            (self.req / "solution-design/key-questions.md").write_text("# 关键问题\n")
+            checks, err = self.key_questions_required()
+            self.assertEqual((checks["key_questions_present"], checks["key_questions_required"]), (True, True))
+            self.assertNotIn("key_questions_required_but_missing", err)
+
+    def test_solution_html_warnings(self):
+        sd = self.req / "solution-design"
+        self.assertIn("solution.html missing", self.freeze_result()[1])
+        (sd / "solution.html").write_text("<html></html>")
+        self.assertIn("no source-sha256 meta", self.freeze_result()[1])
+        (sd / "solution.html").write_text('<meta name="source-sha256" content="sha256-v1:00">')
+        self.assertIn("solution.html is stale", self.freeze_result()[1])
+        (sd / "solution.html").write_text(f'<meta name="source-sha256" content="{rr.fp(sd / "solution.md")}">')
+        self.assertNotIn("solution.html", self.freeze_result()[1])
 
     def test_freeze_reads_versions_and_runs_mechanical_checks(self):
         self.freeze()

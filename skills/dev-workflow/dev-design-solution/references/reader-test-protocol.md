@@ -29,14 +29,14 @@
 
 ## 3. 答案键
 
-设计方在派发读者测试之前写 `solution-design/reader-test/answer-key-v<N>.md`：一张表，列为问题、预期答案、所在章节。答案键同时写明核心机制所在小节，用于比对第四个探针；再列出核心机制里作为判断条件的"空/缺失/默认值"状态及其区分方法，用于比对第五个探针；再写出核心机制每个关键数据结构的类型签名和一份小实例，用于比对第六个探针；第 5 问的预期答案按 2.4 变更总览写，读者漏答其中的新增或修改对象即判为部分通过。答案键不进入方案正文，也不给读者。它的作用是让比对有依据，避免由读者自评"是否理解"。
+设计方在派发读者测试之前写 `solution-design/reader-test/answer-key-v<N>.md`：一张表，列为问题、预期答案、所在章节。答案键同时写明核心机制所在小节，用于比对第四个探针；再列出核心机制里作为判断条件的"空/缺失/默认值"状态及其区分方法，用于比对第五个探针；再写出核心机制每个关键数据结构的类型签名和一份小实例，用于比对第六个探针；第 5 问的预期答案按 2.4 变更总览写，读者漏答其中的新增或修改对象即判为部分通过。方案涉及前端（2.4 有前端应用的行）时，第 4 问的预期答案要含前端交互状态，第 5 问要含前后端版本组合；七问本身不变。答案键不进入方案正文，也不给读者。它的作用是让比对有依据，避免由读者自评"是否理解"。
 
 ## 4. agent 读者
 
 - 新会话，与设计方不同的模型。模型对自己写的文本有系统性偏好，同模型读自己的方案会高估可读性。优先选实测能发现结构问题的后端，选模用 `python3 /home/joney/projects/ai/agent-tools/skills/common/build-codeagent/scripts/pick_agent.py quick-check --task <task_id>` 预览（只预览，不登记参与历史）。
 - 工具面只有 Read，工作目录只含 `solution.md` 副本，不联网、不写文件、不委派。
 - 提示词固定为本文件第 6 节的模板；每问回答不超过两句，附一句逐字引用和所在标题，找不到就写"找不到"。
-- 输出只有一个 JSON 代码块，原样保存为 `reader-test/agent-v<N>.raw.json`。
+- 输出只有一个 JSON 代码块；原始输出原样保存为 `reader-test/agent-v<N>.raw.json`，逐行 JSON 的输出（Claude 侧 `stream-json`、Codex 侧 `--json`）用 `.raw.jsonl`。
 - 不记录 agent 耗时，它对模型没有意义。
 
 ### 4.1 两种 agent 读者
@@ -46,7 +46,7 @@
 - 强模型读全文：用于探针，找矛盾、歧义和未定义术语；七问只作校验。
 - 中等模型只读截断版：把 `solution.md` 截到"## 3. 详细设计"之前（摘要、背景与目标、方案概览），交给更弱的后端作答。它模拟"只看前两章的人"，检验前两章是否承载了七问中的大部分答案；Q6、Q7 允许答"找不到"，其余五问应通过。
 
-两种读者的原始输出分别保存为 `reader-test/agent-v<N>.raw.json` 和 `reader-test/agent-v<N>-head.raw.json`。
+两种读者的原始输出分别保存为 `reader-test/agent-v<N>.raw.json` 和 `reader-test/agent-v<N>-head.raw.json`；逐行 JSON 的输出按第 4 节改用 `.raw.jsonl`。
 
 ## 5. 比对与判定
 
@@ -94,8 +94,11 @@ Claude Code 编排时用 `claude-<backend>`：
 
 ```bash
 cd <只含 solution.md 的目录> && claude-<backend> -p "$(cat <prompt 文件>)" --allowedTools Read --strict-mcp-config \
-  --disallowedTools 'Bash,Write,Edit,WebSearch,WebFetch,Glob,Grep,Task' --max-turns 12 --output-format json
+  --disallowedTools 'Bash,Write,Edit,WebSearch,WebFetch,Glob,Grep,Task' --max-turns 12 --output-format stream-json --verbose \
+  > ../agent-v<N>.raw.jsonl
 ```
+
+比对时把全部 `type=assistant` 消息的文本按顺序拼接，再取最后一个 JSON 代码块。不用 `--output-format json`：它只保留最后一条消息，读者把作答拆成多条消息时会丢失前面的作答。
 
 Codex 编排时用 `codex-<backend> exec`（2026-09-20 用 codex-qwen 对同一份冻结方案实测 7/7）：
 
