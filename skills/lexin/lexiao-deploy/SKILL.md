@@ -2,7 +2,7 @@
 name: lexiao-deploy
 description: 在乐效需求/版本中集成分支、构建、部署并验收项目环境、预发布或用户明确指定的灰度应用。Use when 用户要求集成分支、构建、部署到项目环境或预发布并验收结果；默认每应用一个目标，支持显式灰度全目标；部署后核验制品与实例日志。不用于 OA/线上部署或独立日志查询。
 metadata:
-  version: 1.5.1
+  version: 1.5.2
 ---
 
 # Lexiao Deploy
@@ -69,7 +69,8 @@ For multiple apps, split the work into two phases: branch integration and build 
 
 1. Load the Lexiao version page and locate the exact target app row. For multiple apps, extract all target rows and record their `发布顺序`; sorting applies to deployment after the build phase, not to build triggering.
 2. Branch integration:
-   - Click `分支集成详情` / `分支集成` before build. Do not skip this step.
+   - Click `分支集成详情` / `分支集成` before build. Do not skip this step. Pre-release never merges a push into `release` by itself: after every push the target row shows `补丁提交 / 补丁待合入release` until someone clicks `批量集成分支`, and the build would package the old `release`. Do not poll `release` waiting for the new commit. (Project environment is different: a push auto-integrates and auto-builds there.)
+   - Read the rows first with `lexiao_pre_release.js --action=branch-status` (opens the dialog, clicks nothing). The entry button reads `分支集成` while any patch is unmerged and `分支集成详情` once all are merged; the script tries both.
    - Capture the target project row: project name, branch, last commit, branch status, integration pipeline status, merge status, and CR status.
    - If `批量集成分支` is enabled, first record which project rows are still un-integrated: the batch button integrates all of them. If that set includes projects outside the user's requested scope and the user has not authorized integrating them, do not click; report the blocker and ask for a narrowed scope or explicit authorization. Otherwise click it, confirm, and wait until the target project row is `已合并`, integration pipeline is `执行成功`, and merge status is `合入release成功` or `补丁合入release成功`.
    - If `批量集成分支` is disabled and the target row already shows the success statuses above, report it as "already integrated" and continue.

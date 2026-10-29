@@ -405,6 +405,30 @@ async function branchIntegrate(page, url) {
   return { openIntegration, batchClick, confirm, dialogs: await visibleDialogs(page), outcome: batchClick.clicked ? 'triggered' : 'not-triggered' };
 }
 
+// 只读查看分支集成弹窗：「批量集成分支」会把所有未集成项目一起合进 release，
+// 版本里挂着别的需求时必须先看清行状态再决定，不点任何按钮。
+async function branchStatus(page, url) {
+  await gotoLexiao(page, url, 'pre');
+  const responses = [];
+  const onResponse = async (response) => {
+    if (!/lexiao-api\.oa\.fenqile\.com\/oa\//.test(response.url())) return;
+    if (!/branch|merge|integrat/i.test(response.url())) return;
+    try { responses.push({ url: response.url(), json: await response.json() }); } catch (_) {}
+  };
+  page.on('response', onResponse);
+  // 有未合入的补丁时入口按钮显示为「分支集成」，全部合入后才是「分支集成详情」。
+  let openIntegration = await clickVisibleButton(page, '分支集成详情');
+  if (!openIntegration.clicked) openIntegration = await clickVisibleButton(page, '分支集成');
+  if (!openIntegration.clicked) {
+    page.off('response', onResponse);
+    return { openIntegration, outcome: 'open-failed' };
+  }
+  await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+  await page.waitForTimeout(2000);
+  page.off('response', onResponse);
+  return { openIntegration, dialogs: await visibleDialogs(page), responses, outcome: 'read-only' };
+}
+
 async function waitBuild(page, versionId, appId, projectId, env, timeoutMs = 900000, pollMs = 30000, beforeBuildNo = null) {
   const deadline = Date.now() + timeoutMs;
   const snapshots = [];
@@ -805,6 +829,8 @@ async function main() {
     let result;
     if (action === 'list-apps') {
       result = await listApps(page, url, versionId, env);
+    } else if (action === 'branch-status') {
+      result = await branchStatus(page, url);
     } else if (action === 'branch-integrate') {
       result = await branchIntegrate(page, url);
     } else if (action === 'build') {

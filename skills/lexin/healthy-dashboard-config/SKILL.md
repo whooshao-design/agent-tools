@@ -1,8 +1,8 @@
 ---
 name: healthy-dashboard-config
-description: "修改已有 Healthy/雷神/Nightingale 监控大盘的配置。Use when 用户要求修改已有监控大盘、配置大盘变量、Prometheus 面板或穿透加载监控指标；读取和更新 /api/n9e/board/{id}/configs，并复用本地浏览器登录态完成回读校验。"
+description: "修改已有 Healthy/雷神/Nightingale 监控大盘的配置，以及按指标列举、按模板新建告警规则。Use when 用户要求修改已有监控大盘、配置大盘变量、Prometheus 面板或穿透加载监控指标，或要查某个指标有没有告警规则、在某个业务组分类下配置告警规则；读取和更新 /api/n9e/board/{id}/configs 与分类下的 alert-rules，并复用本地浏览器登录态完成回读校验。"
 metadata:
-  version: 1.1.3
+  version: 1.2.0
 ---
 
 # healthy-dashboard-config
@@ -25,7 +25,7 @@ metadata:
 
 ## 适用场景
 
-用户要求配置 Healthy/雷神大盘、修改 dashboard configs、添加大盘变量、添加 Prometheus 面板、排查大盘 API 写入格式或复用已登录 Healthy 页面时使用。
+用户要求配置 Healthy/雷神大盘、修改 dashboard configs、添加大盘变量、添加 Prometheus 面板、排查大盘 API 写入格式或复用已登录 Healthy 页面时使用；也用于查某个指标有没有告警规则、在指定业务组分类下新建告警规则（见“告警规则”）。
 
 ## 核心约束
 
@@ -109,6 +109,23 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/healthy-dashboard-config/s
 
 输出包含下拉选项、实际查询及未替换变量检查结果；完整响应与截图放在 `backupDir`。
 JSON 配置、查询条件和验证证据是数据文件，可保留用于复查；已被正式入口替代的临时 JS/Python 按用户授权清理。
+
+## 告警规则
+
+雷神改过 Nightingale，规则只能按「业务组 → 分类」读写，标准的 `/api/n9e/busi-group/{gid}/alert-rules` 读写都返回 404。规则页 URL `alert-rules?id=88&cid=68` 里 `id` 是业务组、`cid` 是分类。
+
+```bash
+S=/home/joney/projects/ai/agent-tools/skills/lexin/healthy-dashboard-config/scripts
+# 某个指标有没有告警规则；不传 --gid 时遍历全部业务组，--cid 只查一个分类
+node $S/healthy_alert_rules.js list --metric='fql_fk_server_hawk_decision_task_error' [--gid=88] [--cid=68]
+# 新建：默认 dry-run 只打印请求体；确认后加 --apply
+node $S/healthy_alert_rules.js create --gid=88 --cid=68 --template-rule=102001 --rule-file=<rule.json> [--apply]
+```
+
+- `list` 同时匹配 `prom_ql` 和 `multi_prom_ql`；结果里的 `scanned_rules` 是实际扫描的条数，"没有规则"的结论要带上扫描范围。
+- `create` 的 `--rule-file` 至少写 `name`、`prom_ql`，常改的还有 `note`、`severity`、`prom_for_duration`、`prom_eval_interval`。通知渠道、通知组、负责人等从 `--template-rule`（同分类下的现有规则）复制，模板的 `id`、创建/更新人与时间不会带过去。
+- 同分类下已有同名规则时返回 `exists`，不新建；`--apply` 后按名称回读并逐项核对 `name`、`prom_ql`、`severity`、`disabled`、`category_id`，不一致时退出码 2。
+- 新建规则是线上写操作，只在用户明确要求配置告警时 `--apply`；不修改、不停用、不删除已有规则。
 
 ## 登录态失效处理
 

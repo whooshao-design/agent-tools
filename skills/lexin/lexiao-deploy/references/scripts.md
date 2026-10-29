@@ -29,6 +29,10 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/lexiao-deploy/scripts/lexi
   --url=<lexiao-url>
 
 node /home/joney/projects/ai/agent-tools/skills/lexin/lexiao-deploy/scripts/lexiao_pre_release.js \
+  --action=branch-status \
+  --url=<lexiao-url>
+
+node /home/joney/projects/ai/agent-tools/skills/lexin/lexiao-deploy/scripts/lexiao_pre_release.js \
   --action=branch-integrate \
   --url=<lexiao-url>
 
@@ -62,6 +66,8 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/lexiao-deploy/scripts/lexi
   --order-id=<publish-order-id> \
   --target-type=auto
 ```
+
+`branch-status` is read-only: it opens the branch-integration dialog and returns every project row (branch, last commit, merge status) without clicking. Run it before `branch-integrate`, because `批量集成分支` merges every unmerged row of the version, including other demands' projects.
 
 For gray deployment, add `--env=gray`; gray skips branch integration and build, but still uses `list-apps`, `open-order`, `deploy-one`, and log verification.
 
