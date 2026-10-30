@@ -28,12 +28,20 @@ export function parseArchive(markdown) {
 
 // 与乐空间前端的 js-xss 白名单一致的最小子集；其他标签去掉标签保留文字，属性只留表格对齐
 const ALLOWED = new Set(['p', 'br', 'ol', 'ul', 'li', 'strong', 'em', 'code', 'pre', 'blockquote', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'h3', 'h4']);
+// 已发布进展的展示页不给表格画线（编辑器会），边框只能写成内联 style
+const TABLE_STYLE = {
+  table: 'border-collapse: collapse;',
+  th: 'border: 1px solid #ccc; padding: 4px 8px; background-color: #f5f5f5;',
+  td: 'border: 1px solid #ccc; padding: 4px 8px;',
+};
 export function sanitizeHtml(html) {
   return html.replace(/<(\/?)([a-zA-Z][a-zA-Z0-9]*)([^>]*)>/g, (all, slash, tag, attrs) => {
     const name = tag.toLowerCase();
     if (!ALLOWED.has(name)) return '';
-    const align = !slash && (name === 'td' || name === 'th') ? /\balign="(left|right|center)"/.exec(attrs) : null;
-    return `<${slash}${name}${align ? ` align="${align[1]}"` : ''}>`;
+    if (slash) return `</${name}>`;
+    const align = name === 'td' || name === 'th' ? /\balign="(left|right|center)"/.exec(attrs) : null;
+    const style = TABLE_STYLE[name];
+    return `<${name}${align ? ` align="${align[1]}"` : ''}${style ? ` style="${style}"` : ''}>`;
   });
 }
 

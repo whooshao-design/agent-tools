@@ -38,11 +38,11 @@ test('parseArchive keeps only KR sections writable and honours the skip mark', (
   assert.equal(sections.find((s) => s.kind === 'other').title, '待归类');
 });
 
-test('markdownToHtml emits only whitelisted tags without attributes', () => {
+test('markdownToHtml emits only whitelisted tags, keeping just table align and border styles', () => {
   const html = markdownToHtml('本周工作\n1. a **b** <script>x</script> [l](http://e)\n\n| a | b |\n|:-:|---|\n| 1 | 2 |');
-  assert.match(html, /^<p>本周工作<\/p><ol><li>a <strong>b<\/strong> x l<\/li><\/ol><table>/);
+  assert.match(html, /^<p>本周工作<\/p><ol><li>a <strong>b<\/strong> x l<\/li><\/ol><table style=\"border-collapse: collapse;\">/);
   assert.ok(!/<script|<a |href/.test(html));
-  assert.match(html, /<th align="center">a<\/th>/);
+  assert.match(html, /<th align="center" style="border: 1px solid #ccc;[^"]*">a<\/th>/);
   assert.equal(sanitizeHtml('<div class="x"><p style="c">t</p></div>'), '<p>t</p>');
 });
 
@@ -114,6 +114,25 @@ test('buildRequest skips KRs published this week and already-written additions',
   assert.equal(dup.request, null);
 });
 
+test('buildRequest with replace swaps the old draft for the addition and keeps its state', () => {
+  const before = normalizeDetail(9, DETAIL);
+  const { request, plan } = buildRequest(before, new Map([[1, '<p>旧草稿</p>']]), { windowStart: START, replace: new Set([1]) });
+  assert.equal(plan[0].action, 'replace');
+  assert.deepEqual(request.krProcessList[0], { krId: 1, progressRatio: '40', processStatus: 3, processContent: '<p>旧草稿</p>' });
+  const echo = { result_rows: [{ kr_process_list: request.krProcessList.map((k, i) => ({ kr_id: k.krId, process_draft_content: k.processContent ? { process_with_rich_text: k.processContent, progress_ratio: k.progressRatio, process_status: k.processStatus, draft_modify_time: 'new' } : null, latest_kr_process: DETAIL.result_rows[0].kr_process_list[i].latest_kr_process })) }] };
+  assert.deepEqual(verifyAfterWrite(before, normalizeDetail(9, echo), plan), []);
+  const stale = { result_rows: [{ kr_process_list: echo.result_rows[0].kr_process_list.map((k, i) => (i === 0 ? { ...k, process_draft_content: { ...k.process_draft_content, process_with_rich_text: '<p>旧草稿</p><p>旧草稿</p>' } } : k)) }] };
+  assert.deepEqual(verifyAfterWrite(before, normalizeDetail(9, stale), plan).map((p) => [p.krId, p.field]), [[1, 'content']]);
+});
+
+test('buildRequest replaces a draft that only repeats the latest published progress', () => {
+  const detail = structuredClone(DETAIL);
+  detail.result_rows[0].kr_process_list[0].process_draft_content.process_with_rich_text = '<p>上周&nbsp;</p>\n';
+  const { request, plan } = buildRequest(normalizeDetail(9, detail), new Map([[1, '<p>新</p>']]), { windowStart: START });
+  assert.equal(plan[0].action, 'replace');
+  assert.equal(request.krProcessList[0].processContent, '<p>新</p>');
+});
+
 test('verifyAfterWrite passes on the expected state and catches clobbered neighbours', () => {
   const before = normalizeDetail(9, DETAIL);
   const { request, plan } = buildRequest(before, new Map([[1, '<p>新</p>']]), { windowStart: START });
@@ -150,7 +169,7 @@ test('nested theme lists keep their hierarchy in the HTML sent to leco', () => {
 
 test('a stage table under a numbered item stays inside that item', () => {
   const html = markdownToHtml('1. **乐包复制**\n\n   | 阶段 | 进度 |\n   |---|---|\n   | 方案设计 | 已完成 |\n\n   收益：预期 a；实际 b\n\n2. **告警排查**：结论\n');
-  assert.equal(html, '<ol><li><p><strong>乐包复制</strong></p><table><thead><tr><th>阶段</th><th>进度</th></tr></thead><tbody><tr><td>方案设计</td><td>已完成</td></tr></tbody></table><p>收益：预期 a；实际 b</p></li><li><p><strong>告警排查</strong>：结论</p></li></ol>');
+  assert.equal(html, '<ol><li><p><strong>乐包复制</strong></p><table style="border-collapse: collapse;"><thead><tr><th style="border: 1px solid #ccc; padding: 4px 8px; background-color: #f5f5f5;">阶段</th><th style="border: 1px solid #ccc; padding: 4px 8px; background-color: #f5f5f5;">进度</th></tr></thead><tbody><tr><td style="border: 1px solid #ccc; padding: 4px 8px;">方案设计</td><td style="border: 1px solid #ccc; padding: 4px 8px;">已完成</td></tr></tbody></table><p>收益：预期 a；实际 b</p></li><li><p><strong>告警排查</strong>：结论</p></li></ol>');
 });
 
 test('archivePlan never overwrites an existing summary or an earlier .new.md', (t) => {

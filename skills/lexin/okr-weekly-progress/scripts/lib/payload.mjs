@@ -2,6 +2,7 @@
 // 这里只做纯计算：把服务端详情归一化、合成整组请求、写后逐字段核验。
 
 const str = (v) => (v === undefined || v === null ? '' : String(v));
+const plain = (html) => str(html).replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
 
 // 判空严格照搬页面：process_with_rich_text!=="" || progress_ratio!=="0" || process_status（原始值、严格比较），
 // 否则页面认为非空的草稿在这里被当成空草稿、改用已发布进展的进度和状态
@@ -35,7 +36,9 @@ export function parseLecoTime(text) {
 }
 
 // additions: Map<krId, html>。返回整组请求与逐 KR 计划；没有任何 KR 需要追加时 request 为 null
-export function buildRequest(obj, additions, { windowStart, includePublished = false } = {}) {
+// replace：这些 KR 用新增内容整段替换原草稿，不在其后追加。草稿文字与最近已发布进展相同时也自动替换：
+// 那是发布后页面自动保存或打开「添加进展」时回填留下的旧内容，不是本周新写的
+export function buildRequest(obj, additions, { windowStart, includePublished = false, replace = new Set() } = {}) {
   const plan = [];
   const krProcessList = obj.krs.map((kr) => {
     const keep = kr.draft
@@ -47,18 +50,19 @@ export function buildRequest(obj, additions, { windowStart, includePublished = f
     if (add !== undefined) {
       const published = kr.latest && windowStart && parseLecoTime(kr.latest.publishTime) >= windowStart;
       if (published && !includePublished) action = 'skip-published';
-      else if (kr.draft && kr.draft.html.includes(add)) action = 'skip-duplicate';
+      else if (kr.draft && kr.draft.html.includes(add) && !replace.has(kr.krId)) action = 'skip-duplicate';
       else {
-        action = 'append';
-        const base = kr.draft ? kr.draft.html : '';
+        const stale = kr.draft && kr.latest && plain(kr.draft.html) === plain(kr.latest.html);
+        action = (replace.has(kr.krId) || stale) && kr.draft ? 'replace' : 'append';
+        const base = kr.draft && action === 'append' ? kr.draft.html : '';
         const from = kr.draft || kr.latest || { ratio: '0', status: 0 };
         next = { content: base + add, ratio: str(from.ratio || '0'), status: Number(from.status || 0) };
       }
     }
-    plan.push({ krId: kr.krId, action, beforeChars: keep.content.length, afterChars: next.content.length, expected: next, base: keep.content, addition: action === 'append' ? add : '' });
+    plan.push({ krId: kr.krId, action, beforeChars: keep.content.length, afterChars: next.content.length, expected: next, base: keep.content, addition: action === 'append' || action === 'replace' ? add : '' });
     return { krId: kr.krId, progressRatio: next.ratio, processStatus: next.status, processContent: next.content };
   });
-  const request = plan.some((p) => p.action === 'append') ? { objId: obj.objId, option: 1, krProcessList } : null;
+  const request = plan.some((p) => p.action === 'append' || p.action === 'replace') ? { objId: obj.objId, option: 1, krProcessList } : null;
   return { request, plan };
 }
 
@@ -68,7 +72,7 @@ export function changedSince(before, now) {
   return before.krs.filter((k) => at.get(k.krId) !== k.draftModifyTime).map((k) => k.krId);
 }
 
-// 写后核验：目标 KR = 旧草稿 + 新增，其他 KR 与计划逐字段相等，已发布进展不变
+// 写后核验：目标 KR = 旧草稿 + 新增（replace 时只有新增），其他 KR 与计划逐字段相等，已发布进展不变
 export function verifyAfterWrite(before, after, plan) {
   const problems = [];
   const afterById = new Map(after.krs.map((k) => [k.krId, k]));
@@ -80,6 +84,8 @@ export function verifyAfterWrite(before, after, plan) {
     if (p.action === 'append') {
       if (!got.content.startsWith(p.base)) problems.push({ krId: p.krId, field: 'content', detail: '原草稿没有完整保留在开头' });
       if (!got.content.includes(p.addition)) problems.push({ krId: p.krId, field: 'content', detail: '新增内容未写入' });
+    } else if (p.action === 'replace') {
+      if (got.content !== p.expected.content) problems.push({ krId: p.krId, field: 'content', detail: '草稿未替换为新内容' });
     } else if (p.action === 'keep-empty' && now.draft) {
       // 按页面规则这条草稿已不再是空的：用户打开「添加进展」时不会再回填上次已发布的进展
       problems.push({ krId: p.krId, field: 'draft', detail: '原本为空的草稿在页面看来已非空，将不再回填已发布进展' });

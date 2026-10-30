@@ -105,6 +105,7 @@ export async function cmdWrite(opts, { withClient = withLeco, wait = sleep, out 
   const file = opts.file || opts._[0];
   if (!file || !fs.existsSync(file)) throw new Error('write 需要 --file=<周报汇总.md>');
   const includePublished = flag(opts['include-published']);
+  const replace = new Set(String(opts.replace || '').split(',').filter(Boolean).map(Number));
   const { meta, additions, skipped, empty } = loadAdditions(file, includePublished);
   if (additions.size === 0) return out({ status: 'nothing-to-write', skippedPublished: skipped, emptySections: empty, hint: '没有可写的 KR 小节（都标了本周已发布、为空或只有「本周无」）' });
   const hits = [...additions.values()].flatMap((a) => scanSensitive(a.markdown).map((h) => ({ ...h, kr: a.title })));
@@ -118,7 +119,7 @@ export async function cmdWrite(opts, { withClient = withLeco, wait = sleep, out 
     const groups = okr.objs.map((o) => {
       const before = normalizeDetail(o.objId, o.detail);
       const adds = new Map([...additions].filter(([id]) => o.krs.some((k) => k.krId === id)).map(([id, a]) => [id, a.html]));
-      return { obj: o, before, ...buildRequest(before, adds, { windowStart, includePublished }) };
+      return { obj: o, before, ...buildRequest(before, adds, { windowStart, includePublished, replace }) };
     }).filter((g) => g.plan.some((p) => p.action !== 'keep' && p.action !== 'keep-empty'));
     // kr_id 必须同时出现在 KR 列表和进展详情里，否则会被整组请求悄悄丢掉
     const planned = new Set(groups.flatMap((g) => g.plan.filter((p) => p.action !== 'keep' && p.action !== 'keep-empty').map((p) => p.krId)));
@@ -218,7 +219,7 @@ function cmdOpen(opts) {
 
 const USAGE = `用法:
   okr_weekly.mjs collect [--out=<json>] [--mid=49548] [--start=<ISO>] [--now=<ISO>]
-  okr_weekly.mjs write --file=<周报汇总.md> [--confirm] [--allow-sensitive] [--include-published] [--settle-seconds=35] [--recheck-seconds=65]
+  okr_weekly.mjs write --file=<周报汇总.md> [--confirm] [--allow-sensitive] [--include-published] [--replace=<kr_id,...>] [--settle-seconds=35] [--recheck-seconds=65]
   okr_weekly.mjs restore --snapshot=<快照.json> [--confirm] [--force]
   okr_weekly.mjs open <周报汇总.md>`;
 
