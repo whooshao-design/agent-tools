@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { buildRuleBody, flattenCategories, matchRules, runCreate, runList } = require('./healthy_alert_rules');
+const { buildRuleBody, flattenCategories, matchRules, runCreate, runList, runSetDisabled, runUpdate } = require('./healthy_alert_rules');
 
 const template = { id: 102001, create_by: 'x', notify_groups_obj: [{ id: 21 }], notify_groups: ['21'], notify_channels: ['wecom'], severity: 3, prom_ql: 'old', name: 'old', category_id: 1 };
 
@@ -80,4 +80,43 @@ test('list 遍历业务组的全部分类并只返回命中的规则', async () 
   const result = await runList(request, { gid: '88', metric: 'fql_fk_task_error' });
   assert.equal(result.scanned_rules, 2);
   assert.deepEqual(result.hits.map((h) => [h.id, h.category]), [[1, '米霍克']]);
+});
+
+test('update 默认 dry-run，只列出有变化的字段，不发 PUT', async () => {
+  const { request, calls } = fakeRequest({ 'GET /api/n9e/alert-rule/9': { id: 9, group_id: 88, name: 'a', prom_ql: 'old', severity: 3 } });
+  const result = await runUpdate(request, { id: '9', 'rule-file': ruleFile({ name: 'a', prom_ql: 'new' }) });
+  assert.equal(result.outcome, 'dry-run');
+  assert.deepEqual(Object.keys(result.diff), ['prom_ql']);
+  assert.ok(!calls.some((c) => c.method === 'PUT'));
+});
+
+test('update 拒绝修改归属与审计字段', async () => {
+  const { request } = fakeRequest({});
+  await assert.rejects(runUpdate(request, { id: '9', 'rule-file': ruleFile({ group_id: 1, prom_ql: 'q' }) }), /group_id/);
+});
+
+test('update apply 时 PUT 完整规则并回读校验', async () => {
+  let stored = { id: 9, group_id: 88, name: 'a', prom_ql: 'old', notify_groups: ['21'], notify_groups_obj: [{ id: 21 }] };
+  const { request, calls } = fakeRequest({
+    'GET /api/n9e/alert-rule/9': () => stored,
+    'PUT /api/n9e/busi-group/88/alert-rule/9': (body) => { stored = { ...body }; return null; },
+  });
+  const result = await runUpdate(request, { id: '9', apply: true, 'rule-file': ruleFile({ prom_ql: 'new' }) });
+  assert.equal(result.outcome, 'updated');
+  const put = calls.find((c) => c.method === 'PUT').body;
+  assert.deepEqual([put.prom_ql, put.notify_groups[0], put.notify_groups_obj], ['new', '21', undefined]);
+});
+
+test('disable 已停用时不发请求，apply 时按列表开关接口停用并回读', async () => {
+  const off = fakeRequest({ 'GET /api/n9e/alert-rule/9': { id: 9, group_id: 88, disabled: 1 } });
+  assert.equal((await runSetDisabled(off.request, { id: '9', apply: true }, 1)).outcome, 'unchanged');
+  let disabled = 0;
+  const { request, calls } = fakeRequest({
+    'GET /api/n9e/alert-rule/9': () => ({ id: 9, group_id: 88, disabled }),
+    'PUT /api/n9e/busi-group/88/alert-rules/disabled': (body) => { disabled = body.disabled; return null; },
+  });
+  assert.equal((await runSetDisabled(request, { id: '9' }, 1)).outcome, 'dry-run');
+  const result = await runSetDisabled(request, { id: '9', apply: true }, 1);
+  assert.equal(result.outcome, 'disabled');
+  assert.deepEqual(calls.find((c) => c.method === 'PUT').body, { id: 9, disabled: 1 });
 });

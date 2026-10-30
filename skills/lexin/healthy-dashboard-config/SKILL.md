@@ -1,8 +1,8 @@
 ---
 name: healthy-dashboard-config
-description: "修改已有 Healthy/雷神/Nightingale 监控大盘的配置，以及按指标列举、按模板新建告警规则。Use when 用户要求修改已有监控大盘、配置大盘变量、Prometheus 面板或穿透加载监控指标，或要查某个指标有没有告警规则、在某个业务组分类下配置告警规则；读取和更新 /api/n9e/board/{id}/configs 与分类下的 alert-rules，并复用本地浏览器登录态完成回读校验。"
+description: "修改已有 Healthy/雷神/Nightingale 监控大盘的配置，以及按指标列举、按模板新建、修改、停用/启用告警规则。Use when 用户要求修改已有监控大盘、配置大盘变量、Prometheus 面板或穿透加载监控指标，或要查某个指标有没有告警规则、在某个业务组分类下配置告警规则、修改已有告警规则的 PromQL/名称/备注、停用或启用告警规则；读取和更新 /api/n9e/board/{id}/configs 与 alert-rules，并复用本地浏览器登录态完成回读校验。"
 metadata:
-  version: 1.2.0
+  version: 1.3.0
 ---
 
 # healthy-dashboard-config
@@ -112,7 +112,7 @@ JSON 配置、查询条件和验证证据是数据文件，可保留用于复查
 
 ## 告警规则
 
-雷神改过 Nightingale，规则只能按「业务组 → 分类」读写，标准的 `/api/n9e/busi-group/{gid}/alert-rules` 读写都返回 404。规则页 URL `alert-rules?id=88&cid=68` 里 `id` 是业务组、`cid` 是分类。
+雷神改过 Nightingale，规则只能按「业务组 → 分类」列举和新建，标准的 `/api/n9e/busi-group/{gid}/alert-rules` 读写都返回 404。规则页 URL `alert-rules?id=88&cid=68` 里 `id` 是业务组、`cid` 是分类。
 
 ```bash
 S=/home/joney/projects/ai/agent-tools/skills/lexin/healthy-dashboard-config/scripts
@@ -120,12 +120,19 @@ S=/home/joney/projects/ai/agent-tools/skills/lexin/healthy-dashboard-config/scri
 node $S/healthy_alert_rules.js list --metric='fql_fk_server_hawk_decision_task_error' [--gid=88] [--cid=68]
 # 新建：默认 dry-run 只打印请求体；确认后加 --apply
 node $S/healthy_alert_rules.js create --gid=88 --cid=68 --template-rule=102001 --rule-file=<rule.json> [--apply]
+# 读一条规则的完整字段
+node $S/healthy_alert_rules.js get --id=93575
+# 修改：规则文件只写要改的字段；默认 dry-run 打印变化字段，--apply 后逐字段回读
+node $S/healthy_alert_rules.js update --id=93575 --rule-file=<fields.json> [--apply]
+# 停用 / 启用：默认 dry-run，--apply 后回读 disabled
+node $S/healthy_alert_rules.js disable|enable --id=110444 [--apply]
 ```
 
 - `list` 同时匹配 `prom_ql` 和 `multi_prom_ql`；结果里的 `scanned_rules` 是实际扫描的条数，"没有规则"的结论要带上扫描范围。
 - `create` 的 `--rule-file` 至少写 `name`、`prom_ql`，常改的还有 `note`、`severity`、`prom_for_duration`、`prom_eval_interval`。通知渠道、通知组、负责人等从 `--template-rule`（同分类下的现有规则）复制，模板的 `id`、创建/更新人与时间不会带过去。
 - 同分类下已有同名规则时返回 `exists`，不新建；`--apply` 后按名称回读并逐项核对 `name`、`prom_ql`、`severity`、`disabled`、`category_id`，不一致时退出码 2。
-- 新建规则是线上写操作，只在用户明确要求配置告警时 `--apply`；不修改、不停用、不删除已有规则。
+- `update` 先 `GET /api/n9e/alert-rule/{id}`，把规则文件字段合并进完整规则后 `PUT /api/n9e/busi-group/{gid}/alert-rule/{id}`（与页面「编辑」保存同一接口）；规则文件不能带 `id`、`group_id`、`category_id` 和创建/更新审计字段。`disable`/`enable` 调 `PUT /api/n9e/busi-group/{gid}/alert-rules/disabled`，body `{id, disabled}`（与列表页「启用」开关同一接口）。2026-10-30 线上实测：`update` 后逐字段比对，只有规则文件里的字段和 `update_at`、`update_by` 变化。
+- 新建、修改、停用都是线上写操作，只在用户明确要求时 `--apply`，先 dry-run；不删除规则。
 
 ## 登录态失效处理
 
