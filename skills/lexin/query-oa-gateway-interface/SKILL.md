@@ -2,7 +2,7 @@
 name: query-oa-gateway-interface
 description: 查询 OA 网关 URL 与后端接口映射，并回代码仓库追踪实现链路。Use when 用户给出前端请求地址、rc_oa_gateway 路径、mihawk/gateway OA 页面请求，要求查询对应的 FSOF/Dubbo interface、method、version、真实后端应用、实现类、VO 参数、DAO 或 SQL；适用于“页面请求对应后端接口”“前端地址映射后端”“query_page_list 网关规则查询”“当前仓库搜不到接口时定位应用”等只读排查。
 metadata:
-  version: 1.3.0
+  version: 1.3.1
 ---
 
 # query-oa-gateway-interface
@@ -23,7 +23,7 @@ MCP 优先、浏览器会话兜底。优先使用 `browser_session` MCP 访问 `
 带了这两个头仍返回 16051006，是网关自己的登录 Cookie `rog_session`（`.oa.fenqile.com`，约每天过期）缺失；`sessionHealth` 不检查它，所以会话仍报 READY（2026-11-02 实测）。`--request` 遇到 16051006 会自动打开一次网关控制台让 SSO 重新签发，再重试一次，结果里的 `sessionRefresh.recovered` 说明是否恢复；仍失败时再按失败处理刷新登录态。
 按后端接口反查前端 URL 时，`url` 留空、`interface_name` 传全限定接口名。
 
-反方向（后端接口、网关 URL 或 MySQL 表 → 线上前端页面地址）用 `locate-frontend-page`。
+反方向（后端接口、网关 URL 或 MySQL 表 → 线上前端页面地址）用 `locate-frontend-page`。新增路由规则用 `manage-oa-gateway-rule`。
 
 ## 核心约束
 

@@ -1,0 +1,6 @@
+interface:
+  display_name: "manage-oa-gateway-rule"
+  short_description: "按模板新增 OA 网关路由规则（线上/项目环境），回读并探活"
+  default_prompt: "使用 $manage-oa-gateway-rule 参照已有规则给新接口加 OA 网关路由"
+policy:
+  allow_implicit_invocation: true
