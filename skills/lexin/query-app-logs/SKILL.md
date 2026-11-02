@@ -2,7 +2,7 @@
 name: query-app-logs
 description: 统一只读查询 Java 应用日志：VM/KVM 服务器日志走 java_app_diag MCP，容器 Pod 日志走 container_log_check/webshell_log_check 脚本，超出服务器保存期或需要跨机器按 traceId 汇总时走日志平台 log.oa.fenqile.com（热数据 90 天）。Use when 用户要求查某应用的日志、按 traceId/关键字/时间段找日志、看几天到几个月前的历史日志、服务器日志已轮转找不到、或明确说用日志平台；应用名必须明确。
 metadata:
-  version: 1.1.2
+  version: 1.1.3
 ---
 
 # query-app-logs

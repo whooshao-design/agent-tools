@@ -13,6 +13,7 @@ from mcp.types import ToolAnnotations
 
 from devtools_mcp.common import (
     DEFAULT_BROWSER_PROFILE,
+    PROFILE_LOCK_WAIT_SECONDS,
     DEFAULT_INTERNAL_ALLOWED_HOSTS,
     bounded_int,
     command_result_text,
@@ -41,7 +42,7 @@ def lexiao_project_status(url: str, app: str, profile: str = DEFAULT_BROWSER_PRO
     """查询乐效项目环境目标应用行状态，并打开该行「部署详情」弹窗读取版本号、集群行、Pod 与发布单号（打开弹窗时页面会自行调用 create_publish_order）。"""
     if not url or not app:
         return error_text("url and app are required")
-    return _run_node(PROJECT_SCRIPT, ["--action=status", f"--url={url}", f"--app={app}", f"--profile={profile}"], timeout=180)
+    return _run_node(PROJECT_SCRIPT, ["--action=status", f"--url={url}", f"--app={app}", f"--profile={profile}"], timeout=180 + PROFILE_LOCK_WAIT_SECONDS)
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False))
@@ -66,7 +67,7 @@ def lexiao_project_deploy(
     ]
     if cluster:
         args.append(f"--cluster={cluster}")
-    return _run_node(PROJECT_SCRIPT, args, timeout=bounded_int(build_timeout_seconds, 900, 30, 3600) + bounded_int(deploy_timeout_seconds, 900, 30, 3600) + 60)
+    return _run_node(PROJECT_SCRIPT, args, timeout=bounded_int(build_timeout_seconds, 900, 30, 3600) + bounded_int(deploy_timeout_seconds, 900, 30, 3600) + 60 + PROFILE_LOCK_WAIT_SECONDS)
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True))
@@ -77,7 +78,7 @@ def lexiao_list_apps(url: str, env: str = "pre", profile: str = "") -> str:
     args = ["--action=list-apps", f"--url={url}", f"--env={env}"]
     if profile:
         args.append(f"--profile={profile}")
-    return _run_node(PRE_SCRIPT, args, timeout=120)
+    return _run_node(PRE_SCRIPT, args, timeout=120 + PROFILE_LOCK_WAIT_SECONDS)
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False))
@@ -88,7 +89,7 @@ def lexiao_branch_integrate(url: str, profile: str = "") -> str:
     args = ["--action=branch-integrate", f"--url={url}"]
     if profile:
         args.append(f"--profile={profile}")
-    return _run_node(PRE_SCRIPT, args, timeout=180)
+    return _run_node(PRE_SCRIPT, args, timeout=180 + PROFILE_LOCK_WAIT_SECONDS)
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False))
@@ -103,7 +104,7 @@ def lexiao_build_app(url: str, app: str, app_id: str = "", project_id: str = "",
         args.append(f"--project-id={project_id}")
     if profile:
         args.append(f"--profile={profile}")
-    return _run_node(PRE_SCRIPT, args, timeout=bounded_int(timeout_seconds, 900, 60, 3600) + 60)
+    return _run_node(PRE_SCRIPT, args, timeout=bounded_int(timeout_seconds, 900, 60, 3600) + 60 + PROFILE_LOCK_WAIT_SECONDS)
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False))
@@ -114,7 +115,7 @@ def lexiao_build_many(url: str, apps: str, env: str = "pre", profile: str = "", 
     args = ["--action=build-many", f"--url={url}", f"--apps={apps}", f"--env={env}", f"--timeout={bounded_int(timeout_seconds, 900, 60, 3600) * 1000}"]
     if profile:
         args.append(f"--profile={profile}")
-    return _run_node(PRE_SCRIPT, args, timeout=bounded_int(timeout_seconds, 900, 60, 3600) + 60)
+    return _run_node(PRE_SCRIPT, args, timeout=bounded_int(timeout_seconds, 900, 60, 3600) + 60 + PROFILE_LOCK_WAIT_SECONDS)
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False))
@@ -125,7 +126,7 @@ def lexiao_open_order(url: str, app: str, env: str = "pre", profile: str = "") -
     args = ["--action=open-order", f"--url={url}", f"--app={app}", f"--env={env}"]
     if profile:
         args.append(f"--profile={profile}")
-    return _run_node(PRE_SCRIPT, args, timeout=180)
+    return _run_node(PRE_SCRIPT, args, timeout=180 + PROFILE_LOCK_WAIT_SECONDS)
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False))
@@ -158,7 +159,7 @@ def lexiao_deploy_one(
         args.append(f"--deployment-id={deployment_id}")
     if profile:
         args.append(f"--profile={profile}")
-    return _run_node(PRE_SCRIPT, args, timeout=bounded_int(timeout_seconds, 900, 60, 3600) + 60)
+    return _run_node(PRE_SCRIPT, args, timeout=bounded_int(timeout_seconds, 900, 60, 3600) + 60 + PROFILE_LOCK_WAIT_SECONDS)
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True))
@@ -169,7 +170,7 @@ def lexiao_deployment_status(url: str, order_ids: str, env: str = "pre", profile
     args = ["--action=status", f"--url={url}", f"--order-ids={order_ids}", f"--env={env}"]
     if profile:
         args.append(f"--profile={profile}")
-    return _run_node(PRE_SCRIPT, args, timeout=120)
+    return _run_node(PRE_SCRIPT, args, timeout=120 + PROFILE_LOCK_WAIT_SECONDS)
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False))
@@ -179,7 +180,7 @@ def lexiao_project_build(url: str, app: str, profile: str = DEFAULT_BROWSER_PROF
         return error_text("url and app are required")
     timeout = bounded_int(build_timeout_seconds, 1200, 60, 3600)
     args = ["--action=build", f"--url={url}", f"--app={app}", f"--profile={profile}", f"--build-timeout={timeout * 1000}"]
-    return _run_node(PROJECT_SCRIPT, args, timeout=timeout + 120)
+    return _run_node(PROJECT_SCRIPT, args, timeout=timeout + 120 + PROFILE_LOCK_WAIT_SECONDS)
 
 
 NEXUS_SNAPSHOTS = "http://product.fenqile.com:8081/nexus/content/repositories/snapshots/"

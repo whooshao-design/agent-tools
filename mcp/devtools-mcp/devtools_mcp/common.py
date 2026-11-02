@@ -41,6 +41,9 @@ def skill_path(skill_name: str, *parts: str) -> str:
 
 
 DEFAULT_BROWSER_SCRIPT = skill_path("get-browser-session", "scripts", "browser_session.js")
+# Default queue time on a shared browser profile (browser_session.js PROFILE_LOCK_WAIT_MS).
+# Kill timeouts of calls that may queue must exceed it, or the caller dies while waiting.
+PROFILE_LOCK_WAIT_SECONDS = 300
 
 
 def json_text(data: Any) -> str:
@@ -184,7 +187,7 @@ def browser_session_request(
     command_env["BROWSER_SESSION_REQUEST_JSON"] = json.dumps(request_config, ensure_ascii=False)
     result = run_command(
         command,
-        timeout=bounded_int(timeout, 60, 5, 300) + 30,
+        timeout=bounded_int(timeout, 60, 5, 300) + 30 + PROFILE_LOCK_WAIT_SECONDS,
         env=command_env,
     )
     if result["exit_code"] != 0:

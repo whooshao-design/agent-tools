@@ -9,7 +9,7 @@
 
 ## 推荐脚本
 
-脚本复用 `get-browser-session` 的路径解析、profile 锁、直连网络配置和登录检测。在一次浏览器上下文中读取当前用户、调用接口并保存 Cookie 续期结果；token 仅留在浏览器内存中，不输出到终端。登录失效的处理交给 `get-browser-session`，不要另写登录流程。
+脚本复用 `get-browser-session` 的路径解析、只读 profile 副本（`launchReadOnlyContext`，可并发）、直连网络配置和登录检测。在一次浏览器上下文中读取当前用户、调用接口并保存 Cookie 续期结果；token 仅留在浏览器内存中，不输出到终端。登录失效的处理交给 `get-browser-session`，不要另写登录流程。
 
 ```bash
 # 不确定实例时先列清单；只输出实例标识和说明，不输出连接地址或凭据。

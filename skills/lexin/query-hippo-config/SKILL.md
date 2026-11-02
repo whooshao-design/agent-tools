@@ -2,7 +2,7 @@
 name: query-hippo-config
 description: 通过 Hippo 配置中心只读查看应用配置和实际生效 release，支持标准 Hippo、stable/测试/项目环境以及墨西哥、印尼海外站点的独立域名，应用名或 namespace 不明确时可按关键字定位。Use when 用户要求查看 Hippo 配置、只给出应用关键字或业务语义要求定位配置项落在哪个应用和 namespace、线上/预发/灰度/OA/stable 配置、墨西哥或印尼海外配置、代码分支依赖的配置 key、应用默认配置、namespace 配置项，或需要根据代码里的 ConfigService/getAppConfig/@HippoConfigProperty 判断真实配置走向；默认环境为 prod/fql_prod，最终必须输出查询接口 URL 和配置结果。
 metadata:
-  version: 1.5.4
+  version: 1.5.5
 ---
 
 # query-hippo-config
@@ -123,7 +123,7 @@ node .../hippo_query.js find --app-id=server-hawk-decision-task-mexyw --hippo-si
 - 已知 namespace 的单 key 查询：加 `--namespace=<namespace>`；不要为了确认 namespace 存在先查 namespace 列表。
 - `mihwak_common`、`mihawk_common` 归一为 `hippo.mihwak_common`；当前米霍克公共 namespace 的承载 app 为 `mihwak_virtual`，可直接 `get --app-id=mihwak_virtual --namespace=hippo.mihwak_common --key=<key>`。
 - `water_common` 归一为 `hippo.water_common`；承载 app 未确定时先用公共 namespace 关联接口查 owner，再查 active release。
-- 同一个 app 下多个独立 namespace 的查询分多次 `get` 串行发起（脚本共用同一个浏览器 profile，并行会报 `PROFILE_IN_USE`），最后统一整理结果；但如果本来就不知道 key 在哪个 namespace，用一次 `find` 比并行猜多个 `get` 更快也更完整。
+- 同一个 app 下多个独立 namespace 的查询分多次 `get` 发起（脚本跑在 profile 副本上，可以并行），最后统一整理结果；但如果本来就不知道 key 在哪个 namespace，用一次 `find` 比并行猜多个 `get` 更快也更完整。
 - `find` 的结果要连 `scannedApps`、`scannedNamespaces`、`namespacesTruncated`、`appsTruncated`、`appSearchTruncated`（关键字搜应用满页）、`unreadableApps`（候选应用 navtree 读不到）、`unreadableNamespaces` 一起看：任一截断或不可读非空时不得下“未配置”的结论；没命中时先确认扫过的范围是否包含目标。
 
 ## API Reference

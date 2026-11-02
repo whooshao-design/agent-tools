@@ -375,7 +375,7 @@ def refresh_session_snapshot(path: Path, timeout: int) -> None:
         ["node", str(script), f"--export-session={path}", f"--url={LXCLOUD_ORIGIN}/", "--success-text=none"],
         capture_output=True,
         text=True,
-        timeout=max(timeout, 180),
+        timeout=max(timeout, 180) + 300,  # the export may queue on the shared profile for up to 5 minutes
     )
     if completed.returncode != 0:
         raise UserError(

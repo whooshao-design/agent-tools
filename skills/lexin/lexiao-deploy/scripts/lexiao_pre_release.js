@@ -3,7 +3,7 @@ const os = require('os');
 const path = require('path');
 const fs = require('fs');
 const { createRequire } = require('module');
-const { launchLockedContext } = require('../../get-browser-session/scripts/browser_session');
+const { launchLockedContext, launchReadOnlyContext, moveToReadOnlyContext, trackRequests } = require('../../get-browser-session/scripts/browser_session');
 
 const TOOL_DIR = path.join(os.homedir(), 'tools/lexiao-browser');
 const DEFAULT_PROFILE = process.env.BROWSER_SESSION_PROFILE
@@ -105,9 +105,13 @@ function findPipelineForApp(rows, appName) {
   return loose.length === 1 ? loose[0] : null;
 }
 
-async function openContext(args) {
+// 这些动作只读页面和接口，跑在 profile 副本上，不等也不占共享 profile 的锁。
+const READ_ONLY_ACTIONS = new Set(['list-apps', 'branch-status', 'wait-build', 'wait-build-many', 'status']);
+
+async function openContext(args, readOnly = false) {
   const ldLibraryPath = [RUNTIME_LIB_DIR, process.env.LD_LIBRARY_PATH].filter(Boolean).join(':');
-  return launchLockedContext(chromium, profileDir(args.profile), {
+  const launch = readOnly && !args.headed ? launchReadOnlyContext : launchLockedContext;
+  return launch(chromium, profileDir(args.profile), {
     executablePath: args.chrome || CHROME_PATH,
     headless: !args.headed,
     env: { ...process.env, LD_LIBRARY_PATH: ldLibraryPath },
@@ -527,7 +531,7 @@ async function waitBuildMany(page, versionId, targets, env, timeoutMs = 900000, 
   return { outcome: 'timeout', last, snapshots: snapshots.slice(-12) };
 }
 
-async function buildApp(page, url, versionId, appName, appId, projectId, env, timeoutMs = 900000, pollMs = 30000) {
+async function buildApp(page, url, versionId, appName, appId, projectId, env, timeoutMs = 900000, pollMs = 30000, reopenForWait = async () => page) {
   await gotoLexiao(page, url, env);
   const before = (await listApps(page, url, versionId, env)).apps.find((item) => item.app_name === appName) || null;
   const buildClick = await clickRowButton(page, appName, '构建');
@@ -536,11 +540,12 @@ async function buildApp(page, url, versionId, appName, appId, projectId, env, ti
     return { before, buildClick, confirm, wait: { outcome: 'not-triggered', reason: !buildClick.clicked ? 'build-button-not-clicked' : 'confirm-failed' } };
   }
   const beforeBuildNo = jobBuildNo(before?.pipeline?.pipeline_job_url);
+  if (appId || projectId) page = await reopenForWait();
   const wait = appId || projectId ? await waitBuild(page, versionId, appId, projectId, env, timeoutMs, pollMs, beforeBuildNo) : null;
   return { before, buildClick, confirm, wait };
 }
 
-async function buildMany(page, url, versionId, appNames, env, timeoutMs = 900000, pollMs = 30000) {
+async function buildMany(page, url, versionId, appNames, env, timeoutMs = 900000, pollMs = 30000, reopenForWait = async () => page) {
   await gotoLexiao(page, url, env);
   const { targets, listed } = await resolveTargetApps(page, url, versionId, env, appNames);
   const clicks = [];
@@ -556,6 +561,7 @@ async function buildMany(page, url, versionId, appNames, env, timeoutMs = 900000
     // 触发失败的应用仍带着上一轮的「执行成功 / 制作成功」，进入 wait 会被当成已完成。
     return { before: targets, all_apps_count: listed.apps.length, clicks, wait: { outcome: 'not-triggered', not_triggered: notTriggered } };
   }
+  page = await reopenForWait();
   const wait = await waitBuildMany(page, versionId, targets, env, timeoutMs, pollMs);
   return { before: targets, all_apps_count: listed.apps.length, clicks, wait };
 }
@@ -653,7 +659,7 @@ function pendingTargets(root) {
   return [...vm, ...container];
 }
 
-async function deployOne(page, url, versionId, appName, orderId, targetType, targetIp, deploymentId, env, allowPublished = false) {
+async function deployOne(page, url, versionId, appName, orderId, targetType, targetIp, deploymentId, env, allowPublished = false, reopenForWait = async () => page) {
   const before = await latestDetails(page, versionId, orderId, env);
   const vmTargets = before.root.kvm_deployment_detail_list || [];
   const containerTargets = before.root.deployment_order_detail_list || [];
@@ -690,6 +696,7 @@ async function deployOne(page, url, versionId, appName, orderId, targetType, tar
     await page.waitForTimeout(2500);
     const deployClick = await clickRowButton(page, target.machine_ip, '部署');
     const confirm = deployClick.clicked ? await confirmIfNeeded(page) : null;
+    if (deployClick.clicked) page = await reopenForWait();
     const wait = deployClick.clicked ? await waitKvm(page, versionId, orderId, target.machine_ip, env) : null;
     const vmFinal = (await latestDetails(page, versionId, orderId, env)).root;
     const vmRemaining = pendingTargets(vmFinal);
@@ -716,6 +723,7 @@ async function deployOne(page, url, versionId, appName, orderId, targetType, tar
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
+  page = await reopenForWait();
   const wait = await waitContainer(page, versionId, orderId, target.order_detail_id, env);
   const cFinal = (await latestDetails(page, versionId, orderId, env)).root;
   const cRemaining = pendingTargets(cFinal);
@@ -815,10 +823,17 @@ async function main() {
   const versionId = Number(args['version-id'] || versionIdFromUrl(url));
   if (!versionId) throw new Error('missing --version-id or app-publish/<id> URL');
 
-  const context = await openContext(args);
+  const session = { context: await openContext(args, READ_ONLY_ACTIONS.has(action)) };
   const responses = [];
   try {
-    const page = context.pages()[0] || await context.newPage();
+    const page = session.context.pages()[0] || await session.context.newPage();
+    const requestsSettled = trackRequests(page);
+    const reopenForWait = async () => (args.headed ? page : moveToReadOnlyContext(session, page, {
+      requestsSettled,
+      openReadOnly: () => openContext(args, true),
+      prepare: (next) => gotoLexiao(next, url, env),
+      retryHint: '--action=status 或 --action=wait-build',
+    }));
     page.on('response', async (response) => {
       const responseUrl = response.url();
       if (!/lexiao-api\.oa\.fenqile\.com\/oa\/.*(Publish|publish|deployment|Deployment|order|Order)/.test(responseUrl)) return;
@@ -834,9 +849,9 @@ async function main() {
     } else if (action === 'branch-integrate') {
       result = await branchIntegrate(page, url);
     } else if (action === 'build') {
-      result = await buildApp(page, url, versionId, args.app, args['app-id'], args['project-id'], env, Number(args.timeout || 900000), pollMs);
+      result = await buildApp(page, url, versionId, args.app, args['app-id'], args['project-id'], env, Number(args.timeout || 900000), pollMs, reopenForWait);
     } else if (action === 'build-many') {
-      result = await buildMany(page, url, versionId, parseCsv(args.apps), env, Number(args.timeout || 900000), pollMs);
+      result = await buildMany(page, url, versionId, parseCsv(args.apps), env, Number(args.timeout || 900000), pollMs, reopenForWait);
     } else if (action === 'wait-build') {
       await gotoLexiao(page, url, env);
       result = await waitBuild(page, versionId, args['app-id'], args['project-id'], env, Number(args.timeout || 900000), pollMs);
@@ -848,7 +863,7 @@ async function main() {
       result = await openOrder(page, url, versionId, args.app, responses, env);
     } else if (action === 'deploy-one') {
       await gotoLexiao(page, url, env);
-      result = await deployOne(page, url, versionId, args.app, Number(args['order-id']), args['target-type'] || 'auto', args['target-ip'], args['deployment-id'], env, Boolean(args['allow-published']));
+      result = await deployOne(page, url, versionId, args.app, Number(args['order-id']), args['target-type'] || 'auto', args['target-ip'], args['deployment-id'], env, Boolean(args['allow-published']), reopenForWait);
     } else if (action === 'container-login') {
       result = await containerLogin(page, url, args.app, env, args.pod || args['pod-ip'] || args['container-ip']);
     } else if (action === 'status') {
@@ -859,7 +874,7 @@ async function main() {
     }
     console.log(JSON.stringify({ action, env, version_id: versionId, result }, null, 2));
   } finally {
-    await context.close().catch(() => {});
+    await session.context.close().catch(() => {});
   }
 }
 

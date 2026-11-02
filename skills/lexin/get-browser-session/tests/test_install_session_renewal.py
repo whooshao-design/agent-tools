@@ -30,7 +30,7 @@ class SessionRenewalInstallerTest(unittest.TestCase):
         self.assertIn('"--url=https://lexiao.oa.fenqile.com/#/home?ratio=100%%"', service)
         self.assertIn('"--profile=/home/test/.cache/browser profile"', service)
         self.assertIn('"--success-text=当前环境"', service)
-        self.assertIn("TimeoutStartSec=5min", service)
+        self.assertIn("TimeoutStartSec=25min", service)
         self.assertIn("OnCalendar=*-*-* 11:00:00", timer)
         self.assertIn("OnBootSec=5m", timer)
         self.assertIn("RandomizedDelaySec=5m", timer)

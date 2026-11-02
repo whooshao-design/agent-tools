@@ -4,7 +4,7 @@
 const fs = require('fs');
 const { createRequire } = require('module');
 const {
-  acquireProfileLock, parseArgs, resolvePaths, waitForStableSession,
+  launchReadOnlyContext, parseArgs, resolvePaths, waitForStableSession,
   DEFAULT_LOGIN_PATTERN, DEFAULT_PORTAL_PATTERN,
 } = require('../../get-browser-session/scripts/browser_session');
 const { buildBrowserEnv, chromiumArgsFor } = require('../../get-browser-session/scripts/browser_network');
@@ -138,15 +138,12 @@ async function run(args) {
   const options = queryOptions(args); // Validate before opening any browser or making requests.
   const url = options.baseUrl + PAGE_PATH;
   const paths = resolvePaths(args, url);
-  // 与其他 browser_session 脚本一致：profile 被别的会话占用时排队等待（默认 5 分钟，BROWSER_PROFILE_LOCK_TIMEOUT_MS 可调）
-  const lockTimeoutMs = Number(process.env.BROWSER_PROFILE_LOCK_TIMEOUT_MS) || 300000;
-  const release = await acquireProfileLock(paths.profileDir, { timeoutMs: lockTimeoutMs, pollMs: 100 });
   let context;
   try {
     const chromium = createRequire(paths.playwrightPackage)('playwright').chromium;
     const network = buildBrowserEnv(url);
     network.env.LD_LIBRARY_PATH = [paths.runtimeLibDir, process.env.LD_LIBRARY_PATH].filter(Boolean).join(':');
-    context = await chromium.launchPersistentContext(paths.profileDir, {
+    context = await launchReadOnlyContext(chromium, paths.profileDir, {
       executablePath: paths.chromePath, headless: true, env: network.env,
       args: chromiumArgsFor(url, ['--no-sandbox']),
     });
@@ -184,7 +181,7 @@ async function run(args) {
       ...parseResponse(result, options.action),
     };
   } finally {
-    try { if (context) await context.close(); } finally { release(); }
+    if (context) await context.close();
   }
 }
 

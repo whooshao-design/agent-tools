@@ -9,7 +9,7 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const { createRequire } = require('module');
-const { acquireProfileLock, parseArgs, resolvePaths } = require('../../get-browser-session/scripts/browser_session');
+const { launchReadOnlyContext, parseArgs, resolvePaths } = require('../../get-browser-session/scripts/browser_session');
 const { buildBrowserEnv, chromiumArgsFor } = require('../../get-browser-session/scripts/browser_network');
 
 const GATEWAY = 'https://gateway.oa.fenqile.com';
@@ -260,20 +260,14 @@ function traceTable(table, backendRoot) {
 
 async function openContext(args) {
   const paths = resolvePaths(args, GATEWAY);
-  const release = await acquireProfileLock(paths.profileDir, { timeoutMs: 60000, pollMs: 200 });
-  try {
-    const chromium = createRequire(paths.playwrightPackage)('playwright').chromium;
-    const network = buildBrowserEnv(GATEWAY);
-    network.env.LD_LIBRARY_PATH = [paths.runtimeLibDir, process.env.LD_LIBRARY_PATH].filter(Boolean).join(':');
-    const context = await chromium.launchPersistentContext(paths.profileDir, {
-      executablePath: paths.chromePath, headless: true, env: network.env,
-      args: chromiumArgsFor(GATEWAY, ['--no-sandbox']),
-    });
-    return { context, close: async () => { try { await context.close(); } finally { release(); } } };
-  } catch (error) {
-    release();
-    throw error;
-  }
+  const chromium = createRequire(paths.playwrightPackage)('playwright').chromium;
+  const network = buildBrowserEnv(GATEWAY);
+  network.env.LD_LIBRARY_PATH = [paths.runtimeLibDir, process.env.LD_LIBRARY_PATH].filter(Boolean).join(':');
+  const context = await launchReadOnlyContext(chromium, paths.profileDir, {
+    executablePath: paths.chromePath, headless: true, env: network.env,
+    args: chromiumArgsFor(GATEWAY, ['--no-sandbox']),
+  });
+  return { context, close: () => context.close() };
 }
 
 async function queryGateway(context, filter) {

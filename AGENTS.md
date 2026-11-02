@@ -180,7 +180,7 @@ PYTHONPATH 都指向本仓库内对应 MCP 目录。新增 MCP 服务器后需�
 
 `env/credentials.env` 由 `bin/with-env <命令>` 或 `source bin/_load_env.sh` 加载，只导出非空值，空占位不会覆盖脚本默认值，
 `AGENT_TOOLS_ENV_FILE` 可改路径。`devtools_mcp` 不会自动加载它，只看进程环境与 `mcp/devtools-mcp/.env`；`third-party-mcp/lark` wrapper
-则强制要求它存在。浏览器登录态与凭据快照在 `~/.local/state/agent-tools/`（`browser-profiles/{main,healthy,webshell}`、`session-snapshots/`），不在仓库内。
+则强制要求它存在。浏览器登录态与凭据快照在 `~/.local/state/agent-tools/`（`browser-profiles/{main,healthy,webshell}`、只读查询的临时副本 `profile-clones/` 与并发名额 `profile-clones-slots/`、`session-snapshots/`），不在仓库内。
 
 ## 命名约定
 

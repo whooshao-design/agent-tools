@@ -2,7 +2,7 @@
 name: lexiao-deploy
 description: 在乐效需求/版本中集成分支、构建、部署并验收项目环境、预发布或用户明确指定的灰度应用。Use when 用户要求集成分支、构建、部署到项目环境或预发布并验收结果；默认每应用一个目标，支持显式灰度全目标；部署后核验制品与实例日志。不用于 OA/线上部署或独立日志查询。
 metadata:
-  version: 1.5.2
+  version: 1.6.0
 ---
 
 # Lexiao Deploy
@@ -118,6 +118,8 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/script
 Profile selection follows `get-browser-session`: explicit `--profile`, then `BROWSER_SESSION_PROFILE`, then `DEVTOOLS_BROWSER_PROFILE`, and finally `~/.local/state/agent-tools/browser-profiles/main`. If an isolated writable profile is required, choose it explicitly and reuse it for the whole deployment flow.
 
 Concurrency: one Chromium instance per profile directory, so every concurrent build/deploy/status task needs its own profile copy (copy a logged-in profile and delete its `SingletonLock`); sharing a profile across concurrent tasks produces silent hangs and stale reads. Keep total concurrent browser tasks at 4 or fewer: at 10 concurrent, 7 of 10 deploy clicks failed with `row-not-found`; at 5-6, progress slowed to a crawl. Each profile copy is ~700 MB, so delete the copies when the flow finishes; 17 stale copies (14 GB) were enough to trigger low-memory kills of background tasks. If login is required, open a headed browser and ask the user to complete SSO/MOA in the browser; never ask for passwords, OTPs, cookies, or private keys in chat.
+
+只读动作（`--action=list-apps`、`--action=branch-status`、`--action=status`、`--action=wait-build`、`--action=wait-build-many`）跑在 profile 副本上，不等共享 profile 的锁。`--action=build`、`--action=build-many`、`--action=deploy-one` 和项目环境 `--action=build`、`--action=deploy` 确认触发后释放共享 profile，改在副本上轮询；项目环境 `--action=deploy` 在触发前等待构建完成的阶段仍占着共享 profile。轮询页面打不开时脚本报错并提示操作已触发，此时不要重复触发。
 
 ## Detailed References
 

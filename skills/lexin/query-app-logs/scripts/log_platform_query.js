@@ -11,8 +11,8 @@ const BROWSER_SESSION_DIR = '/home/joney/projects/ai/agent-tools/skills/lexin/ge
 const {
   DEFAULT_LOGIN_PATTERN,
   DEFAULT_PORTAL_PATTERN,
-  acquireProfileLock,
   classifyRequestSession,
+  launchReadOnlyContext,
   resolvePaths,
 } = require(path.join(BROWSER_SESSION_DIR, 'browser_session.js'));
 const { buildBrowserEnv, chromiumArgsFor } = require(path.join(BROWSER_SESSION_DIR, 'browser_network.js'));
@@ -198,7 +198,7 @@ function loadPlaywright(paths) {
 async function openContext(paths, chromium) {
   const env = buildBrowserEnv(PAGE_URL, { ...process.env }).env;
   env.LD_LIBRARY_PATH = [paths.runtimeLibDir, process.env.LD_LIBRARY_PATH].filter(Boolean).join(':');
-  return chromium.launchPersistentContext(paths.profileDir, {
+  return launchReadOnlyContext(chromium, paths.profileDir, {
     executablePath: paths.chromePath,
     headless: true,
     env,
@@ -427,7 +427,6 @@ async function collectWithCachedSession(paths, query, userNameOverride, startedA
 
 async function collectWithBrowser(paths, query, userNameOverride, startedAt) {
   const chromium = loadPlaywright(paths);
-  const release = await acquireProfileLock(paths.profileDir, { timeoutMs: 300000 });
   let context;
   try {
     context = await openContext(paths, chromium);
@@ -437,7 +436,6 @@ async function collectWithBrowser(paths, query, userNameOverride, startedAt) {
     return { ...result, sessionSource: 'browser' };
   } finally {
     if (context) await context.close().catch(() => {});
-    release();
   }
 }
 

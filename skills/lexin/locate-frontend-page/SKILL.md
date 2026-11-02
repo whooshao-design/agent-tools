@@ -2,7 +2,7 @@
 name: locate-frontend-page
 description: 从后端反查线上前端页面地址：Dubbo 接口（可带 method）、OA 网关 URL 或 MySQL 表，经 OA 网关规则和 rc_fd 前端工程 product 分支里的调用代码，得到可直接在浏览器打开的线上页面地址。Use when 用户问“这个接口/表/网关 URL 在哪个页面用”“对应前端页面地址”“前端哪个目录调用了这个接口”“想在浏览器里看这个功能的页面”等只读反查；前端 URL 查后端实现用 query-oa-gateway-interface。
 metadata:
-  version: 1.0.1
+  version: 1.0.2
 ---
 
 # locate-frontend-page

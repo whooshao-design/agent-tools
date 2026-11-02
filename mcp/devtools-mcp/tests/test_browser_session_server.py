@@ -27,7 +27,7 @@ class BrowserSessionServerTest(unittest.TestCase):
             "--profile=/tmp/profile",
             "--success-text=当前环境",
             "--renew",
-        ], timeout=90)
+        ], timeout=90 + browser_session_server.PROFILE_LOCK_WAIT_SECONDS)
 
     @patch("devtools_mcp.browser_session_server._run_browser")
     def test_renew_session_requires_url(self, run_browser):

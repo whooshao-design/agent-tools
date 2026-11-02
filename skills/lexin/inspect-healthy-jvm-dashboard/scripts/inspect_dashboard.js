@@ -67,7 +67,7 @@ function pageSnapshot(url, profile) {
     `--url=${url}`,
     `--profile=${profile}`,
     '--success-text=none',
-  ], 90000);
+  ], 390000); // 90s page load + up to 5 min queue on the shared profile
   const parsed = JSON.parse(stdout);
   return {
     title: parsed.title,

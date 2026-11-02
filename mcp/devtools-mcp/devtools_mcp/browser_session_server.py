@@ -9,6 +9,7 @@ from devtools_mcp.common import (
     bounded_int,
     command_result_text,
     DEFAULT_BROWSER_SCRIPT,
+    PROFILE_LOCK_WAIT_SECONDS,
     error_text,
     internal_http_get,
     json_text,
@@ -55,7 +56,7 @@ def check_session(url: str, profile: str = "", success_text: str = "none", login
     """检查指定 URL 的浏览器登录态。默认不要求固定成功文案。"""
     if not url:
         return error_text("url is required")
-    return _run_browser(_browser_args(url, profile, success_text, login_pattern), timeout=90)
+    return _run_browser(_browser_args(url, profile, success_text, login_pattern), timeout=90 + PROFILE_LOCK_WAIT_SECONDS)
 
 
 @mcp.tool()
@@ -63,7 +64,7 @@ def browser_page_snapshot(url: str, profile: str = "", success_text: str = "none
     """读取页面标题、URL、正文摘要和按钮列表；不执行页面动作。"""
     if not url:
         return error_text("url is required")
-    return _run_browser(_browser_args(url, profile, success_text, login_pattern), timeout=90)
+    return _run_browser(_browser_args(url, profile, success_text, login_pattern), timeout=90 + PROFILE_LOCK_WAIT_SECONDS)
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False))
@@ -80,7 +81,7 @@ def browser_click_text(
         return error_text("url is required")
     if not text:
         return error_text("text is required")
-    timeout = bounded_int(timeout_seconds, 120, 10, 600)
+    timeout = bounded_int(timeout_seconds, 120, 10, 600) + PROFILE_LOCK_WAIT_SECONDS
     args = _browser_args(url, profile, success_text, login_pattern)
     args.append(f"--click-text={text}")
     return _run_browser(args, timeout=timeout)
@@ -100,7 +101,7 @@ def browser_click_button(
         return error_text("url is required")
     if not text:
         return error_text("text is required")
-    timeout = bounded_int(timeout_seconds, 120, 10, 600)
+    timeout = bounded_int(timeout_seconds, 120, 10, 600) + PROFILE_LOCK_WAIT_SECONDS
     args = _browser_args(url, profile, success_text, login_pattern)
     args.append(f"--click-button={text}")
     return _run_browser(args, timeout=timeout)
@@ -114,7 +115,7 @@ def ensure_session(url: str, profile: str = "", success_text: str = "none", time
     timeout_ms = bounded_int(timeout_seconds, 300, 30, 1800) * 1000
     args = _browser_args(url, profile, success_text)
     args.extend(["--ensure", f"--timeout={timeout_ms}"])
-    return _run_browser(args, timeout=bounded_int(timeout_seconds, 300, 30, 1800) + 30)
+    return _run_browser(args, timeout=bounded_int(timeout_seconds, 300, 30, 1800) + 30 + PROFILE_LOCK_WAIT_SECONDS)
 
 
 @mcp.tool()
@@ -124,7 +125,7 @@ def renew_session(url: str, profile: str = "", success_text: str = "none") -> st
         return error_text("url is required")
     args = _browser_args(url, profile, success_text)
     args.append("--renew")
-    return _run_browser(args, timeout=90)
+    return _run_browser(args, timeout=90 + PROFILE_LOCK_WAIT_SECONDS)
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False))
@@ -140,7 +141,7 @@ def export_session(url: str, export_path: str, profile: str = "", success_text: 
         return error_text("export_path is required")
     args = _browser_args(url, profile, success_text)
     args.append(f"--export-session={export_path}")
-    return _run_browser(args, timeout=120)
+    return _run_browser(args, timeout=120 + PROFILE_LOCK_WAIT_SECONDS)
 
 
 @mcp.tool()
@@ -153,12 +154,12 @@ def get_cookies(url: str, domain: str = "", profile: str = "", show_secrets: boo
     args.extend(["--cookies", f"--domain={cookie_domain}"])
     if show_secrets:
         args.append("--show-secrets")
-    return _run_browser(args, timeout=120)
+    return _run_browser(args, timeout=120 + PROFILE_LOCK_WAIT_SECONDS)
 
 
 @mcp.tool()
 def fetch_with_session(url: str, domain: str = "", profile: str = "", max_chars: int = 8000) -> str:
-    """在 BrowserContext 中对允许的内网域名发起只读 GET，持久化续期 Cookie，不主动输出请求 Cookie。"""
+    """在 BrowserContext 中对允许的内网域名发起只读 GET，不主动输出请求 Cookie；跑在 profile 副本上，响应 Set-Cookie 不写回 profile。"""
     if not url:
         return error_text("url is required")
     return json_text(internal_http_get(

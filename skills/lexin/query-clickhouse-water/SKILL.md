@@ -2,7 +2,7 @@
 name: query-clickhouse-water
 description: 只读查询 ClickHouse 流水；DecisionWaterHawkCK 默认走 bastion_dba、通道不可用时自动降级乐信云 HTTP，其他 CK 实例默认走乐信云 HTTP，支持用户显式指定通道。Use when 用户要求查询预发布/灰度/线上/stable/测试 ClickHouse 流水、决策/规则/trace cost 流水，验证流水口径或优化查询 SQL；输出执行 SQL 和查询结果。
 metadata:
-  version: 1.4.1
+  version: 1.4.2
 ---
 
 # query-clickhouse-water

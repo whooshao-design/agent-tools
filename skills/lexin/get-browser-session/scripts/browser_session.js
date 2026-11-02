@@ -33,6 +33,25 @@ const DEFAULT_LOGIN_PATTERN = [
 const DEFAULT_PORTAL_PATTERN = '乐空间传送门|ATrust';
 const FORBIDDEN_PATTERN = '403|Forbidden|无权限|拒绝访问';
 const PROFILE_LOCK_STALE_MS = 60 * 60 * 1000;
+const PROFILE_LOCK_WAIT_MS = 300000;
+// The login state a read needs. Everything else in a profile (1.1G on main, mostly caches) is skipped.
+const PROFILE_CLONE_PATHS = [
+  'Local State',
+  'Default/Cookies',
+  'Default/Cookies-journal',
+  'Default/Network/Cookies',
+  'Default/Network/Cookies-journal',
+  'Default/Local Storage',
+];
+const PROFILE_CLONE_ATTEMPTS = 3;
+const PROFILE_CLONE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+// Copies remove the queue that used to throttle Chromium, so cap how many run at once on this machine.
+const PROFILE_CLONE_SLOTS = 4;
+// Short, because a caller that times out here then queues on the shared profile for up to 5 minutes.
+const PROFILE_CLONE_SLOT_WAIT_MS = 30000;
+// These SPAs call /auth/refresh from the page. If the server rotates the refresh token, a clone
+// would spend it and leave the shared profile holding a dead one, so they stay on the shared profile.
+const TOKEN_REFRESH_HOSTS = new Set(['healthy.lexincloud.com', 'stable-eye.oa.fenqile.com']);
 const AUTH_COOKIE_NAMES = new Set(['oa_session', 'oa_token_id', 'mid', 'sessionId']);
 const DEFAULT_AUTH_EXPIRY_THRESHOLD_SECONDS = 24 * 60 * 60;
 const DEFAULT_WSLG_LOG_PATH = '/mnt/wslg/weston.log';
@@ -528,7 +547,7 @@ async function launchLockedContext(chromium, profileDir, launchOptions, lockOpti
   const release = await acquireProfileLock(profileDir, {
     timeoutMs: boundedNumber(
       lockOptions.timeoutMs ?? (process.env.BROWSER_PROFILE_LOCK_TIMEOUT_MS || undefined),
-      300000, 0, 1800000,
+      PROFILE_LOCK_WAIT_MS, 0, 1800000,
     ),
     pollMs: lockOptions.pollMs ?? 250,
   });
@@ -548,6 +567,230 @@ async function launchLockedContext(chromium, profileDir, launchOptions, lockOpti
     }
   };
   return context;
+}
+
+// Before closing a browser after a click, the requests it started must finish or the action can be
+// aborted. waitForLoadState('networkidle') cannot tell: it stays satisfied once the navigation
+// reached it. Waiting for silence does not work either, because pages such as Lexiao poll every
+// few seconds. So: give the click time to start its requests, then wait for those to finish.
+function trackRequests(page) {
+  const inflight = new Set();
+  page.on('request', (request) => inflight.add(request));
+  const finished = (request) => inflight.delete(request);
+  page.on('requestfinished', finished);
+  page.on('requestfailed', finished);
+  return async ({ graceMs = 2000, timeoutMs = 20000, pollMs = 200 } = {}) => {
+    await page.waitForTimeout(graceMs);
+    const pending = [...inflight];
+    const deadline = Date.now() + timeoutMs;
+    while (pending.some((request) => inflight.has(request))) {
+      if (Date.now() >= deadline) return false;
+      await page.waitForTimeout(pollMs);
+    }
+    return true;
+  };
+}
+
+function profileCloneRoot() {
+  return path.join(os.homedir(), '.local/state/agent-tools/profile-clones');
+}
+
+// Removes clones left by processes that died before closing their context (SIGKILL, MCP timeout).
+function pruneProfileClones(root, nowMs = Date.now()) {
+  let names;
+  try {
+    names = fs.readdirSync(root);
+  } catch (error) {
+    if (error.code === 'ENOENT') return;
+    throw error;
+  }
+  for (const name of names) {
+    const dir = path.join(root, name);
+    const pid = Number((/-(\d+)-[^-]+$/.exec(name) || [])[1]);
+    let ageMs;
+    try {
+      ageMs = nowMs - fs.statSync(dir).mtimeMs;
+    } catch (_) {
+      continue;
+    }
+    if (pid && isProcessAlive(pid) && ageMs < PROFILE_CLONE_MAX_AGE_MS) continue;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+function cookieDbIsIntact(file) {
+  let DatabaseSync;
+  const emitWarning = process.emitWarning;
+  process.emitWarning = () => {}; // node:sqlite prints an ExperimentalWarning on load.
+  try {
+    ({ DatabaseSync } = require('node:sqlite'));
+  } catch (_) {
+    return true;
+  } finally {
+    process.emitWarning = emitWarning;
+  }
+  let db;
+  try {
+    db = new DatabaseSync(file);
+    return db.prepare('PRAGMA integrity_check').get().integrity_check === 'ok';
+  } catch (_) {
+    return false;
+  } finally {
+    if (db) db.close();
+  }
+}
+
+function cookieDbPath(profileDir) {
+  return ['Default/Network/Cookies', 'Default/Cookies']
+    .map((item) => path.join(profileDir, item))
+    .find((item) => fs.existsSync(item));
+}
+
+function fileSignature(file) {
+  const stat = fs.statSync(file);
+  return `${stat.mtimeMs}:${stat.size}`;
+}
+
+// Chromium allows one process per user-data-dir, so each reader gets its own short-lived copy.
+// Copying takes no lock: the shared profile may be in use, in which case a copy that raced a
+// write is detected (Cookies changed during the copy, or fails integrity_check) and retried.
+function createProfileClone(profileDir, options = {}) {
+  const source = fs.existsSync(profileDir) ? fs.realpathSync(profileDir) : profileDir;
+  const cookies = cookieDbPath(source);
+  if (!cookies) throw new Error(`no Cookies database in profile: ${source}`);
+  const root = options.root || profileCloneRoot();
+  fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+  pruneProfileClones(root);
+  const dir = fs.mkdtempSync(path.join(root, `${path.basename(source)}-${process.pid}-`));
+  const remove = () => {
+    process.off('exit', remove);
+    try {
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
+    } catch (error) {
+      // Runs in finally blocks: must not replace a result. The next clone prunes what is left.
+      console.error(`could not remove profile copy ${dir}: ${error.message}`);
+    }
+  };
+  process.on('exit', remove);
+  const copyTo = options.copy || ((from, to) => fs.cpSync(from, to, { recursive: true }));
+  let lastError = null;
+  for (let attempt = 0; attempt < PROFILE_CLONE_ATTEMPTS; attempt += 1) {
+    try {
+      const before = fileSignature(cookies);
+      for (const item of PROFILE_CLONE_PATHS) {
+        const from = path.join(source, item);
+        if (fs.existsSync(from)) copyTo(from, path.join(dir, item));
+      }
+      if (fileSignature(cookies) === before
+        && cookieDbIsIntact(path.join(dir, path.relative(source, cookies)))) {
+        return { dir, remove };
+      }
+      lastError = new Error('Cookies changed during copy or failed integrity_check');
+    } catch (error) {
+      lastError = error; // LevelDB files can vanish mid-copy during compaction.
+    }
+    for (const entry of fs.readdirSync(dir)) fs.rmSync(path.join(dir, entry), { recursive: true, force: true });
+  }
+  remove();
+  throw lastError;
+}
+
+async function acquireCloneSlot(root, options = {}) {
+  const slots = options.slots || PROFILE_CLONE_SLOTS;
+  const dir = `${root}-slots`;
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const deadline = Date.now() + (options.slotWaitMs ?? PROFILE_CLONE_SLOT_WAIT_MS);
+  while (true) {
+    for (let index = 0; index < slots; index += 1) {
+      try {
+        return await acquireProfileLock(path.join(dir, `slot-${index}`), { timeoutMs: 0 });
+      } catch (error) {
+        if (!/profile is busy/.test(error.message)) throw error;
+      }
+    }
+    if (Date.now() >= deadline) throw new Error(`all ${slots} read-only browser slots are busy`);
+    await new Promise((resolve) => setTimeout(resolve, options.slotPollMs || 500));
+  }
+}
+
+// A copy plus one of the slots that cap concurrent read-only browsers; remove() frees both.
+async function openProfileClone(profileDir, options = {}) {
+  const root = options.root || profileCloneRoot();
+  const releaseSlot = await acquireCloneSlot(root, options);
+  let clone;
+  try {
+    clone = createProfileClone(profileDir, { ...options, root });
+  } catch (error) {
+    releaseSlot();
+    throw error;
+  }
+  return {
+    dir: clone.dir,
+    remove: () => {
+      clone.remove();
+      try {
+        releaseSlot();
+      } catch (error) {
+        console.error(`could not release browser slot: ${error.message}`);
+      }
+    },
+  };
+}
+
+// Moves polling off the shared profile once a write action is confirmed, so other sessions need
+// not queue behind a long job. Reads and replaces session.context; returns the page to poll on.
+async function moveToReadOnlyContext(session, page, { requestsSettled, openReadOnly, prepare, retryHint }) {
+  if (!await requestsSettled()) {
+    console.error('page requests did not finish within 20s; polling stays on the shared profile');
+    return page;
+  }
+  try {
+    await session.context.close().catch(() => {});
+    session.context = await openReadOnly();
+    const next = session.context.pages()[0] || await session.context.newPage();
+    await prepare(next);
+    return next;
+  } catch (error) {
+    throw new Error(`操作已触发，但无法打开轮询页面，不要重复触发，改用 ${retryHint} 查结果：${error.message}`);
+  }
+}
+
+// For callers that only read: runs on a private copy of the login state, so it neither waits for
+// nor blocks the shared profile. Set-Cookie received here is discarded with the copy. Falls back
+// to queueing on the shared profile when the copy cannot be made or launched.
+async function launchReadOnlyContext(chromium, profileDir, launchOptions, options = {}) {
+  let clone;
+  let context;
+  try {
+    clone = await openProfileClone(profileDir, options);
+    context = await chromium.launchPersistentContext(clone.dir, launchOptions);
+  } catch (error) {
+    if (clone) clone.remove();
+    console.error(`read-only profile copy unavailable, queueing on ${profileDir}: ${error.message}`);
+    return launchLockedContext(chromium, profileDir, launchOptions);
+  }
+  const close = context.close.bind(context);
+  context.close = async (...args) => {
+    try {
+      return await close(...args);
+    } finally {
+      clone.remove();
+    }
+  };
+  return context;
+}
+
+// Whether a browser_session.js invocation can run on a copy: it must not need to persist anything
+// (login, renewal, export, page clicks) and must not show a window to the user.
+function canUseProfileClone({ mode, args = {}, url, headless, requestMethod }) {
+  if (!headless || args['click-text'] || args['click-button'] || isWebShellUrl(url)) return false;
+  try {
+    if (TOKEN_REFRESH_HOSTS.has(new URL(url).hostname)) return false;
+  } catch (_) {
+    return false;
+  }
+  if (mode === 'request') return requestMethod === 'GET';
+  return ['status', 'cookies', 'storage'].includes(mode);
 }
 
 async function collectSessionHealth(context, targetUrl, expiryThresholdSeconds = 900) {
@@ -606,7 +849,7 @@ async function openContext(paths, chromium, headless, targetUrl) {
   const network = buildBrowserEnv(targetUrl, browserBaseEnv);
   const env = inferWslgEnv(network.env);
   env.LD_LIBRARY_PATH = ldLibraryPath;
-  const context = await chromium.launchPersistentContext(paths.profileDir, {
+  const context = await chromium.launchPersistentContext(paths.launchDir || paths.profileDir, {
     executablePath: paths.chromePath,
     headless,
     env,
@@ -976,12 +1219,29 @@ async function main() {
     return;
   }
 
-  const releaseProfileLock = await acquireProfileLock(paths.profileDir, {
-    timeoutMs: boundedNumber(args['lock-timeout'], 30000, 0, 1800000),
+  try {
+    // Bounds how long credentials of a killed process stay on disk: the renewal timer runs this daily.
+    pruneProfileClones(profileCloneRoot());
+  } catch (error) {
+    console.error(`could not prune profile copies: ${error.message}`);
+  }
+
+  const request = mode === 'request' ? requestConfigFromEnvironment(expiryThresholdSeconds) : null;
+  let clone = null;
+  if (canUseProfileClone({ mode, args, url, headless, requestMethod: request && request.method })) {
+    try {
+      clone = await openProfileClone(paths.profileDir);
+    } catch (error) {
+      console.error(`read-only profile copy unavailable, queueing on ${paths.profileDir}: ${error.message}`);
+    }
+  }
+  const releaseProfileLock = clone ? clone.remove : await acquireProfileLock(paths.profileDir, {
+    timeoutMs: boundedNumber(args['lock-timeout'] ?? process.env.BROWSER_PROFILE_LOCK_TIMEOUT_MS, PROFILE_LOCK_WAIT_MS, 0, 1800000),
     pollMs: boundedNumber(args['lock-poll'], 100, 5, 5000),
   });
   try {
     const chromium = loadPlaywright(paths);
+    const runPaths = clone ? { ...paths, launchDir: clone.dir } : paths;
 
     const baseFlow = {
       args,
@@ -1000,12 +1260,11 @@ async function main() {
     };
     let result;
     if (mode === 'request') {
-      const request = requestConfigFromEnvironment(expiryThresholdSeconds);
-      result = await runRequestFlow(paths, chromium, { ...baseFlow, request });
+      result = await runRequestFlow(runPaths, chromium, { ...baseFlow, request });
     } else if (mode === 'ensure') {
       result = await runEnsureFlow(paths, chromium, baseFlow);
     } else {
-      const pageResult = await runPageFlow(paths, chromium, {
+      const pageResult = await runPageFlow(runPaths, chromium, {
         ...baseFlow,
         headless,
         waitForLogin: false,
@@ -1013,6 +1272,7 @@ async function main() {
       });
       result = mode === 'renew' ? summarizeRenewalResult(pageResult) : pageResult;
     }
+    result.profileMode = clone ? 'read-only-copy' : 'shared';
     console.log(JSON.stringify(result, null, 2));
   } finally {
     releaseProfileLock();
@@ -1030,21 +1290,28 @@ module.exports = {
   DEFAULT_LOGIN_PATTERN,
   DEFAULT_PORTAL_PATTERN,
   acquireProfileLock,
+  canUseProfileClone,
   classifyPageStatus,
   classifyRequestSession,
   collectStatus,
   collectSessionHealth,
   cookieMatchesDomain,
+  createProfileClone,
   diffAuthCookies,
   inspectWslgHealth,
   launchLockedContext,
+  launchReadOnlyContext,
   main,
+  moveToReadOnlyContext,
+  openProfileClone,
   parseArgs,
+  pruneProfileClones,
   resolvePaths,
   runPageFlow,
   runEnsureFlow,
   runRequestFlow,
   summarizeAuthCookies,
   summarizeRenewalResult,
+  trackRequests,
   waitForStableSession,
 };

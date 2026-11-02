@@ -8,7 +8,7 @@ const {
   chromiumArgsFor,
   validateWebShellUrl,
 } = require('../../get-browser-session/scripts/browser_network');
-const { launchLockedContext } = require('../../get-browser-session/scripts/browser_session');
+const { launchLockedContext, launchReadOnlyContext } = require('../../get-browser-session/scripts/browser_session');
 const sessionCache = require('../../get-browser-session/scripts/session_cache');
 
 const TOOL_DIR = path.join(os.homedir(), 'tools/lexiao-browser');
@@ -213,7 +213,8 @@ function inferAppNameFromCwd(cwd) {
 async function openContext(profile, args) {
   const ldLibraryPath = [RUNTIME_LIB_DIR, process.env.LD_LIBRARY_PATH].filter(Boolean).join(':');
   const network = buildBrowserEnv(LEXIAO_URL, process.env);
-  const context = await launchLockedContext(chromium, profile, {
+  const launch = args.headed ? launchLockedContext : launchReadOnlyContext;
+  const context = await launch(chromium, profile, {
     executablePath: args.chrome || CHROME_PATH,
     headless: !args.headed,
     env: { ...network.env, LD_LIBRARY_PATH: ldLibraryPath },

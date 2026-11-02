@@ -97,7 +97,7 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 {exec_lines}
-TimeoutStartSec=5min
+TimeoutStartSec=25min
 """
     # Persistent=true matters here: WSL is often shut down, and without it a missed
     # 11:00 trigger would simply be skipped until the next day.

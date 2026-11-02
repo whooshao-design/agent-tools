@@ -2,7 +2,7 @@
 name: query-hive-data
 description: 通过乐信大数据门户「即席分析」（data.oa.fenqile.com）以 Presto/Spark 引擎只读查询 Hive 数仓表并整理结果。Use when 用户要求查 Hive 表、数仓表、dp_ods/dp_snap/rt_ods/lx_dwd/rt_mart 等库的数据、米霍克离线流水或规则元数据、SHOW SCHEMAS/SHOW TABLES/DESCRIBE 表结构，或让即席分析跑一条 SQL；最终必须同时输出执行 SQL 和查询结果。
 metadata:
-  version: 1.0.1
+  version: 1.0.2
 ---
 
 # query-hive-data
@@ -33,8 +33,8 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/script
   --success-text=none
 ```
 
-不要在聊天中索取密码、OTP、Cookie 或 token。同一 profile 同时只能被一个 Chromium 使用；脚本会等待跨进程锁最多 60 秒，
-仍提示 `profile is busy` 或 `ProcessSingleton` 时，先结束占用该 profile 的浏览器进程，不要循环重试。
+不要在聊天中索取密码、OTP、Cookie 或 token。查询跑在 profile 副本上（`launchReadOnlyContext`），可以并发；只有副本不可用时才退回共享 profile 排队（最多 5 分钟），
+此时仍提示 `profile is busy` 或 `ProcessSingleton`，先结束占用该 profile 的浏览器进程，不要循环重试。
 
 ## 核心约束
 

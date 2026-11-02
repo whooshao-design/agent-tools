@@ -3,7 +3,7 @@ const os = require('os');
 const path = require('path');
 const fs = require('fs');
 const { createRequire } = require('module');
-const { launchLockedContext } = require('../../get-browser-session/scripts/browser_session');
+const { launchLockedContext, launchReadOnlyContext, moveToReadOnlyContext, trackRequests } = require('../../get-browser-session/scripts/browser_session');
 
 const TOOL_DIR = path.join(os.homedir(), 'tools/lexiao-browser');
 const DEFAULT_PROFILE = process.env.BROWSER_SESSION_PROFILE
@@ -60,11 +60,12 @@ function requireArg(args, name) {
   return args[name];
 }
 
-async function openContext(profile) {
+async function openContext(profile, readOnly = false) {
   // 延迟加载 playwright，单元测试 require 本文件时不依赖浏览器工具目录。
   const { chromium } = createRequire(path.join(TOOL_DIR, 'package.json'))('playwright');
   const ldLibraryPath = [RUNTIME_LIB_DIR, process.env.LD_LIBRARY_PATH].filter(Boolean).join(':');
-  return launchLockedContext(chromium, profileDir(profile), {
+  const launch = readOnly ? launchReadOnlyContext : launchLockedContext;
+  return launch(chromium, profileDir(profile), {
     executablePath: CHROME_PATH,
     headless: true,
     env: { ...process.env, LD_LIBRARY_PATH: ldLibraryPath },
@@ -707,20 +708,22 @@ async function waitReadyForDeploy(page, url, appName, responses, timeoutMs, clus
   return { outcome: 'timeout', row: await readRow(page, appName), snapshots: snapshots.slice(-12) };
 }
 
-async function deployLegacy(page, url, appName, ready, args) {
+async function deployLegacy(page, url, appName, ready, args, reopenForWait) {
   const deployClick = await clickRowButton(page, appName, '部署');
   const confirm = deployClick.clicked ? await confirmDeploy(page) : null;
+  if (deployClick.clicked) page = await reopenForWait();
   const done = deployClick.clicked ? await waitDeployDone(page, url, appName, Number(args['deploy-timeout'] || 900000)) : null;
   return { ok: Boolean(deployClick.clicked && done && done.outcome === 'success'), report: { ready, deployClick, confirm, done } };
 }
 
-async function deployFromDialog(page, appName, ready, args) {
+async function deployFromDialog(page, appName, ready, args, reopenForWait) {
   const orderId = ready.order?.order_id;
   if (!orderId) return { ok: false, report: { ready, publishClick: null, reason: 'order-id-missing' } };
   const publishClick = await clickClusterPublish(page, appName, ready.target);
   if (!publishClick.clicked) return { ok: false, report: { ready, publishClick } };
   const confirm = await confirmPublishIfAsked(page);
   if (!confirm.confirmed) return { ok: false, report: { ready, publishClick, confirm } };
+  page = await reopenForWait();
   const done = await waitPublishDone(page, orderId, ready.order.demand_id, ready.target,
     Number(args['deploy-timeout'] || 900000), Number(args['poll-ms'] || 10000));
   return { ok: done.outcome === 'success', report: { ready, publishClick, confirm, done } };
@@ -808,7 +811,7 @@ async function confirmBuild(page, waitMs = 10000) {
   return { confirmed: false, reason: 'no-confirm-dialog' };
 }
 
-async function buildApp(page, url, appName, args) {
+async function buildApp(page, url, appName, args, reopenForWait) {
   const start = await loadPipeline(page, url, appName);
   if (!start.row) return { ok: false, report: { outcome: 'row-not-found' } };
   if (!start.pipeline) return { ok: false, report: { outcome: 'pipeline-not-found', branch: start.branch, row: rowSummary(start.row) } };
@@ -817,6 +820,7 @@ async function buildApp(page, url, appName, args) {
   if (!click.clicked) return { ok: false, report: { outcome: 'click-failed', click, before: start.pipeline } };
   const confirm = await confirmBuild(page);
   if (!confirm.confirmed) return { ok: false, report: { outcome: 'not-confirmed', click, confirm, before: start.pipeline } };
+  page = await reopenForWait();
   const timeoutMs = Number(args['build-timeout'] || 1200000);
   const pollMs = Number(args['poll-ms'] || 30000);
   const startWaitMs = Number(args['start-timeout'] || 180000);
@@ -842,9 +846,16 @@ async function main() {
   const url = requireArg(args, 'url');
   const appName = requireArg(args, 'app');
   if (!['status', 'deploy', 'build'].includes(action)) throw new Error(`unknown action: ${action}`);
-  const context = await openContext(args.profile || DEFAULT_PROFILE);
+  const session = { context: await openContext(args.profile || DEFAULT_PROFILE, action === 'status') };
   try {
-    const page = context.pages()[0] || await context.newPage();
+    const page = session.context.pages()[0] || await session.context.newPage();
+    const requestsSettled = trackRequests(page);
+    const reopenForWait = () => moveToReadOnlyContext(session, page, {
+      requestsSettled,
+      openReadOnly: () => openContext(args.profile || DEFAULT_PROFILE, true),
+      prepare: (next) => gotoPage(next, url),
+      retryHint: '--action=status',
+    });
     const responses = collectResponses(page);
     await gotoPage(page, url);
     if (action === 'status') {
@@ -855,7 +866,7 @@ async function main() {
     }
 
     if (action === 'build') {
-      const result = await buildApp(page, url, appName, args);
+      const result = await buildApp(page, url, appName, args, reopenForWait);
       console.log(JSON.stringify({ action, ...result.report }, null, 2));
       if (!result.ok) process.exitCode = 1;
       return;
@@ -869,12 +880,12 @@ async function main() {
       return;
     }
     const result = ready.mode === 'row-deploy'
-      ? await deployLegacy(page, url, appName, ready, args)
-      : await deployFromDialog(page, appName, ready, args);
+      ? await deployLegacy(page, url, appName, ready, args, reopenForWait)
+      : await deployFromDialog(page, appName, ready, args, reopenForWait);
     console.log(JSON.stringify({ action, mode: ready.mode, ...result.report }, null, 2));
     if (!result.ok) process.exitCode = 1;
   } finally {
-    await context.close().catch(() => {});
+    await session.context.close().catch(() => {});
   }
 }
 
