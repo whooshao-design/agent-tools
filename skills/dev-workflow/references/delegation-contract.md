@@ -77,7 +77,7 @@ spawn/stop 后，编排器另外生成可信运行记录，至少包含：派发
 `persist` 据此向本机 `~/.local/state/agent-tools/reviewer-ledger.jsonl` 追加每个 reviewer 一行（模型、阶段、轮次、复核模式、执行是否有效、无效原因、按分类与严重度的计数、往轮带入数、待抽查条目、漏检引用、耗时与 token）；该文件含需求名，不进仓库。已落盘的轮次可用 `review_round.py ledger` 补记。
 
 - 复审信封里沿用往轮 ID 的 finding（无论 Open 还是 Resolved）只计入"往轮带入"，不重复计分；分类计数只覆盖本轮首次提出的 finding。
-- reviewer 的身份、只读、工具面和结果结构全部通过，仅因前后快照不一致而作废的轮次，无效原因记为 `environment`：它由其他写入方造成，照常计入该 reviewer 的实战，不记"无效"；其余无效轮次记为 `reviewer`。环境作废仍不能形成审批事实，按 §2 重新冻结。
+- reviewer 的身份、只读、工具面和结果结构全部通过，仅因前后快照不一致而作废的轮次，无效原因记为 `environment`：它由其他写入方造成，照常计入该 reviewer 的实战，不记"无效"；reviewer 自身检查全部通过、按 §4 返回 `status=blocked`（`conclusion=null` 且 `unresolved` 写明阻塞原因）的轮次记为 `blocked`，同样照常计入、不记"无效"，阻塞原因由编排器修正材料或环境后重新派发；其余无效轮次记为 `reviewer`。双评审时每个 reviewer 只按自己的身份、只读、工具面、结果结构判定，另一方失败不连带记为无效（整轮审批仍要求两者都有效）；规则调整后用 `review_round.py ledger --revalidate` 重算已落盘轮次的这两个字段。环境作废仍不能形成审批事实，按 §2 重新冻结。
 - `persist` 与 `ledger` 收口时在终端打印本轮评分卡（reviewer 与模型、选择方式、执行状态、本轮新提出的分类计数、往轮带入数、待抽查条目、该后端累计实战）。评分卡同时写入 `rounds/round-<N>/scorecard.md`；编排器每轮向用户汇报时原样粘贴该文件内容，不改写、不删行，不等用户追问。编排器往往也是产出者，判定 reviewer 意见为噪音存在利益冲突，评分卡中的 `噪音` 与 `契约误读` 条目就是供用户抽查的清单。
 
 ## 4. `delegation-result-v1`

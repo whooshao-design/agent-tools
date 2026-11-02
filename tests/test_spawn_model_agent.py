@@ -156,6 +156,8 @@ class SpawnModelAgentTest(unittest.TestCase):
         self.assertEqual(sma.format_stats(st[("claude-qwen", "q2")]), "n=1 成立 1/1 噪音 0 漏检 0")  # a swapped model starts fresh
         self.assertEqual(sma.format_stats(st[("claude-subagent", "s")]), "n=1 成立 1/1 噪音 0 漏检 0")
         self.assertEqual(sma.format_stats(None), "—")
+        st = {'n': 2, 'invalid': 0, 'env_void': 1, 'blocked': 1, 'findings': 0, 'valid': 0, 'noise': 0, 'escaped': 0}
+        self.assertEqual(sma.format_stats(st), "n=2 成立 0/0 噪音 0 漏检 0（含环境作废 1 轮、阻塞 1 轮）")
 
     def test_list_marks_score_stale_when_profile_model_changed(self):
         import io, os, tempfile, contextlib

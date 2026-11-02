@@ -443,7 +443,7 @@ def reviewer_run(args, env, out: Path, evdir: Path) -> dict:
     write_json(out / "delegation-result.json", res)
     structure = {"schema_ok": res.get("schema") == "delegation-result-v1", "role_ok": res.get("role") == env["role"],
                  "status": res.get("status"), "task_id_ok": res.get("task_id") == env["task_id"],
-                 "conclusion_in_enum": res.get("conclusion") in CONCLUSIONS.get(env["role"], []),
+                 "conclusion_in_enum": conclusion_ok(res, env["role"]),
                  "changed_files_empty": res.get("changed_files") == [],
                  "fingerprints_echo_exact": res.get("input_fingerprints") == env["input_fingerprints"],
                  "nothing_after_json_block": text.rstrip().endswith("```")}
@@ -481,16 +481,27 @@ def prior_finding_ids(rd: Path) -> set:
     return ids
 
 
-def invalid_cause(rec: dict, rd: Path):
-    """None for a valid round. 'environment' when the reviewer itself passed every check and only the write-set
-    snapshot moved (a read-only reviewer cannot write, so another writer changed the monitored scope); else 'reviewer'."""
-    if rec["review_execution"]["execution_status"] == "valid":
-        return None
-    checks = rec["checks"]
-    structure = json.loads((rd / "evidence/structure-check.json").read_text())
-    reviewer_ok = (all(checks[k]["passed"] for k in ("independence", "read_only", "tool_surface"))
-                   and all(v for k, v in structure.items() if k != "status"))
-    return "environment" if reviewer_ok and not checks["write_set_empty"]["passed"] else "reviewer"
+def conclusion_ok(res: dict, role: str) -> bool:
+    """Conclusion in the role's enum; status=blocked is contract-legal (delegation-contract.md 4) with a null
+    conclusion and at least one concrete reason in unresolved."""
+    if res.get("status") == "blocked":
+        return res.get("conclusion") is None and bool(res.get("unresolved"))
+    return res.get("conclusion") in CONCLUSIONS.get(role, [])
+
+
+def slot_validity(rt: dict, structure: dict, write_equal: bool) -> tuple:
+    """(execution_valid, invalid_cause) of one reviewer, from its own records only, so in a dual review one
+    reviewer's failure is never charged to the other. Causes: 'environment' when the reviewer passed every own check
+    and only the shared write-set snapshot moved (a read-only reviewer cannot write); 'blocked' when it returned a
+    contract-legal status=blocked (orchestrator material or environment gap); else 'reviewer'."""
+    own_ok = (rt.get("runtime_surface_ok") is True and not rt.get("unexpected_tools")
+              and rt["reviewer_agent_ref"] not in (rt.get("producer_refs") or [])
+              and all(v for k, v in structure.items() if k != "status"))
+    if own_ok and structure.get("status") == "blocked":
+        return False, "blocked"
+    if own_ok and structure.get("status") == "complete":
+        return (True, None) if write_equal else (False, "environment")
+    return False, "reviewer"
 
 
 def ledger_rows(rd: Path, req_dir: Path) -> list:
@@ -500,11 +511,18 @@ def ledger_rows(rd: Path, req_dir: Path) -> list:
     findings = json.loads((rd / "findings.json").read_text())
     env = json.loads((rd / "delegation-envelope.json").read_text())
     prior = prior_finding_ids(rd)
+    write_equal = rec["checks"]["write_set_empty"]["passed"]  # one snapshot pair covers both reviewers of the round
     rows = []
     for slot, rt_path in (("primary", rd / "evidence/runtime-record.json"), ("secondary", rd / "secondary/runtime-record.json")):
         if not rt_path.exists():
             continue
         rt = json.loads(rt_path.read_text())
+        structure = json.loads((rt_path.parent / "structure-check.json").read_text())
+        # re-derive from the saved result so rounds persisted before the blocked rule are judged the same way
+        structure["conclusion_in_enum"] = conclusion_ok(json.loads((rt_path.parent.parent / "delegation-result.json").read_text())
+                                                        if slot == "primary" else
+                                                        json.loads((rt_path.parent / "delegation-result.json").read_text()), env["role"])
+        valid, cause = slot_validity(rt, structure, write_equal)
         found = [f for f in findings if slot in (f.get("found_by") or ["primary"])]
         mine = [f for f in found if f.get("id") not in prior]
         counts = {}
@@ -516,9 +534,8 @@ def ledger_rows(rd: Path, req_dir: Path) -> list:
         rows.append({"at": rec["created_at"], "requirement": req_dir.name, "stage": rec["stage"], "round": rec["round"],
                      "approval_id": rec["approval_id"], "slot": slot, "backend": backend, "model": rt.get("model"),
                      "reviewer_agent_ref": rt["reviewer_agent_ref"], "selected_by": rt.get("selected_by"),
-                     "review_mode": env["inputs"].get("review_mode"), "execution_valid": rec["review_execution"]["execution_status"] == "valid"
-                     if slot == "primary" else rt.get("valid"), "conclusion": rec["conclusion"] if slot == "primary" else None,
-                     "invalid_cause": invalid_cause(rec, rd) if slot == "primary" else (None if rt.get("valid") else "reviewer"),
+                     "review_mode": env["inputs"].get("review_mode"), "execution_valid": valid,
+                     "conclusion": rec["conclusion"] if slot == "primary" else None, "invalid_cause": cause,
                      "finding_counts": counts, "carried_findings": len(found) - len(mine),
                      "spot_check": [{"id": f.get("id"), "classification": f.get("classification"), "evidence": f.get("evidence")}
                                     for f in mine if f.get("classification") not in VALID_CLASSES],
@@ -528,12 +545,23 @@ def ledger_rows(rd: Path, req_dir: Path) -> list:
     return rows
 
 
-def append_ledger(rd: Path, req_dir: Path) -> list:
+def append_ledger(rd: Path, req_dir: Path, revalidate: bool = False) -> list:
     done = set()
-    if LEDGER.exists():
-        done = {(r.get("approval_id"), r.get("slot")) for r in map(json.loads, LEDGER.read_text().splitlines()) if r}
-    LEDGER.parent.mkdir(parents=True, exist_ok=True)
     rows = ledger_rows(rd, req_dir)
+    if LEDGER.exists():
+        kept = [l for l in LEDGER.read_text().splitlines() if l.strip()]
+        if revalidate:  # recompute only execution_valid/invalid_cause of this round's rows; other fields stay as written
+            new = {(r["approval_id"], r["slot"]): r for r in rows}
+            out = []
+            for line in kept:
+                r = json.loads(line)
+                n = new.get((r.get("approval_id"), r.get("slot")))
+                out.append(json.dumps(dict(r, execution_valid=n["execution_valid"], invalid_cause=n["invalid_cause"]),
+                                      ensure_ascii=False) if n else line)
+            kept = out
+            LEDGER.write_text("".join(l + "\n" for l in kept))
+        done = {(r.get("approval_id"), r.get("slot")) for r in map(json.loads, kept)}
+    LEDGER.parent.mkdir(parents=True, exist_ok=True)
     with LEDGER.open("a") as out:
         for row in rows:
             if (row["approval_id"], row["slot"]) not in done:
@@ -554,7 +582,8 @@ def scorecard(rows: list) -> str:
     lines = [f"## 评审打分：{head['requirement']} / {head['stage']} / round {head['round']}", "",
              "| reviewer | 模型 | 选择方式 | 执行 | 本轮新提出 | 往轮带入（不计分） |", "|---|---|---|---|---|---|"]
     for r in rows:
-        status = "有效" if r["execution_valid"] else {"environment": "作废（环境原因，不计 reviewer）"}.get(r["invalid_cause"], "无效（reviewer 原因）")
+        status = "有效" if r["execution_valid"] else {"environment": "作废（环境原因，不计 reviewer）",
+                                                         "blocked": "阻塞（按契约报告材料或环境缺口，不计 reviewer）"}.get(r["invalid_cause"], "无效（reviewer 原因）")
         found = "、".join(f"{k.replace('/', ' ')}×{v}" for k, v in sorted(r["finding_counts"].items())) or "无"
         lines.append(f"| {r['slot']} {r['backend']} | {r['model']} | {r['selected_by'] or '—'} | {status} | {found} | {r['carried_findings']} |")
     checks = [c for r in rows for c in r["spot_check"]]
@@ -571,7 +600,7 @@ def write_scorecard(rd: Path, rows: list) -> str:
 
 
 def cmd_ledger(args) -> None:
-    print(write_scorecard(round_dir(args), append_ledger(round_dir(args), Path(args.req_dir))))
+    print(write_scorecard(round_dir(args), append_ledger(round_dir(args), Path(args.req_dir), args.revalidate)))
 
 
 def cmd_persist(args) -> None:
@@ -677,7 +706,8 @@ def cmd_task(args) -> None:
 - 派发信封：`{rd}/delegation-envelope.json`（冻结输入、范围、上一轮材料都在这里）
 
 只读取信封列出的冻结输入和必要代码证据。没有 Read/Grep/Glob 工具的运行时（如 codex）用 `cat`、`sed -n`、`rg`、`ls`、`git show`/`git diff` 等只读命令读取，
-不执行构建、测试或任何写操作。用中文写评审正文；最后一段只输出 `delegation-result-v1` JSON 代码块，
+不执行构建、测试或任何写操作。codex 运行时的工具列表里会出现 `apply_patch` 等写工具，但进程在只读沙箱里（委派契约 §2 的 `codex-vps` 例外），
+不调用它们即满足只读要求，不要因工具列表里有写工具而判 `blocked`。用中文写评审正文；最后一段只输出 `delegation-result-v1` JSON 代码块，
 其中 `task_id` 为 `{env['task_id']}`、`role` 为 `{role}`、`input_fingerprints` 逐项原样回显信封中的映射，之后不得再输出任何文字。
 """
     path = rd / "evidence" / f"external-task-{args.slot}.md"
@@ -708,7 +738,9 @@ def main(argv=None) -> None:
     s.add_argument("phase", choices=["before", "after"])
     t = sub.add_parser("task", help="write the prompt for an external spawn-model-agent reviewer")
     t.add_argument("--slot", choices=["primary", "secondary"], default="primary")
-    sub.add_parser("ledger", help="append an already persisted round to the reviewer ledger (backfill)")
+    lg = sub.add_parser("ledger", help="append an already persisted round to the reviewer ledger (backfill)")
+    lg.add_argument("--revalidate", action="store_true",
+                    help="recompute execution_valid/invalid_cause of this round's existing ledger rows in place")
     p = sub.add_parser("persist")
     p.add_argument("--spawn-job", help="spawn-model-agent job dir (external reviewer); replaces --transcript/--reviewer-ref")
     p.add_argument("--slot", choices=["primary", "secondary"], default="primary",

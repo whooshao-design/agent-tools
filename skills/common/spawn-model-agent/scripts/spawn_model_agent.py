@@ -116,13 +116,15 @@ def ledger_stats(path=None):
     stats = {}
     for r in rows:
         # keyed by backend AND model: a wrapper's model can be swapped, and its field record does not carry over
-        st = stats.setdefault((r['backend'], r.get('model')), {'n': 0, 'invalid': 0, 'env_void': 0, 'findings': 0, 'valid': 0, 'noise': 0, 'escaped': 0})
+        st = stats.setdefault((r['backend'], r.get('model')), {'n': 0, 'invalid': 0, 'env_void': 0, 'blocked': 0, 'findings': 0, 'valid': 0, 'noise': 0, 'escaped': 0})
         if not r.get('execution_valid'):
-            # a round voided by another writer still holds the reviewer's real work; only reviewer-caused failures count against it
-            if r.get('invalid_cause') != 'environment':
+            # a round voided by another writer, or a contract-legal blocked report on a material gap, still holds the
+            # reviewer's real work; only reviewer-caused failures count against it
+            cause = r.get('invalid_cause')
+            if cause not in ('environment', 'blocked'):
                 st['invalid'] += 1
                 continue
-            st['env_void'] += 1
+            st['env_void' if cause == 'environment' else 'blocked'] += 1
         st['n'] += 1
         for key, c in (r.get('finding_counts') or {}).items():
             cls = key.split('/')[0]
@@ -132,7 +134,7 @@ def ledger_stats(path=None):
     for r in rows:
         for aid in r.get('escaped_from') or []:
             if aid in owner:
-                stats.setdefault(owner[aid], {'n': 0, 'invalid': 0, 'env_void': 0, 'findings': 0, 'valid': 0, 'noise': 0, 'escaped': 0})['escaped'] += 1
+                stats.setdefault(owner[aid], {'n': 0, 'invalid': 0, 'env_void': 0, 'blocked': 0, 'findings': 0, 'valid': 0, 'noise': 0, 'escaped': 0})['escaped'] += 1
     return stats
 
 
@@ -141,7 +143,9 @@ def format_stats(st):
         return '—'
     text = f"n={st['n']} 成立 {st['valid']}/{st['findings']} 噪音 {st['noise']} 漏检 {st['escaped']}"
     text += f" 无效 {st['invalid']}" if st['invalid'] else ''
-    return text + (f"（含环境作废 {st['env_void']} 轮）" if st.get('env_void') else '')
+    notes = [f"环境作废 {st['env_void']} 轮" if st.get('env_void') else '', f"阻塞 {st['blocked']} 轮" if st.get('blocked') else '']
+    notes = [n for n in notes if n]
+    return text + (f"（含{'、'.join(notes)}）" if notes else '')
 
 
 def list_backends():
@@ -167,7 +171,7 @@ def list_backends():
               "重测：build-codeagent/scripts/backend_eval.py。")
     print('\n短名（qwen/deepseek/kimi/…）按宿主补成 claude-* 或 codex-*；分数与备注来自 build-codeagent/model-routing.json；'
           '实战列来自 ~/.local/state/agent-tools/reviewer-ledger.jsonl（只计各轮新提出的 finding；漏检 = 后续轮次标记 escaped_from 的问题数；'
-          '无效 = reviewer 自身原因的无效轮，环境作废轮照常计入）。')
+          '无效 = reviewer 自身原因的无效轮，环境作废轮与按契约报告缺口的阻塞轮照常计入）。')
 
 
 def build_command(backend, task, readonly, resume_id=None, tools=None):

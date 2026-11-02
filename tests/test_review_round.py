@@ -323,6 +323,55 @@ class ReviewRoundTest(unittest.TestCase):
         self.assertEqual(rec["checks"]["tool_surface"]["tools"], ["shell"])
         self.assertIn("codex-reviewer", rec["checks"]["read_only"]["method"])
 
+    def test_ledger_charges_each_reviewer_only_for_its_own_failures(self):
+        self.freeze()
+        run(*self.base, "envelope", "--task-id", "t1", "--scope", "full review")
+        run(*self.base, "task")
+        self.assertIn("apply_patch", (self.rd / "evidence/external-task-primary.md").read_text())
+        env = json.loads((self.rd / "delegation-envelope.json").read_text())
+        run(*self.base, "snapshot", "before")
+        bad = self.spawn_job("claude-glm", env, "通过")
+        (bad / "result.md").write_text("没有 JSON")  # the secondary fails on its own
+        with self.assertRaises(SystemExit):
+            run(*self.base, "persist", "--slot", "secondary", "--spawn-job", str(bad))
+        run(*self.base, "snapshot", "after")
+        findings = Path(self.tmp.name) / "f.json"
+        findings.write_text("[]")
+        with self.assertRaises(SystemExit):  # the round is void: dual review needs both
+            run(*self.base, "persist", "--findings", str(findings), "--spawn-job", str(self.codex_job("ok", env)))
+        self.assertIsNone(json.loads((self.rd / "approval-record.json").read_text())["conclusion"])
+        rows = {r["slot"]: r for r in map(json.loads, rr.LEDGER.read_text().splitlines())}
+        self.assertEqual((rows["primary"]["execution_valid"], rows["primary"]["invalid_cause"]), (True, None))
+        self.assertEqual((rows["secondary"]["execution_valid"], rows["secondary"]["invalid_cause"]), (False, "reviewer"))
+
+    def test_contract_blocked_report_is_not_a_reviewer_failure(self):
+        self.freeze()
+        run(*self.base, "envelope", "--task-id", "t1", "--scope", "full review")
+        env = json.loads((self.rd / "delegation-envelope.json").read_text())
+        run(*self.base, "snapshot", "before")
+        run(*self.base, "snapshot", "after")
+        job = self.codex_job("blk", env)
+        res = {"schema": "delegation-result-v1", "task_id": env["task_id"], "role": env["role"], "status": "blocked",
+               "input_fingerprints": env["input_fingerprints"], "conclusion": None, "changed_files": [], "unresolved": ["EXEC-001"]}
+        (job / "result.md").write_text("```json\n" + json.dumps(res) + "\n```")
+        findings = Path(self.tmp.name) / "f.json"
+        findings.write_text("[]")
+        with self.assertRaises(SystemExit):  # blocked never yields an approval
+            run(*self.base, "persist", "--findings", str(findings), "--spawn-job", str(job))
+        self.assertTrue(json.loads((self.rd / "evidence/structure-check.json").read_text())["conclusion_in_enum"])
+        row = json.loads(rr.LEDGER.read_text().splitlines()[-1])
+        self.assertEqual((row["execution_valid"], row["invalid_cause"]), (False, "blocked"))
+        # --revalidate fixes the round's row in place instead of appending a duplicate
+        rr.LEDGER.write_text(json.dumps(dict(row, invalid_cause="reviewer")) + "\n")
+        run(*self.base, "ledger", "--revalidate")
+        rows = [json.loads(l) for l in rr.LEDGER.read_text().splitlines()]
+        self.assertEqual([r["invalid_cause"] for r in rows], ["blocked"])
+        res["unresolved"] = []  # blocked without a reason is not contract-legal
+        (job / "result.md").write_text("```json\n" + json.dumps(res) + "\n```")
+        with self.assertRaises(SystemExit):
+            run(*self.base, "persist", "--findings", str(findings), "--spawn-job", str(job))
+        self.assertFalse(json.loads((self.rd / "evidence/structure-check.json").read_text())["conclusion_in_enum"])
+
     def test_persist_rejects_unclassified_or_unevidenced_findings(self):
         self.freeze()
         run(*self.base, "envelope", "--task-id", "t1", "--scope", "full review")
