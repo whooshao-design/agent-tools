@@ -625,3 +625,105 @@ test('renewal on the SSO endpoint counts as renewed even when the page itself lo
   assert.equal(result.renewedAuthCookies, true);
   assert.equal(result.actionRequired, null);
 });
+
+test('OA gateway retcode 16051006 is a login failure even with HTTP 200', () => {
+  const targetUrl = 'https://gateway.oa.fenqile.com/rc_oa_gateway/application/url_interface_rule/query_page_list.json';
+  const result = classifyRequestSession({
+    status: 200,
+    url: targetUrl,
+    body: '{"retmsg":"您还没登录或者登录已过期","retcode":"16051006","result_rows":[]}',
+    contentType: 'application/json',
+  }, { targetUrl });
+  assert.equal(result.sessionState, 'LOGIN_REQUIRED');
+  assert.equal(result.loginReason, 'oa-gateway-16051006');
+});
+
+test('request flow opens the gateway page once and retries after retcode 16051006', async () => {
+  const targetUrl = 'https://gateway.oa.fenqile.com/rc_oa_gateway/application/url_interface_rule/query_page_list.json';
+  const bodies = ['{"retcode":"16051006"}', '{"retcode":"0","result_rows":[]}'];
+  const visited = [];
+  const page = {
+    goto: async (url) => { visited.push(url); },
+    waitForLoadState: async () => {},
+  };
+  const context = {
+    request: {
+      fetch: async () => {
+        const body = bodies.shift();
+        return {
+          status: () => 200,
+          url: () => targetUrl,
+          text: async () => body,
+          headers: () => ({ 'content-type': 'application/json' }),
+        };
+      },
+    },
+    pages: () => [page],
+    cookies: async () => [],
+    close: async () => {},
+  };
+  const result = await runRequestFlow({
+    profileDir: '/tmp/profile',
+    runtimeLibDir: '/tmp/runtime',
+    chromePath: '/tmp/chrome',
+  }, { launchPersistentContext: async () => context }, {
+    url: targetUrl,
+    request: {
+      method: 'POST',
+      headers: { Referer: 'https://gateway.oa.fenqile.com/' },
+      timeoutMs: 1000,
+      maxChars: 1000,
+      expiryThresholdSeconds: 900,
+    },
+  });
+
+  assert.deepEqual(visited, ['https://gateway.oa.fenqile.com/']);
+  assert.equal(result.sessionState, 'READY');
+  assert.equal(result.body, '{"retcode":"0","result_rows":[]}');
+  assert.deepEqual(result.sessionRefresh, { url: 'https://gateway.oa.fenqile.com/', recovered: true });
+});
+
+test('page status survives a navigation that destroys the evaluate context', async () => {
+  const targetUrl = 'https://gateway.oa.fenqile.com/';
+  let evaluations = 0;
+  const page = {
+    goto: async () => ({ status: () => 200 }),
+    waitForLoadState: async () => {},
+    waitForTimeout: async () => {},
+    url: () => targetUrl,
+    evaluate: async () => {
+      evaluations += 1;
+      if (evaluations === 1) {
+        throw new Error('page.evaluate: Execution context was destroyed, most likely because of a navigation');
+      }
+      return {
+        title: 'ready',
+        url: targetUrl,
+        hasSuccessText: false,
+        hasLoginText: false,
+        hasLoginControl: false,
+        hasPortalText: false,
+        hasForbiddenText: false,
+        terminalReady: false,
+        snippet: 'ready',
+        buttons: [],
+      };
+    },
+  };
+  const context = { pages: () => [page], cookies: async () => [], close: async () => {} };
+  const result = await runPageFlow({
+    profileDir: '/tmp/profile',
+    runtimeLibDir: '/tmp/runtime',
+    chromePath: '/tmp/chrome',
+  }, { launchPersistentContext: async () => context }, {
+    ...ensureFlow(targetUrl),
+    args: {},
+    mode: 'status',
+    headless: true,
+    waitForLogin: false,
+    screenshotOnLogin: false,
+  });
+
+  assert.equal(evaluations, 2);
+  assert.equal(result.sessionState, 'READY');
+});

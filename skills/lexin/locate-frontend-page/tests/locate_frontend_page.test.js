@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   findModule, findRoutePath, htmlPathForModule, isProdDomain, lineHasTerm, pageUrl,
-  parseGatewayRows, parseGroupProjects, parseImports, parseInput, rankRepos, resolveImport, searchTerms, summarize,
+  parseGatewayRows, parseGroupProjects, parseImports, parseInput, queryGateway, rankRepos, resolveImport, searchTerms, summarize,
 } = require('../scripts/locate_frontend_page');
 
 test('only one entry is accepted and interface must be fully qualified', () => {
@@ -108,4 +108,20 @@ test('summary lists one row per rule', () => {
     backend: 'FooService#page', api: 'https://h.oa.fenqile.com/rc_oa_gateway/a',
     pageUrls: ['https://h/#/m'], callers: ['web_h@origin/product:src/a.vue:3'],
   }]);
+});
+
+test('gateway query opens the console once and retries after 16051006', async () => {
+  const bodies = ['{"retcode":"16051006","result_rows":[]}', '{"retcode":"0","total_page":1,"result_rows":[{"url":"/a.json"}]}'];
+  const visited = [];
+  const tab = { goto: async (url) => { visited.push(url); }, waitForLoadState: async () => {} };
+  const context = {
+    pages: () => [tab],
+    request: { post: async () => ({ text: async () => bodies.shift() }) },
+  };
+  const rows = await queryGateway(context, { url: 'a.json' });
+  assert.deepEqual(visited, ['https://gateway.oa.fenqile.com/']);
+  assert.deepEqual(rows, [{ url: '/a.json' }]);
+
+  const stillOut = { pages: () => [tab], request: { post: async () => ({ text: async () => '{"retcode":"16051006"}' }) } };
+  await assert.rejects(queryGateway(stillOut, { url: 'a.json' }), (e) => e.code === 'LOGIN_REQUIRED');
 });

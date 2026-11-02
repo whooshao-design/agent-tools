@@ -2,7 +2,7 @@
 name: query-oa-gateway-interface
 description: 查询 OA 网关 URL 与后端接口映射，并回代码仓库追踪实现链路。Use when 用户给出前端请求地址、rc_oa_gateway 路径、mihawk/gateway OA 页面请求，要求查询对应的 FSOF/Dubbo interface、method、version、真实后端应用、实现类、VO 参数、DAO 或 SQL；适用于“页面请求对应后端接口”“前端地址映射后端”“query_page_list 网关规则查询”“当前仓库搜不到接口时定位应用”等只读排查。
 metadata:
-  version: 1.2.2
+  version: 1.3.0
 ---
 
 # query-oa-gateway-interface
@@ -19,7 +19,8 @@ MCP 优先、浏览器会话兜底。优先使用 `browser_session` MCP 访问 `
 `node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js --request --url=<下述查询端点>`。
 先读该 skill 的请求参数约定；浏览器管理 Cookie，不导出凭据，也不把该入口用于真实业务写接口。
 `headers` 必须带 `Origin: https://gateway.oa.fenqile.com` 和 `Referer: https://gateway.oa.fenqile.com/`；缺少时即使会话为 READY，
-网关也返回 `retcode=16051006`“您还没登录或者登录已过期”（2026-10-16 实测），这不是登录态失效，不要反复刷新登录。
+网关也返回 `retcode=16051006`“您还没登录或者登录已过期”（2026-10-16 实测）。
+带了这两个头仍返回 16051006，是网关自己的登录 Cookie `rog_session`（`.oa.fenqile.com`，约每天过期）缺失；`sessionHealth` 不检查它，所以会话仍报 READY（2026-11-02 实测）。`--request` 遇到 16051006 会自动打开一次网关控制台让 SSO 重新签发，再重试一次，结果里的 `sessionRefresh.recovered` 说明是否恢复；仍失败时再按失败处理刷新登录态。
 按后端接口反查前端 URL 时，`url` 留空、`interface_name` 传全限定接口名。
 
 反方向（后端接口、网关 URL 或 MySQL 表 → 线上前端页面地址）用 `locate-frontend-page`。
@@ -131,7 +132,7 @@ rg -n "application.name|lsf_app_name|dubbo.application.name|artifactId|XxxGatewa
 
 ## 失败处理
 
-- 网关返回 401/登录页：使用 `get-browser-session` 刷新 `gateway.oa.fenqile.com` 登录态后重试。
+- 网关返回 401/登录页，或自动续登后仍是 16051006：使用 `get-browser-session` 刷新 `gateway.oa.fenqile.com` 登录态后重试。
 - 网关返回空结果：依次尝试 path 变体；再用前端项目关键字、接口名、方法名或系统名查询；最后说明已尝试的查询条件。
 - 本地搜不到接口：先用 `query-dubbo-registry` 查注册中心确认真实后端应用，再按“跨仓库定位”其余步骤处理。
 - 代码链路出现多个实现：按注册中心返回的应用、Dubbo provider 配置、Spring bean、包名、版本筛选；无法唯一确认时列候选和判断依据。

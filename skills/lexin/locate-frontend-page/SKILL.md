@@ -2,7 +2,7 @@
 name: locate-frontend-page
 description: 从后端反查线上前端页面地址：Dubbo 接口（可带 method）、OA 网关 URL 或 MySQL 表，经 OA 网关规则和 rc_fd 前端工程 product 分支里的调用代码，得到可直接在浏览器打开的线上页面地址。Use when 用户问“这个接口/表/网关 URL 在哪个页面用”“对应前端页面地址”“前端哪个目录调用了这个接口”“想在浏览器里看这个功能的页面”等只读反查；前端 URL 查后端实现用 query-oa-gateway-interface。
 metadata:
-  version: 1.0.0
+  version: 1.0.1
 ---
 
 # locate-frontend-page
@@ -53,7 +53,7 @@ node $S --table=rc_credit_ms_db.t_user_whitelist               # 库名前缀可
 
 | 现象 | 处理 |
 |---|---|
-| `LOGIN_REQUIRED`（网关 16051006） | `node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js --ensure --url=https://gateway.oa.fenqile.com/ --success-text=none` 后重跑 |
+| `LOGIN_REQUIRED`（网关 16051006；脚本已自动打开网关控制台续登并重试过一次） | `node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js --ensure --url=https://gateway.oa.fenqile.com/ --success-text=none` 后重跑 |
 | GitLab 工程列表不是 JSON | 同上，把 `--url` 换成 `http://gitlab.fenqile.com/` 登录 GitLab |
 | `PROFILE_IN_USE` / 锁超时 | 等其他浏览器脚本结束，不并行跑多个本脚本 |
 | `fetch-failed` / `clone-failed` | 报告 `note` 里的 git 错误；内网波动可稍后重试，不要改用其他分支凑结果 |

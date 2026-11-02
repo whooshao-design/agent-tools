@@ -153,7 +153,7 @@ function parseGatewayRows(body) {
   let parsed;
   try { parsed = JSON.parse(body); } catch { throw new Error('网关返回的不是 JSON'); }
   if (String(parsed.retcode) === GATEWAY_NOT_LOGGED_IN) {
-    const error = new Error('网关返回未登录（16051006）；请求已带 Origin/Referer，请用 get-browser-session --ensure --url=https://gateway.oa.fenqile.com/ 刷新登录态');
+    const error = new Error('网关返回未登录（16051006）；已自动打开网关控制台重试仍失败，请用 get-browser-session --ensure --url=https://gateway.oa.fenqile.com/ 刷新登录态');
     error.code = 'LOGIN_REQUIRED';
     throw error;
   }
@@ -278,6 +278,7 @@ async function openContext(args) {
 
 async function queryGateway(context, filter) {
   const rows = [];
+  let refreshed = false;
   for (let page = 1; ; page += 1) {
     const form = new URLSearchParams({
       page: String(page), limit: '50', system_id: '', url: filter.url || '',
@@ -291,7 +292,19 @@ async function queryGateway(context, filter) {
       },
       data: form.toString(), timeout: 60000,
     });
-    const parsed = parseGatewayRows(await response.text());
+    let parsed;
+    try {
+      parsed = parseGatewayRows(await response.text());
+    } catch (error) {
+      if (error.code !== 'LOGIN_REQUIRED' || refreshed) throw error;
+      // 网关自身的登录 Cookie（rog_session）按天过期；打开一次控制台让 SSO 重新签发后重试本页。
+      refreshed = true;
+      const tab = context.pages()[0] || await context.newPage();
+      await tab.goto(`${GATEWAY}/`, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+      await tab.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+      page -= 1;
+      continue;
+    }
     rows.push(...parsed.rows);
     if (page >= parsed.totalPage) break;
   }
@@ -596,5 +609,5 @@ if (require.main === module) {
 
 module.exports = {
   findModule, findRoutePath, htmlPathForModule, isProdDomain, kebab, lineHasTerm, normalizeRepoName,
-  pageUrl, parseGatewayRows, summarize, parseGroupProjects, parseImports, parseInput, rankRepos, resolveImport, searchTerms,
+  pageUrl, parseGatewayRows, queryGateway, summarize, parseGroupProjects, parseImports, parseInput, rankRepos, resolveImport, searchTerms,
 };

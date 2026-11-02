@@ -2,7 +2,7 @@
 name: get-browser-session
 description: 获取、检查、续期和复用 WSL Playwright/Chromium 浏览器登录态与网页 session（底层会话层，供其他 skill 复用）。Use when 需要访问要求登录的内网页面、检查或定时续期浏览器 profile 登录态、打开浏览器让用户完成 SSO/OTP 登录、复用已保存 profile 做页面自动化，或按默认脱敏方式查看 session Cookie/localStorage token。
 metadata:
-  version: 1.8.0
+  version: 1.9.0
 ---
 
 # Get Browser Session
@@ -164,6 +164,8 @@ The timer keeps `~/.local/state/agent-tools/session-snapshots/main.json` current
 Status checks and `--ensure` also visit the target page on demand, so a server-side sliding session can refresh its Cookie naturally. `fetch_with_session` runs inside the same BrowserContext rather than copying a Cookie header into a separate HTTP client; response `Set-Cookie` values are therefore persisted back to the profile.
 
 Every page or authenticated-request result includes `sessionHealth` with Cookie counts and the earliest persistent-Cookie expiry. `persistentCookieExpiringSoon` uses a 15-minute default threshold and is advisory: not every Cookie is an authentication Cookie. If an authenticated request returns `LOGIN_REQUIRED` or `PROXY_INTERCEPTED`, run `ensure_session` and retry once after login; do not add an unconditional retry loop.
+
+`sessionHealth.auth` only tracks `oa_session`, `oa_token_id`, `mid` and `sessionId`, so `sessionState: READY` from cookies alone does not prove a backend accepts the session. OA gateway (`rc_oa_gateway`) consoles also need `rog_session` on `.oa.fenqile.com`, which SSO re-issues roughly daily when the console page is visited; without it the API answers HTTP 200 with `retcode=16051006`. `--request` classifies that body as `LOGIN_REQUIRED` with `loginReason: oa-gateway-16051006`, opens the origin of the `Referer`/`Origin` header (or of the request URL) once in the same profile, and retries the request once; the result carries `sessionRefresh: {url, recovered}`. If it is still `LOGIN_REQUIRED`, check the Origin/Referer headers first, then run `ensure_session` on that console URL. Page flows wait for an in-flight SSO redirect to settle before reading status instead of failing with "Execution context was destroyed".
 
 ## Reuse Session For Page Automation
 

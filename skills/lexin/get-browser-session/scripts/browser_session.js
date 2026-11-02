@@ -36,6 +36,10 @@ const PROFILE_LOCK_STALE_MS = 60 * 60 * 1000;
 const AUTH_COOKIE_NAMES = new Set(['oa_session', 'oa_token_id', 'mid', 'sessionId']);
 const DEFAULT_AUTH_EXPIRY_THRESHOLD_SECONDS = 24 * 60 * 60;
 const DEFAULT_WSLG_LOG_PATH = '/mnt/wslg/weston.log';
+// OA gateway (rc_oa_gateway) answers HTTP 200 with this retcode when its own
+// login cookie (rog_session, re-issued daily by SSO) is missing or expired.
+const OA_GATEWAY_LOGIN_RETCODE = /"retcode"\s*:\s*"?16051006\b/;
+const NAVIGATION_ERROR_PATTERN = /Execution context was destroyed|because of a navigation/i;
 
 function summarizeAuthCookies(cookies, options = {}) {
   const nowMs = Number.isFinite(options.nowMs) ? options.nowMs : Date.now();
@@ -283,6 +287,9 @@ function classifyRequestSession(response, options = {}) {
   if (!targetHost || responseHost !== targetHost || hasLoginMarker) {
     return { sessionState: 'LOGIN_REQUIRED', sessionReady: false };
   }
+  if (OA_GATEWAY_LOGIN_RETCODE.test(body)) {
+    return { sessionState: 'LOGIN_REQUIRED', sessionReady: false, loginReason: 'oa-gateway-16051006' };
+  }
   return { sessionState: 'READY', sessionReady: true };
 }
 
@@ -322,6 +329,20 @@ function classifyPageStatus(snapshot, options = {}) {
     sessionState,
     sessionReady,
   };
+}
+
+// A page that is still finishing an SSO redirect destroys the evaluate context;
+// wait for the navigation to settle and read again instead of failing the flow.
+async function collectSettledStatus(page, options, attempts = 3) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await collectStatus(page, options);
+    } catch (error) {
+      if (attempt >= attempts || !NAVIGATION_ERROR_PATTERN.test(String(error.message || error))) throw error;
+      await page.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => {});
+      await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+    }
+  }
 }
 
 async function collectStatus(page, options = {}) {
@@ -594,6 +615,16 @@ async function openContext(paths, chromium, headless, targetUrl) {
   return { context, networkPolicy: network.networkPolicy };
 }
 
+function gatewayRefreshUrl(targetUrl, headers = {}) {
+  const referer = Object.entries(headers)
+    .find(([name]) => ['referer', 'origin'].includes(name.toLowerCase()));
+  try {
+    return `${new URL(referer ? referer[1] : targetUrl).origin}/`;
+  } catch (error) {
+    return `${new URL(targetUrl).origin}/`;
+  }
+}
+
 async function runRequestFlow(paths, chromium, flow) {
   const launched = await openContext(paths, chromium, true, flow.url);
   const { context } = launched;
@@ -607,19 +638,34 @@ async function runRequestFlow(paths, chromium, flow) {
     if (flow.request.bodyBase64) {
       requestOptions.data = Buffer.from(flow.request.bodyBase64, 'base64');
     }
-    const response = await context.request.fetch(flow.url, requestOptions);
-    const responseBody = await response.text();
-    const status = response.status();
-    const requestSession = classifyRequestSession({
-      status,
-      url: response.url(),
-      body: responseBody,
-      contentType: response.headers()['content-type'] || '',
-    }, {
-      targetUrl: flow.url,
-      loginPattern: flow.loginPattern,
-      portalPattern: flow.portalPattern,
-    });
+    const send = async () => {
+      const response = await context.request.fetch(flow.url, requestOptions);
+      const responseBody = await response.text();
+      const status = response.status();
+      const requestSession = classifyRequestSession({
+        status,
+        url: response.url(),
+        body: responseBody,
+        contentType: response.headers()['content-type'] || '',
+      }, {
+        targetUrl: flow.url,
+        loginPattern: flow.loginPattern,
+        portalPattern: flow.portalPattern,
+      });
+      return { response, responseBody, status, requestSession };
+    };
+    let { response, responseBody, status, requestSession } = await send();
+    let sessionRefresh = null;
+    if (requestSession.loginReason === 'oa-gateway-16051006') {
+      // Opening the console page lets SSO re-issue the gateway cookie in this
+      // profile; the request is then retried once.
+      const refreshUrl = gatewayRefreshUrl(flow.url, flow.request.headers);
+      const page = context.pages()[0] || await context.newPage();
+      await page.goto(refreshUrl, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+      await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+      ({ response, responseBody, status, requestSession } = await send());
+      sessionRefresh = { url: redactUrl(refreshUrl), recovered: requestSession.sessionReady };
+    }
     const result = {
       status,
       url: redactUrl(response.url()),
@@ -628,6 +674,7 @@ async function runRequestFlow(paths, chromium, flow) {
       profileDir: paths.profileDir,
       networkPolicy: launched.networkPolicy,
       ...requestSession,
+      ...(sessionRefresh ? { sessionRefresh } : {}),
       sessionHealth: await collectSessionHealth(context, flow.url, flow.request.expiryThresholdSeconds),
     };
     if (status >= 400) result.error = 'HTTP request failed';
@@ -725,7 +772,7 @@ async function runPageFlow(paths, chromium, flow) {
     };
     let status = (flow.waitForLogin || isWebShellUrl(flow.url))
       ? await waitForStableSession(page, options)
-      : await collectStatus(page, options);
+      : await collectSettledStatus(page, options);
     status.browserMode = flow.headless ? 'headless' : 'headed';
     status.networkPolicy = launched.networkPolicy;
     status.profileDir = paths.profileDir;
@@ -752,7 +799,7 @@ async function runPageFlow(paths, chromium, flow) {
       const postClickOptions = page.url() === pageUrlBeforeActions
         ? options
         : { ...options, httpStatus: null };
-      status = await collectStatus(page, postClickOptions);
+      status = await collectSettledStatus(page, postClickOptions);
       status.browserMode = flow.headless ? 'headless' : 'headed';
       status.networkPolicy = launched.networkPolicy;
       status.profileDir = paths.profileDir;
