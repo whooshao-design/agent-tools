@@ -6,7 +6,7 @@
  * 子命令：
  *   doctor   启动前置门禁（Node 版本 / 内存 / PSI / 8116 端口 / 代理提醒），只读
  *   start    门禁全绿后启动本地 webpack（npm run dev:index）；已有本项目健康实例则复用
- *   connect  生成/写入 whistle 网关规则，把 /rc_oa_gateway 切到预发布(pre)或项目环境(prj)
+ *   connect  把当前 whistle 联调分组里的米霍克网关行切到预发布(pre)或项目环境(prj)，默认只预览
  *   open     打印真实域名访问地址，并探测本地实例与网关当前指向
  *
  * 只使用 Node 内置模块，无第三方依赖。
@@ -32,9 +32,6 @@ const OPEN_URL = `https://${DOMAIN}/index.html#/index`;
 // 作为带注释的默认值使用，已变化时用 --ip 覆盖。项目环境(prj) IP 随时在变，一律动态发现，绝不硬编码。
 const DEFAULT_PRE_GATEWAY_IP = '121.46.128.40';
 const WHISTLE_PORT = 8899;
-// 本 skill 的专属 whistle 分组名。脚本只整组覆盖这一个分组，绝不读改其他分组
-// （用户有手工维护的公共分组和名为「项目」的分组，均不可触碰）。
-const WHISTLE_GROUP = 'mihawk-gateway';
 const NODE16_BIN = path.join(os.homedir(), '.nvm/versions/node/v16.16.0/bin');
 // 与 web_mihawk_oa/AGENTS.md 一致：用精确 Node 版本覆盖整个进程树
 const START_PATH = `${NODE16_BIN}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`;
@@ -57,11 +54,12 @@ function usage() {
 
   doctor                     启动前置门禁检查（只读，不改任何东西）
   start                      门禁全绿后启动 npm run dev:index；已有本项目健康实例则复用不重启
-  connect --env pre|prj      生成 whistle 网关规则（默认只打印文本，不写入）
-          [--ip <ip>]        网关 IP。prj 必填（项目环境网关机，见乐效项目环境页），探活通过才生成规则；
+  connect --env pre|prj      预览把联调分组里的米霍克网关行改到目标网关 IP（默认不写入）
+          [--ip <ip>]        网关 IP。prj 必填（项目环境网关机，见乐效项目环境页），探活通过才修改；
                              prj 未传时只列出最近创建的 ${PRJ_GATEWAY_APP} 运行中实例作参考并退出
           [--whistle h[:p]]  覆盖 whistle 地址（默认取 \`ip route show default\` 的宿主机 IP:${WHISTLE_PORT}）
-          [--apply]          调 whistle API 写入专属分组 ${WHISTLE_GROUP}（写入端点未实测，失败自动降级为手工粘贴）
+          [--group <名称>]   要改的 whistle 分组；默认取唯一一个含米霍克网关行的已启用分组
+          [--apply]          写入该分组（只替换网关行的 IP）并回读校验
   open                       打印访问地址并探测本地实例与网关当前指向`);
 }
 
@@ -287,56 +285,64 @@ async function whistlePost(w, pathName, form) {
     return json;
 }
 
-function buildRuleValue(env, app, ip, source) {
-    return [
-        '# managed-by: start-local-frontend（本分组由脚本整组覆盖，请勿手工编辑；切换环境请重跑 connect）',
-        `# env=${env}` + (app ? ` app=${app}` : '') + ` source=${source} generated=${new Date().toISOString()}`,
-        `${ip} ${DOMAIN}${GATEWAY_PATH}`,
-    ].join('\n') + '\n';
+// 米霍克页面经网关访问的规则目标（whistle 规则写法 `<ip> <目标>`），取自用户「本地-项目」分组（2026-11-02）。
+// 同组里 cs、ruleengin 等其他系统的 /rc_oa_gateway 有意指向预发布，不在此列，connect 不改它们
+const GATEWAY_TARGETS = [
+    `${DOMAIN}${GATEWAY_PATH}`,
+    `gateway.oa.fenqile.com${GATEWAY_PATH}`,
+    `hawkeye.oa.fenqile.com${GATEWAY_PATH}`,
+    `${DOMAIN}/groovy-lint`,
+];
+const PAGE_RULE_TARGET = `127.0.0.1:${DEV_PORT}`;
+
+// 解析一行 whistle 规则为 { ip, target }；空行、注释和不足两段的行返回 null
+function parseRuleLine(line) {
+    const parts = line.trim().split(/\s+/);
+    if (parts.length < 2 || parts[0].startsWith('#')) return null;
+    return { ip: parts[0], target: parts[1] };
 }
 
-function printManualInstructions(w) {
-    const ui = w ? `http://${w.host}:${w.port}/` : `http://<Windows宿主机IP>:${WHISTLE_PORT}/`;
-    console.log(`
-手工启用步骤:
-  1. 打开 whistle 界面 ${ui} -> Rules
-  2. 若无 ${WHISTLE_GROUP} 则 Create 一个（名字必须精确为 ${WHISTLE_GROUP}），已有则打开
-  3. 用上面内容整体替换该分组内容并保存、勾选启用
-  4. 只改这一个分组；页面本体(127.0.0.1:${DEV_PORT})与 vui/assets/captcha/passport-odin
-     等公共规则在你既有的公共分组里，保持不动
-  5. 若公共分组里也有一条 ${DOMAIN}${GATEWAY_PATH} 规则，两条同 path 规则只有一条会生效
-     （以 whistle 的匹配顺序为准），建议把公共组那条注释掉，让 ${WHISTLE_GROUP} 独占这条路径`);
-}
-
-async function applyWhistleGroup(w, value) {
-    // 安全边界：只按精确名称操作专属分组，绝不读改其他分组（含用户手工维护的「项目」分组）
-    const before = await whistleGetList(w);
-    const existing = before.list.find((item) => item && item.name === WHISTLE_GROUP);
-    if (existing && existing.data === value && existing.selected) {
-        console.log(`· 分组 ${WHISTLE_GROUP} 已是目标内容且已启用，无需写入`);
-        return;
-    }
-    const clientId = 'start-local-frontend-' + Date.now();
-    if (!existing) {
-        console.log(`· 创建分组 ${WHISTLE_GROUP}（POST /cgi-bin/rules/add，该端点未实测）`);
-        await whistlePost(w, '/cgi-bin/rules/add', { name: WHISTLE_GROUP, value, clientId });
-    }
-    console.log(`· 写入并启用分组 ${WHISTLE_GROUP}（POST /cgi-bin/rules/select，该端点未实测）`);
-    await whistlePost(w, '/cgi-bin/rules/select', {
-        name: WHISTLE_GROUP,
-        value,
-        selected: 'true',
-        active: 'true',
-        clientId,
+function hasGatewayLine(data) {
+    return String(data || '').split('\n').some((line) => {
+        const rule = parseRuleLine(line);
+        return rule && GATEWAY_TARGETS.includes(rule.target);
     });
-    const after = await whistleGetList(w);
-    const saved = after.list.find((item) => item && item.name === WHISTLE_GROUP);
-    if (!saved || saved.data !== value) {
-        throw new Error('写入后回读校验失败：分组不存在或内容不一致');
+}
+
+// 只把 GATEWAY_TARGETS 行的 IP 换成 ip，其余行原样保留；分组里没有的目标只报告，不新增
+function rewriteGatewayLines(data, ip) {
+    const found = new Set();
+    const changes = [];
+    const value = String(data || '').split('\n').map((line) => {
+        const rule = parseRuleLine(line);
+        if (!rule || !GATEWAY_TARGETS.includes(rule.target)) return line;
+        found.add(rule.target);
+        if (rule.ip === ip) return line;
+        changes.push({ target: rule.target, from: rule.ip });
+        return line.replace(rule.ip, ip);
+    }).join('\n');
+    return { value, changes, missing: GATEWAY_TARGETS.filter((target) => !found.has(target)) };
+}
+
+// 要改的分组：--group 指定的分组；未指定时取唯一一个含米霍克网关行的已启用分组。
+// 单选模式下启用一个独立分组会关掉用户的联调分组（缺页面规则），所以改用户正在用的分组，不另建分组
+function pickTargetGroup(list, name) {
+    if (name) {
+        const group = list.find((item) => item && item.name === name);
+        if (!group) throw new Error(`whistle 中没有分组「${name}」`);
+        return group;
     }
-    console.log('· 回读校验通过：内容一致' + (saved.selected
-        ? '，分组已启用'
-        : '；启用状态未能确认，请到 whistle 界面确认分组已勾选'));
+    const candidates = list.filter((item) => item && item.selected && hasGatewayLine(item.data));
+    if (candidates.length !== 1) {
+        throw new Error(`已启用分组中含米霍克网关行的有 ${candidates.length} 个`
+            + `（${candidates.map((item) => item.name).join(', ') || '无'}），用 --group <分组名> 指定要改的分组`);
+    }
+    return candidates[0];
+}
+
+function printManualLines(ip) {
+    console.log('手工修改: 在 whistle 界面 Rules 里打开当前联调分组，把下面这些目标的行改成:');
+    for (const target of GATEWAY_TARGETS) console.log(`  ${ip} ${target}`);
 }
 
 // ---------- 乐效动态发现（prj） ----------
@@ -485,13 +491,11 @@ async function cmdStart() {
 
 async function cmdConnect(args) {
     const env = String(args.env || '').toLowerCase();
-    if (env !== 'pre' && env !== 'prj') {
-        console.error('用法: connect --env pre|prj [--ip <网关IP>] [--whistle h[:p]] [--apply]');
+    if ((env !== 'pre' && env !== 'prj') || args.group === true) {
+        console.error('用法: connect --env pre|prj [--ip <网关IP>] [--group <分组名>] [--whistle h[:p]] [--apply]');
         process.exitCode = 2;
         return;
     }
-    const app = env === 'prj' ? PRJ_GATEWAY_APP : null;
-
     // whistle API 地址动态发现（宿主机 IP 会变，不硬编码）
     let whistle = null;
     try {
@@ -505,10 +509,8 @@ async function cmdConnect(args) {
 
     // 确定目标网关 IP
     let ip = null;
-    let source = '';
     if (env === 'pre') {
         ip = String(args.ip || DEFAULT_PRE_GATEWAY_IP);
-        source = args.ip ? '--ip' : 'default-constant';
         const probe = await probeGateway(ip);
         if (probe.ok) {
             console.log(`· 预发布网关探活通过: ${ip} (retcode=${probe.retcode})`);
@@ -527,40 +529,55 @@ async function cmdConnect(args) {
             return;
         }
         ip = String(args.ip);
-        source = '--ip';
         const probe = await probeGateway(ip);
         if (!probe.ok) {
-            console.error(`探活失败，拒绝生成规则（项目环境网关必须探活通过才可用）: ${ip}: ${probe.step} ${probe.detail}`);
+            console.error(`探活失败，拒绝修改（项目环境网关必须探活通过才可用）: ${ip}: ${probe.step} ${probe.detail}`);
             process.exitCode = 1;
             return;
         }
         console.log(`· 探活通过: ${ip} (retcode=${probe.retcode})`);
     }
 
-    const value = buildRuleValue(env, app, ip, source);
-    console.log(`\n===== whistle 专属分组 ${WHISTLE_GROUP} 目标内容 =====`);
-    process.stdout.write(value);
-    console.log('====================================================');
-
-    if (!args.apply) {
-        console.log('\n（默认只打印，不写入。确认无误后加 --apply 尝试自动写入 whistle。）');
-        printManualInstructions(whistle);
-        return;
-    }
     if (!whistle) {
-        console.log('\n! --apply 无法执行（whistle 不可达），回退为手工粘贴:');
-        printManualInstructions(null);
+        printManualLines(ip);
         return;
     }
+    let group;
     try {
-        await applyWhistleGroup(whistle, value);
-        console.log(`\n完成。当前 ${GATEWAY_PATH} -> ${ip}（env=${env}）。用 open 子命令复核。`);
+        group = pickTargetGroup((await whistleGetList(whistle)).list, args.group);
     } catch (e) {
-        // 写入端点未实测，失败属预期风险：降级为手工粘贴，不报错退出
-        console.log('\n! whistle 写入 API 调用失败（add/select 端点未实测，失败属预期）: ' + e.message);
-        console.log('回退为手工粘贴:');
-        printManualInstructions(whistle);
+        console.error('! ' + e.message);
+        printManualLines(ip);
+        process.exitCode = 1;
+        return;
     }
+    const { value, changes, missing } = rewriteGatewayLines(group.data, ip);
+    console.log(`\n目标分组「${group.name}」：${group.selected ? '已启用'
+        : '未启用；写入时会启用它，whistle 单选模式下会同时关掉当前启用的分组'}`);
+    for (const change of changes) console.log(`  - ${change.from} ${change.target}\n  + ${ip} ${change.target}`);
+    if (missing.length) {
+        console.log(`! 分组里没有这些网关行，脚本不新增，需要时手工加: ${missing.map((target) => `${ip} ${target}`).join('; ')}`);
+    }
+    if (!changes.length && group.selected) {
+        console.log(`· 网关行已指向 ${ip}，无需修改`);
+        return;
+    }
+    if (!args.apply) {
+        console.log('\n（只预览，未写入。确认后加 --apply；回退时用 --ip <上面 - 行的原 IP> 再执行一次。）');
+        return;
+    }
+    // /cgi-bin/rules/select 保存分组内容并启用，2026-11-02 实测可用（ec=0，回读内容一致、保持启用）
+    await whistlePost(whistle, '/cgi-bin/rules/select', {
+        name: group.name,
+        value,
+        selected: 'true',
+        active: 'true',
+        clientId: 'start-local-frontend-' + Date.now(),
+    });
+    const saved = (await whistleGetList(whistle)).list.find((item) => item && item.name === group.name);
+    if (!saved || saved.data !== value) throw new Error(`写入后回读校验失败：分组「${group.name}」内容不一致`);
+    console.log(`\n完成。「${group.name}」的米霍克网关行 -> ${ip}（env=${env}），`
+        + (saved.selected ? '分组已启用' : '启用状态未能确认，请到 whistle 界面确认') + '。用 open 子命令复核。');
 }
 
 async function cmdOpen(args) {
@@ -577,51 +594,35 @@ async function cmdOpen(args) {
         else console.log(`! 本地 ${DEV_PORT} 已监听但 HTTPS 无响应（可能仍在编译）: ${health.error}`);
     }
 
-    // 探测 2：whistle 专属分组当前指向
+    // 探测 2：已启用分组里的页面规则和米霍克网关行（单选模式下只看当前启用的那个分组）
     try {
         const w = resolveWhistle(args);
-        const list = await whistleGetList(w);
-        const group = list.list.find((item) => item && item.name === WHISTLE_GROUP);
-        if (!group) {
-            console.log(`! whistle(http://${w.host}:${w.port}) 无 ${WHISTLE_GROUP} 分组：先运行 connect --env pre|prj`);
-        } else {
-            const data = String(group.data || '');
-            const envMatch = data.match(/^# env=(\w+)/m);
-            let ip = null;
-            for (const line of data.split('\n')) {
-                const parts = line.trim().split(/\s+/);
-                if (parts.length >= 2 && !parts[0].startsWith('#') && parts[1].startsWith(DOMAIN)) {
-                    ip = parts[0];
-                    break;
-                }
-            }
-            const envGuess = envMatch ? `env=${envMatch[1]}` : (ip === DEFAULT_PRE_GATEWAY_IP ? 'env≈pre(等于默认常量)' : 'env=未知(自定义?)');
-            console.log(`· whistle 分组 ${WHISTLE_GROUP}: ${group.selected ? '已启用' : '未启用（需在界面勾选）'}，网关指向 ${ip || '未识别'}（${envGuess}）`);
-        }
-        // 所有已启用分组里的 /rc_oa_gateway 规则：whistle 单选模式下启用别的分组会把专属分组关掉，
-        // 或者同时存在多条同 path 规则，浏览器实际走的网关就不是专属分组里那台
+        const enabled = (await whistleGetList(w)).list.filter((item) => item && item.selected);
+        console.log(`· whistle(http://${w.host}:${w.port}) 已启用分组: ${enabled.map((item) => item.name).join(', ') || '无'}`);
         const gatewayRules = [];
-        for (const item of list.list) {
-            if (!item || !item.selected) continue;
+        const pageGroups = [];
+        for (const item of enabled) {
             for (const line of String(item.data || '').split('\n')) {
-                const parts = line.trim().split(/\s+/);
-                if (parts.length >= 2 && !parts[0].startsWith('#') && parts[1] === `${DOMAIN}/rc_oa_gateway`) {
-                    gatewayRules.push({ group: item.name, ip: parts[0] });
+                const rule = parseRuleLine(line);
+                if (!rule) continue;
+                if (GATEWAY_TARGETS.includes(rule.target)) gatewayRules.push({ group: item.name, ip: rule.ip, target: rule.target });
+                if ((rule.ip === PAGE_RULE_TARGET && rule.target === DOMAIN) || (rule.ip === DOMAIN && rule.target === PAGE_RULE_TARGET)) {
+                    pageGroups.push(item.name);
                 }
             }
         }
+        if (pageGroups.length) console.log(`· 页面规则 ${PAGE_RULE_TARGET} ${DOMAIN} 在: ${pageGroups.join(', ')}`);
+        else console.log(`! 已启用分组里没有 \`${PAGE_RULE_TARGET} ${DOMAIN}\`：页面不会来自本地`);
         if (!gatewayRules.length) {
-            console.log('! 已启用的 whistle 分组里没有 /rc_oa_gateway 规则：接口会走真实 DNS（线上）');
+            console.log('! 已启用分组里没有米霍克网关行：接口会走真实 DNS（线上）');
         } else {
-            console.log(`· 已启用分组中的 /rc_oa_gateway 规则: ${gatewayRules.map((r) => `${r.ip}(${r.group})`).join(', ')}`);
-            // 只有实际生效的网关 IP 与专属分组的目标不一致时才告警；用户分组指向同一台是正常用法
-            const targetIp = group ? (String(group.data || '').split('\n').map((l) => l.trim().split(/\s+/))
-                .find((parts) => parts.length >= 2 && !parts[0].startsWith('#') && parts[1] === `${DOMAIN}/rc_oa_gateway`) || [])[0] : null;
-            const mismatched = gatewayRules.filter((r) => targetIp && r.ip !== targetIp);
-            const ips = [...new Set(gatewayRules.map((r) => r.ip))];
-            if (mismatched.length || ips.length > 1) {
-                console.log(`! 已启用分组的 /rc_oa_gateway 指向与 ${WHISTLE_GROUP} 的目标 ${targetIp || '未知'} 不一致或有多个: `
-                    + `${gatewayRules.map((r) => `${r.ip}(${r.group})`).join(', ')}。请把实际启用分组里的这条规则改成目标网关 IP，或只保留一条同 path 规则`);
+            for (const rule of gatewayRules) console.log(`  ${rule.ip} ${rule.target}（${rule.group}）`);
+            const ips = [...new Set(gatewayRules.map((rule) => rule.ip))];
+            if (ips.length > 1) {
+                console.log(`! 米霍克网关行指向多个 IP: ${ips.join(', ')}。用 connect --env pre|prj 统一`);
+            } else {
+                console.log(`· 网关指向 ${ips[0]}（${ips[0] === DEFAULT_PRE_GATEWAY_IP
+                    ? '预发布' : '非预发布默认 IP；项目环境时核对它是本环境的网关机 IP'}）`);
             }
         }
     } catch (e) {
@@ -657,8 +658,9 @@ if (require.main === module) {
 }
 
 module.exports = {
-    buildRuleValue,
     parseArgs,
+    pickTargetGroup,
     probeGateway,
     resolveWhistle,
+    rewriteGatewayLines,
 };
