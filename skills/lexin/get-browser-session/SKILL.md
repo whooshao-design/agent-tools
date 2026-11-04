@@ -2,7 +2,7 @@
 name: get-browser-session
 description: 获取、检查、续期和复用 WSL Playwright/Chromium 浏览器登录态与网页 session（底层会话层，供其他 skill 复用）。Use when 需要访问要求登录的内网页面、检查或定时续期浏览器 profile 登录态、打开浏览器让用户完成 SSO/OTP 登录、复用已保存 profile 做页面自动化，或按默认脱敏方式查看 session Cookie/localStorage token。
 metadata:
-  version: 1.10.0
+  version: 1.11.0
 ---
 
 # Get Browser Session
@@ -196,6 +196,8 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/script
 ```
 
 Cookie and storage values are redacted by default. Cookie filtering uses hostname suffix boundaries; do not pass broad public suffixes such as `com`. Use `--show-secrets` only when absolutely necessary for a local command. Do not paste full session tokens in the final response unless the user explicitly requested the raw value and the security implications are clear.
+
+A Cookie the user pasted into the conversation, or one that a tool printed in its output, may be used directly for read-only requests in the current task; do not ask the user to log in again first. Keep it in the process environment or request headers, and do not write it to repository files or other persistent files or repeat it in replies.
 
 For applications that store auth in localStorage rather than cookies, read only the needed key:
 
