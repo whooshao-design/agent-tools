@@ -1,0 +1,18 @@
+{
+  "workspace": "20061171",
+  "template": "1120061171001000570",
+  "title": "【米霍克】策略节点版本比对“查看对比详情”报 JSONException，节点比对弹窗打不开",
+  "owner": "joneyshao",
+  "description_file": "bug.example.description.html",
+  "fields": {
+    "priority": "中",
+    "severity": "一般",
+    "frequency": "可重现",
+    "originphase": "预发布阶段",
+    "bugtype": "线上已有问题",
+    "custom_field_11": ["基础研发组"],
+    "custom_field_19": ["手工测试"],
+    "custom_field_16": "米霍克系统",
+    "custom_field_17": ["乐包管理"]
+  }
+}

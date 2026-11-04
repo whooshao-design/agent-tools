@@ -1,0 +1,10 @@
+<p><strong>所属应用</strong>：server_hawk_decision_manage（接口 EditionDiffGatewayService.diffStrategyField）</p>
+<p><strong>复现步骤</strong></p>
+<ol>
+<li>打开米霍克乐包 1965 的版本页，点“版本比对”，勾选版本 19672 和 46481，点“确定比对”。</li>
+<li>在右侧流程图里点策略节点 211480 的“查看对比详情”。</li>
+</ol>
+<p><strong>期望结果</strong>：正常打开节点版本比对弹窗。</p>
+<p><strong>实际结果</strong>：接口抛 com.alibaba.fastjson.JSONException: syntax error, unexpect token error。</p>
+<p><strong>证据</strong>：报错位置、traceId、出现时间与环境。</p>
+<p><strong>根因分析</strong>：已确认的直接写结论，未证实的标明“推测”。</p>
