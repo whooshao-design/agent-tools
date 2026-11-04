@@ -2,7 +2,7 @@
 name: manage-publish-order
 description: 在乐信发布系统 publish3（publish3.oa.fenqile.com）为乐效需求准备前端发布单：先把需求分支合并到前端发布分支（默认 product）并推送，再在“应用版本发布”新建前端发布单（线上、版本/补丁、预发布+灰度+线上）并打包；不推送、不发布、不回滚、不结单。Use when 用户要求合并前端代码到 product 后建发布单、新建前端发布单、给发布单打包、查看自己的发布单；后端发布单后续补充；不负责发布计划（用 manage-publish-plan）、乐效部署或推送上线。
 metadata:
-  version: 1.0.1
+  version: 1.1.0
 ---
 
 # manage-publish-order
@@ -26,14 +26,14 @@ node $S pack   --id=<发布单号> [--dry-run]
 
 | 子命令 | 作用 | 写入 |
 |---|---|---|
-| `merge` | 在临时 worktree 里把 `origin/<需求分支>` 用 `merge --no-ff` 合入 `origin/product` 并推送，提交信息 `Merge branch '<分支>' into product`（仓库惯例）；不动本地工作区 | git 推送 |
+| `merge` | 先校验乐效 CR通过，再在临时 worktree 里把 `origin/<需求分支>` 用 `merge --no-ff` 合入 `origin/product` 并推送，提交信息 `Merge branch '<分支>' into product`（仓库惯例）；不动本地工作区 | git 推送 |
 | `list` | 列出发布单：单号、应用、分支、tag、环境、状态、描述 | 否 |
 | `create` | 按页面填表并点“创建”，回读单号 | publish3 |
 | `pack` | 打开发布单详情点“打包”，确认弹框，等“打包成功”，确认“更新文件” | publish3 |
 
 ## 工作流（前端）
 
-1. 合并：`merge --dry-run` 先列出将合入 product 的提交和文件给用户看；确认后去掉 `--dry-run`。需求分支必须已推送且与远端一致；已合入时直接跳过；有冲突时停止，回需求分支先合 `origin/product` 解决后再来。
+1. 合并：前提是需求分支在乐效已 CR通过（`manage-publish-plan` 的 `lexiao_cr.js`；顺序是 product 合入需求分支 → CR → CR通过 → 合 product，先合 product 再 CR 时 Diff 为空，乐效会判“无需CR”）。`merge` 按分支名末尾的 TAPD ID 和仓库远端名查乐效 CR 记录，本分支最新记录早于分支最后一次提交、或不是 CR通过时拒绝合并（最新记录是“无需CR”且之前有过 CR通过时放行：增量 CR 只多了合入 product 的提交，Diff 为空）；只有用户明确说本次不需要 CR 时才加 `--skip-cr-check`。`merge --dry-run` 先列出将合入 product 的提交和文件给用户看；确认后去掉 `--dry-run`。需求分支必须已推送且与远端一致；已合入时直接跳过；有冲突时停止，回需求分支先合 `origin/product` 解决后再来。
 2. 查重：`list --app=<应用>` 看有没有未结单的发布单；有则先问用户（结单或加 `--allow-open`）。
 3. 建单：`create --dry-run` 填表并打印表单状态；确认后正式创建。默认值：
    - 发布环境类型“线上”；发布类型“版本”（需求功能新增），线上问题或需求优化用 `--pub-type=patch`。

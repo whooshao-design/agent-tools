@@ -2,7 +2,7 @@
 name: manage-publish-plan
 description: 在乐信发布系统 publish3（publish3.oa.fenqile.com）为乐效流程需求新建“普通应用发布”前端发布计划，或修改尚未提交审批（待审批、列表有“修改”按钮）的计划的版本描述与通知方式；先用历史计划取默认值并经用户确认，按前端发布指南模板写版本描述并检查是否混入后端事项，先 dry-run 预览再保存，写后回读校验，复用 get-browser-session 浏览器登录态。另按 references/backend-plan-doc.md 撰写 TQM 发布计划评审“发布方案（后台）”飞书文档的后端发布内容。Use when 用户要求在 publish3 建发布计划、给需求建前端发布计划、建计划前给前端工程建乐效 Phabricator CR 或查 CR 状态、修改发布计划的版本描述、查看自己的历史发布计划或某个计划详情、查看业务名对应的审批人选项、编写后端发布方案（应用/配置发布顺序、回退、灰度）；不负责 publish3 后端计划（后续补充）、发布申请、删除计划、发布单、打包推送，也不负责乐效集成部署或 Hippo 配置。
 metadata:
-  version: 1.2.0
+  version: 1.3.0
 ---
 
 # manage-publish-plan
@@ -29,7 +29,7 @@ metadata:
 3. 写入前完整打印表单内容，并提醒“保存后进入待审批”。先跑 `--dry-run`：它会填表、截图、打印各字段值，但不保存。用户确认后再去掉 `--dry-run` 正式保存。
 4. 同一需求已有待审批或审批通过且未过有效期的计划（或 `validity=true`）时，`create` 拒绝重复创建，提示改用 `modify`。
 5. 不点“发布申请”和“删除”，不建发布单，不打包推送。脚本会拦截 publish_server 上路径含 delete/remove/apply/approve/submit 的请求；dry-run 和只读命令还会拦截所有 publishPlan 写接口。
-6. 建计划前先建 CR。“CR情况”只按乐效 CR 记录写，不按 AI 代码评审写：`lexiao_cr.js list` 查到本需求、本工程、本分支的记录状态为“CR通过”才写“已CR”，“无需CR”照原文写并告诉用户；没有记录就先建，状态是“发起中”或评审中时如实写或等评审结束。评审人、抄送人取同工程历史 CR 的值并经用户确认；建 CR 会给评审人发邀请，先 `--dry-run` 核对表单，用户同意后再正式创建。
+6. 建计划前先建 CR，顺序是：`origin/product` 合入需求分支并推送 → 建 CR → CR通过 → 需求分支合入 product（`manage-publish-order merge`，未 CR通过会拒绝）。分支已合入 product 时 Diff 为空，乐效会判“无需CR”（2026-11-04 记录 87001 就是这样），`create` 会拒绝。“CR情况”只按乐效 CR 记录写，不按 AI 代码评审写：`lexiao_cr.js list` 查到本需求、本工程、本分支的记录状态为“CR通过”才写“已CR”，“无需CR”照原文写并告诉用户；没有记录就先建，状态是“发起中”或评审中时如实写或等评审结束。评审人、抄送人取同工程历史 CR 的值并经用户确认；建 CR 会给评审人发邀请，先 `--dry-run` 核对表单，用户同意后再正式创建。
 
 ## 脚本
 
@@ -43,8 +43,8 @@ node $S modify  --id=<计划ID> --file=<patch.json> [--dry-run] [--allow-backend
 
 CR=/home/joney/projects/ai/agent-tools/skills/lexin/manage-publish-plan/scripts/lexiao_cr.js
 node $CR list   [--demand=<TAPD ID>] [--project=<工程名>] [--limit=N]
-node $CR create --demand=<TAPD ID> --group=<GitLab组> --project=<工程名> --branch=<评审分支> \
-                --compare=<对比分支> --reviewers=<a,b> [--cc=<a,b>] [--dry-run]
+node $CR create --repo=<本地仓库> --demand=<TAPD ID> --group=<GitLab组> --project=<工程名> \
+                --branch=<评审分支> --compare=<对比分支> --reviewers=<a,b> [--cc=<a,b>] [--dry-run]
 ```
 
 - 读接口在已登录的 publish3 页面里用 `fetch(credentials:'include')` 调 `https://publish_server.oa.fenqile.com/`，请求为 POST、表单编码。`publishPlan/list` 按 `creator` 或 `id` 过滤；`publishPlan/getPublishPlanDetailList` 的参数是 `id=<计划ID>`，不是 planId。Cookie 不出浏览器、不落盘、不输出。浏览器经 `launchLockedContext` 启动，强制直连。
@@ -60,14 +60,14 @@ node $CR create --demand=<TAPD ID> --group=<GitLab组> --project=<工程名> --b
 | `show` | 计划字段、版本描述、应用明细 | 否 |
 | `create` | 校验与查重 → 填表 → 打印并截图；不带 `--dry-run` 时保存，抓取新 ID，再用 list 和 detail 回读校验 | 是（不带 `--dry-run` 时） |
 | `lexiao_cr.js list` | 乐效 CR 记录：id、工程、评审/对比分支、状态、阶段、Diff 范围、评审人、抄送、Phabricator 链接 | 否 |
-| `lexiao_cr.js create` | 在“创建CodeReview”弹窗按值精确选择各字段 → 打印表单；不带 `--dry-run` 时点“确 定”并确认“此操作将发起phabricator CR”，抓 `code_review_id` 后用 list 回读分支、评审人、抄送 | 是（不带 `--dry-run` 时） |
+| `lexiao_cr.js create` | 先在 `--repo` 里 fetch 并检查：`origin/<评审分支>` 已包含 `origin/<对比分支>`、且未合入对比分支，否则拒绝 → 在“创建CodeReview”弹窗按值精确选择各字段 → 打印表单；不带 `--dry-run` 时点“确 定”并确认“此操作将发起phabricator CR”，抓 `code_review_id` 后用 list 回读分支、评审人、抄送 | 是（不带 `--dry-run` 时） |
 | `modify` | 只改 `description` 和 `notify`，其他字段保持原值；要求计划待审批且列表行有“修改”；回读校验 version 加 1、描述和通知一致、应用明细不变 | 是（不带 `--dry-run` 时） |
 
 ## 工作流
 
 1. 读发布指南模板。前端发布指南在飞书 wiki `https://lexin.feishu.cn/wiki/DrOFwKwq0iiKqvk1603cKrCmnHk`，第 7.1 节“新建审批单”给出版本描述模板。用 `manage-feishu-doc` 读取：`node /home/joney/projects/ai/agent-tools/skills/lexin/manage-feishu-doc/scripts/feishu_doc.mjs read --target=<链接> --scope=keyword --keyword='新建审批单' --context-after=40`。读不到时以示例 plan.json 的 7 段结构为准。
 2. 取默认值：跑 `history`，把最近计划的业务名（列表里显示的是 bizLine，例如“风控业务线”；表单要选中心名，例如“风控研发中心”）、approvers、通知方式列给用户确认。拿不准时用 `options --biz=<业务名>` 看可选项。同时询问“是否已发送发布周知”。
-3. 建 CR：`lexiao_cr.js list --demand=<ID> --project=<前端工程>` 看本分支是否已有记录。没有时用 `list --project=<前端工程>` 取最近的评审人、抄送人给用户确认，跑 `create ... --dry-run` 核对表单，用户同意后去掉 `--dry-run` 创建；按 list 结果填“CR情况”。
+3. 建 CR（必须在需求分支合入 product 之前）：先把 `origin/product` 合入需求分支并推送；`lexiao_cr.js list --demand=<ID> --project=<前端工程>` 看本分支是否已有记录。没有时用 `list --project=<前端工程>` 取最近的评审人、抄送人给用户确认，跑 `create ... --dry-run` 核对表单，用户同意后去掉 `--dry-run` 创建；按 list 结果填“CR情况”。
 4. 区分前端和后端：每份计划只写本端内容。后端事项（Hippo、后端应用、配置、数据库）留给后端计划，前端描述里最多写一句发布先后依赖。
 5. 写 plan.json：放在任务临时目录，字段见下表，可以复制示例再改。
 6. 跑 `create --file=<plan.json> --dry-run`，把打印的表单内容和截图路径给用户看，并提醒“保存后进入待审批”。
@@ -113,5 +113,5 @@ patch.json 只允许 `description`、`notify` 两个字段，写法同上。
 - publish3 后端发布计划后续补充。目前 `projectType=backend` 直接报错；后端发布方案文档的内容规则见 `references/backend-plan-doc.md`，没有脚本；后端事项（Hippo、后端应用、配置、数据库）写进后端计划，不写进前端计划。
 - 紧急发布、跨团队项目未实测，脚本也不支持。多个应用（插入行）和 `notify` 除 `none` 外的取值未实测，脚本会校验最终的应用顺序和通知值，不一致就报错。
 - 正式保存（`publishPlan/add`）和修改提交的接口路径只按 2026-10-21 主会话的人工实测记录实现，本 skill 交付时没有对平台做真实写入；首次正式使用时要核对脚本输出的回读结果。
-- `lexiao_cr.js create` 2026-11-04 在需求 1426731 上实测创建过 1 次（记录 87001，web_mihawk_oa，评审人 jianquanma，抄送 jaydeng、jensxu），之后状态由“发起中”变为“无需CR”、无 Phabricator 链接，原因未查明；撤回、更新 CR 和后端工程的“CR邀请”不做。
+- `lexiao_cr.js create` 2026-11-04 在需求 1426731 上实测创建过 1 次（记录 87001，web_mihawk_oa，评审人 jianquanma，抄送 jaydeng、jensxu），之后状态由“发起中”变为“无需CR”、无 Phabricator 链接：原因是该分支此前已合入 product，Diff 为空，现已由 `create` 的分支检查拦截；撤回、更新 CR 和后端工程的“CR邀请”不做。
 - 删除计划、发布申请、发布单、上传附件、工程列表（老 pub 工程）不做。

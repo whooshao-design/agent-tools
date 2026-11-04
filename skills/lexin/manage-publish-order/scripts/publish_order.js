@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 'use strict';
 // Frontend 发布单 on publish3 (publish3.oa.fenqile.com, 应用发布 > 应用版本发布):
-//   merge  : merge the requirement branch into the frontend release branch (default product) in a temp worktree and push
+//   merge  : merge the requirement branch into the frontend release branch (default product) in a temp worktree and push;
+//            refuses unless the branch has a Lexiao CR通过 record created after its last commit
 //   list   : read the creator's release orders
 //   create : fill the 新建前端发布单 form via the real page and click 创建 (no 打包 / 推送)
 //   pack   : click 打包 on an existing order and confirm the page dialogs (never 推送 / 一键发布 / 回滚 / 结单)
@@ -16,6 +17,7 @@ const { createRequire } = require('module');
 const BROWSER_SESSION_DIR = '/home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts';
 const { launchLockedContext, resolvePaths } = require(path.join(BROWSER_SESSION_DIR, 'browser_session.js'));
 const { buildBrowserEnv, chromiumArgsFor } = require(path.join(BROWSER_SESSION_DIR, 'browser_network.js'));
+const { crGate, queryCodeReviews } = require('/home/joney/projects/ai/agent-tools/skills/lexin/manage-publish-plan/scripts/lexiao_cr.js');
 
 const PUBLISH_HOME = 'https://publish3.oa.fenqile.com/';
 // #/verPub cannot be opened directly (the SPA redirects to #/); enter through the menu from the plan list.
@@ -33,6 +35,7 @@ const FORBIDDEN_REQUEST = /(push|rollback|roll_back|finish|close|onekey|autopubl
 
 const USAGE = `Usage:
   node publish_order.js merge  --repo=<前端仓库> [--branch=<需求分支，默认当前分支>] [--target=product] [--dry-run]
+                               [--skip-cr-check]  (只在用户明确说本次不需要 CR 时使用)
   node publish_order.js list   [--app=<应用名>] [--creator=<OA用户名>]
   node publish_order.js create --app=<应用名> --desc=<发布版本描述> [--pub-type=version|patch] [--envs=pre,gray,prod]
                                [--branch=product] [--repo=<前端仓库> --feature=<需求分支>] [--allow-open] [--dry-run]
@@ -124,7 +127,31 @@ function isAncestor(repo, ancestor, ref) {
   try { git(repo, ['merge-base', '--is-ancestor', ancestor, ref]); return true; } catch (_) { return false; }
 }
 
-function cmdMerge(args) {
+// Requirement id is the trailing number of rel_<name>_<tapdId>; the Lexiao project name is the remote repo name.
+function crTarget(repo, branch) {
+  const demand = (branch.match(/_(\d+)$/) || [])[1];
+  if (!demand) throw new OrderError(`cannot read the TAPD id from branch ${branch}; expected rel_<name>_<tapdId>`);
+  const project = path.basename(git(repo, ['remote', 'get-url', 'origin'])).replace(/\.git$/, '');
+  return { demand, project };
+}
+
+async function assertCrPassed(repo, branch, args) {
+  if (args['skip-cr-check']) {
+    console.log('WARNING --skip-cr-check: 未检查乐效 CR 记录。');
+    return;
+  }
+  const { demand, project } = crTarget(repo, branch);
+  const lastCommitMs = Number(git(repo, ['log', '-1', '--format=%ct', `origin/${branch}`])) * 1000;
+  const rows = await queryCodeReviews({ demand, project, profile: args.profile });
+  const gate = crGate(rows, branch, lastCommitMs);
+  if (!gate.ok) {
+    throw new OrderError(`${gate.reason}. Merge into the release branch only after CR通过 `
+      + '(manage-publish-plan scripts/lexiao_cr.js); pass --skip-cr-check only when the user says no CR is needed.');
+  }
+  console.log(`CR 已通过: 记录 ${gate.row.id} ${gate.row.url}`);
+}
+
+async function cmdMerge(args) {
   const repo = path.resolve(text(args.repo) || process.cwd());
   const target = text(args.target) || 'product';
   const branch = text(args.branch) || git(repo, ['rev-parse', '--abbrev-ref', 'HEAD']);
@@ -137,6 +164,7 @@ function cmdMerge(args) {
     console.log(`${branch} is already merged into origin/${target} (${git(repo, ['rev-parse', '--short', `origin/${target}`])}); nothing to do.`);
     return;
   }
+  await assertCrPassed(repo, branch, args);
   const commits = git(repo, ['log', '--oneline', `origin/${target}..origin/${branch}`]);
   const files = git(repo, ['diff', '--name-only', `origin/${target}...origin/${branch}`]);
   console.log(`将合并 ${branch} -> ${target}，提交:\n${commits}\n改动文件:\n${files}`);
