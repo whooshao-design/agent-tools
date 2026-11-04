@@ -6,6 +6,7 @@ checked, so existing code is never reported. Reports:
   - method without JavaDoc, or JavaDoc without a purpose sentence
   - parameter without a non-empty `@param`, non-void method without `@return`
   - field or constant without JavaDoc
+  - method body of at least --min-body lines without any // step comment
 Exempt: getter/setter/one-line delegation bodies, `@Override` methods (doc is
 on the interface), `serialVersionUID`, loggers and injected (`@Autowired`,
 `@Resource`) fields.
@@ -26,6 +27,7 @@ FIELD_RE = re.compile(
     r"^\s*(?P<mods>(?:(?:public|protected|private|static|final|volatile|transient)\s+)*)"
     r"(?P<type>[\w$.<>\[\],? ]+?)\s+(?P<name>[\w$]+)\s*(?:=[^;]*)?;\s*(?://.*)?$")
 INJECT = ("@Autowired", "@Resource", "@Inject", "@Value")
+MIN_BODY = 12
 
 
 def added_lines(repo, base, path):
@@ -192,9 +194,12 @@ def check_method(lines, idx, m, path):
         return []
     if re.match(r"(get|set|is)[A-Z]", name) and body_lines(lines, idx) <= 1:
         return []
-    if doc is None:
-        return [where + " 缺少 JavaDoc"]
     issues = []
+    body, comments = body_stats(lines, idx)
+    if body >= MIN_BODY and comments == 0:
+        issues.append("%s 方法体 %d 行没有方法内注释，按步骤补充说明" % (where, body))
+    if doc is None:
+        return issues + [where + " 缺少 JavaDoc"]
     purpose, params, has_return = doc_tags(doc)
     if not purpose:
         issues.append(where + " JavaDoc 缺少用途说明")
@@ -204,6 +209,26 @@ def check_method(lines, idx, m, path):
     if ret and ret != "void" and not CTOR_RE.match(lines[idx]) and not has_return:
         issues.append(where + " 缺少 @return 或描述为空")
     return issues
+
+
+def body_stats(lines, idx):
+    """Return (non-blank statement lines, // comment lines) of the method body declared at idx."""
+    depth, started, body, comments = 0, False, 0, 0
+    for j in range(idx, len(lines)):
+        stripped = lines[j].strip()
+        if started and stripped and stripped != "}":
+            body += 1
+            if stripped.startswith("//"):
+                comments += 1
+        code = strip_literals(lines[j])
+        depth += code.count("{") - code.count("}")
+        if "{" in code:
+            started = True
+        if started and depth <= 0:
+            break
+        if not started and stripped.endswith(";"):
+            break
+    return body, comments
 
 
 def check_field(lines, idx, f, path):
@@ -245,8 +270,12 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--repo", default=".")
     ap.add_argument("--base", required=True, help="base revision, e.g. origin/master or a merge-base commit")
+    ap.add_argument("--min-body", type=int, default=12,
+                    help="report methods whose body has at least this many lines and no // comment")
     ap.add_argument("files", nargs="*", help="limit to these repo-relative files")
     args = ap.parse_args()
+    global MIN_BODY
+    MIN_BODY = args.min_body
     try:
         files = args.files or changed_files(args.repo, args.base)
     except subprocess.CalledProcessError as e:

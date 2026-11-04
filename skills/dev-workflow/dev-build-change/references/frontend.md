@@ -44,6 +44,7 @@ rg -n "import .*CustomMessageBox" src                              # 找具体�
 
 先读仓库的注释规范（`web_mihawk_oa` 在根目录 `CLAUDE.md` 的"注释规范"：方法用带类型的 JSDoc，template 用 `<!-- -->` 标功能块），没有规范时按下面的默认写法。写到什么程度见 `implementation-simplicity.md` 注释一节。
 
+- 方法和 computed 内部按 `implementation-simplicity.md`「方法内部」一条写步骤注释，例如请求前清空了哪些状态、为什么在 `$nextTick` 里调用、传 null 给渲染库代表什么。
 - `methods`：每个新增方法写 JSDoc，`@param {类型} 名称 - 含义`、`@returns {类型} - 含义`，不用 Java 的 `@return`/`@throws`。异步方法写清失败时界面的表现（提示、保留旧数据还是清空、是否可重试），返回 Promise 时写 resolve 的值。
 - `props`：每个 prop 写含义、取值或数据结构、是否必传及默认值的语义；对象或数组 prop 写出关键字段。
 - `computed`：写返回什么、由哪些数据推导；只是简单取值时可省。

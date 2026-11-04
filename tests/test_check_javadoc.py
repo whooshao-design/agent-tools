@@ -64,6 +64,29 @@ class CheckJavadocTest(unittest.TestCase):
         self.assertNotIn("old()", out)
         self.assertNotIn("local", out)
 
+    def test_reports_long_method_without_inline_comments(self):
+        body = "\n".join("                int v%d = a;" % i for i in range(12))
+        code, out = self.run_check(self.BASE, """\
+            public class A {
+                public int old(int x) {
+                    return x;
+                }
+
+                /**
+                 * Long.
+                 *
+                 * @param a first
+                 * @return sum
+                 */
+                public int longOne(int a) {
+%s
+                    return a;
+                }
+            }
+            """ % body)
+        self.assertEqual(code, 1)
+        self.assertIn("longOne() 方法体 13 行没有方法内注释", out)
+
     def test_clean_when_documented_or_exempt(self):
         code, out = self.run_check(self.BASE, """\
             public class A {
