@@ -33,12 +33,25 @@ rg -n "import .*CustomMessageBox" src                              # 找具体�
 ## 3. 写法
 
 - 模板优先。弹窗、提示等内容的显隐和文案状态放在 `data`/`computed`，不在方法里临时拼 DOM。
-- 方法职责单一。按团队规范写注释，例如规范要求 JSDoc 时，新增方法写 JSDoc。
+- 方法职责单一。
 - Options API 的 `methods` 和生命周期钩子不用箭头函数，否则会丢失组件实例 `this`；防抖或节流函数在 `created` 里按实例创建，不在 `methods` 定义处直接包装，否则多个实例会共用同一个计时器。
 - import 顺序和 alias 跟随规范（如第三方 → `@/` → 相对路径 → 样式）。与同文件现有风格冲突时以同文件为准，避免同一文件出现两种风格，并在开发记录里说明原因。
 - 接口调用放进仓库约定的 api 层（如 `src/modules/Index/api/<域>/index.js`），不在组件里新写散落的 URL。
 - 文案、后端返回值和外部配置按纯文本插值渲染（`{{ }}`、`textContent`）。不用 `v-html`、`innerHTML`、`dangerouslySetInnerHTML` 渲染不可信内容；确需渲染富文本时，复用仓库已有的净化方式（如 `dompurify`）；`:href`/`:src` 不绑定未校验的外部 URL，防止 `javascript:` 链接。
 - 删除、覆盖、发布等破坏性操作要有确认步骤；提交按钮在请求进行中禁用或显示 loading，防止重复提交；失败提示说明下一步怎么做，不只显示“失败”。
+
+### 注释
+
+先读仓库的注释规范（`web_mihawk_oa` 在根目录 `CLAUDE.md` 的"注释规范"：方法用带类型的 JSDoc，template 用 `<!-- -->` 标功能块），没有规范时按下面的默认写法。写到什么程度见 `implementation-simplicity.md` 注释一节。
+
+- `methods`：每个新增方法写 JSDoc，`@param {类型} 名称 - 含义`、`@returns {类型} - 含义`，不用 Java 的 `@return`/`@throws`。异步方法写清失败时界面的表现（提示、保留旧数据还是清空、是否可重试），返回 Promise 时写 resolve 的值。
+- `props`：每个 prop 写含义、取值或数据结构、是否必传及默认值的语义；对象或数组 prop 写出关键字段。
+- `computed`：写返回什么、由哪些数据推导；只是简单取值时可省。
+- `data` 和非响应式实例字段：只写含义不直观或有生命周期约束的状态（例如何时创建、在 `beforeDestroy` 释放）。
+- `watch` 和生命周期钩子：写为什么在这里做，以及清理对应在哪里。
+- 组件对外事件（`$emit`）：在组件说明或触发处写事件名和载荷结构。
+- `template`：按仓库规范用 `<!-- -->` 标出主要功能块和插槽用途，不逐个元素标注。
+- api 层函数（如 `api/<域>/index.js`）：JSDoc 写对应后端接口、请求参数结构和返回数据结构。
 
 ## 4. 版式与样式
 

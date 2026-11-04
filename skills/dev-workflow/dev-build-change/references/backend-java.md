@@ -17,7 +17,15 @@
 ## 3. 注释
 
 - 线程池、缓存等资源的归属与生命周期不明显时，在类或字段上说明谁创建、谁关闭、作用范围多大。
-- 普通注释默认不用 HTML 标签；正式 JavaDoc 仅在多段说明或项目既有风格需要时使用 `<p>`。
+- 方法注释用 JavaDoc：首句写用途，`@param` 写业务含义和取值约束，`@return` 写返回值含义（含 null、空集合），会抛业务异常时写 `@throws` 及触发条件；`@param`、`@return` 不留空描述（仓库常见的空 `@param x` 不作参照）。private 方法也按此写，只有 getter、setter、一行委托可省。
+- 类注释写职责和边界，有多步流程时写步骤概要；Spring Bean 写清是否只读业务数据。
+- DTO/VO（含 Lombok `@Data`）每个字段写 JavaDoc：含义、枚举值、为 null 或空集合时的语义、取值来源；只有含义与名称完全一致且无空值语义的 ID 字段可省。常量、内部类及其字段同样要求。
+- 名称就是取值本身的一组常量（如 JSON 键名常量）可以用一段 `/* ... */` 分组注释统一说明，不必逐个写。
+- 交付前用脚本检查本次新增的方法和字段（只检查相对 base 新增的声明，不报已有代码；`@Override` 方法、getter/setter、注入字段、`serialVersionUID` 和名称自明的 ID 字段自动跳过）：
+  `python3 /home/joney/projects/ai/agent-tools/skills/dev-workflow/dev-build-change/scripts/check_javadoc.py --repo <仓库> --base <开发起点提交> [文件...]`
+  退出码 1 时按输出逐条补齐；脚本只检查有没有写，写得对不对仍要人工核对。
+- Dubbo/网关接口方法写清入参各字段要求、返回 `MihawkCommRetVO` 里实际承载的类型（`{@link}` 到具体 Bean）和业务错误码。
+- 普通注释默认不用 HTML 标签；正式 JavaDoc 仅在多段说明或项目既有风格需要时使用 `<p>`。JavaDoc 里避免裸写 `<ID>` 这类尖括号占位，改用文字描述。
 
 ## 4. 契约与发布
 
