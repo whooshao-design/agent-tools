@@ -1,0 +1,6 @@
+interface:
+  display_name: "Prepare SER Transfer File"
+  short_description: "从服务器取 SER 包转迁移 XML 并上传 oss-fk，产出 TransferService#transfer 的 filePath"
+  default_prompt: "使用 $prepare-ser-transfer-file 为 SER 迁移准备 filePath。"
+policy:
+  allow_implicit_invocation: true
