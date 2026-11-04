@@ -2,7 +2,7 @@
 name: manage-publish-plan
 description: 在乐信发布系统 publish3（publish3.oa.fenqile.com）为乐效流程需求新建“普通应用发布”前端发布计划，或修改尚未提交审批（待审批、列表有“修改”按钮）的计划的版本描述与通知方式；先用历史计划取默认值并经用户确认，按前端发布指南模板写版本描述并检查是否混入后端事项，先 dry-run 预览再保存，写后回读校验，复用 get-browser-session 浏览器登录态。另按 references/backend-plan-doc.md 撰写 TQM 发布计划评审“发布方案（后台）”飞书文档的后端发布内容。Use when 用户要求在 publish3 建发布计划、给需求建前端发布计划、建计划前给前端工程建乐效 Phabricator CR 或查 CR 状态、修改发布计划的版本描述、查看自己的历史发布计划或某个计划详情、查看业务名对应的审批人选项、编写后端发布方案（应用/配置发布顺序、回退、灰度）；不负责 publish3 后端计划（后续补充）、发布申请、删除计划、发布单、打包推送，也不负责乐效集成部署或 Hippo 配置。
 metadata:
-  version: 1.3.1
+  version: 1.3.2
 ---
 
 # manage-publish-plan
@@ -72,7 +72,7 @@ node $CR create --repo=<本地仓库> --demand=<TAPD ID> --group=<GitLab组> --p
 5. 写 plan.json：放在任务临时目录，字段见下表，可以复制示例再改。
 6. 跑 `create --file=<plan.json> --dry-run`，把打印的表单内容给用户确认（不给截图），并提醒“保存后进入待审批”。
 7. 用户确认后去掉 `--dry-run` 正式保存，汇报计划 ID 和回读结果，并提醒用户在 publish3 发布计划列表该行点“修改”核对后，自己点“发布申请”提交审批。
-8. 回读汇报后提醒用户：米霍克发布前要在“米霍克问题沟通群”@所有人发升级提醒（文案模板见发布指南），这一步由用户自己发；计划审批通过后，再由用户按指南 7.2 建发布单。
+8. 回读汇报后提醒用户：米霍克发布前要在“米霍克问题沟通群”@所有人发升级提醒（文案模板见发布指南），这一步由用户自己发；发布单不必等计划审批：CR通过、合入 product 后就可以用 `manage-publish-order` 建单打包、推预发布先验证，灰度和线上等计划审批通过再推。
 
 修改计划时：先 `show --id=<ID>` 看现状，写只含 `description` 和/或 `notify` 的 patch.json，跑 `modify --dry-run` 给用户确认，再正式修改。
 
