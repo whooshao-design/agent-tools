@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
-  approvalInfo, buildPayload, classifyProbe, normalizeRuleUrl, runAdd, sameRuleUrl, validateAddArgs,
+  approvalInfo, buildPayload, classifyProbe, consoleIp, normalizeRuleUrl, runAdd, sameRuleUrl, validateAddArgs,
 } = require('../scripts/oa_gateway_rule');
 
 const TEMPLATE = {
@@ -121,4 +121,18 @@ test('add arguments are validated before any console call', () => {
   validateAddArgs({ ...ADD_ARGS, interface: 'other.Service', 'lsf-app': 'server_y' }, TEMPLATE);
   const payload = buildPayload(TEMPLATE, { url: 'a.json', method: 'm', interfaceName: 'other.Service', lsfApp: 'server_y', urlManager: 'me' });
   assert.equal(payload.lsf_app_name, 'server_y');
+});
+
+test('project console ip comes from the argument or local env and is required', () => {
+  const saved = process.env.OA_GATEWAY_PRJ_CONSOLE_IP;
+  try {
+    delete process.env.OA_GATEWAY_PRJ_CONSOLE_IP;
+    assert.throws(() => consoleIp({}), /OA_GATEWAY_PRJ_CONSOLE_IP/);
+    process.env.OA_GATEWAY_PRJ_CONSOLE_IP = '192.0.2.1';
+    assert.equal(consoleIp({}), '192.0.2.1');
+    assert.equal(consoleIp({ 'console-ip': '192.0.2.2' }), '192.0.2.2');
+  } finally {
+    if (saved === undefined) delete process.env.OA_GATEWAY_PRJ_CONSOLE_IP;
+    else process.env.OA_GATEWAY_PRJ_CONSOLE_IP = saved;
+  }
 });

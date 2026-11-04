@@ -12,8 +12,6 @@ const { buildBrowserEnv, chromiumArgsFor } = require('../../get-browser-session/
 
 const CONSOLE = 'https://gateway.oa.fenqile.com';
 const CONSOLE_HOST = 'gateway.oa.fenqile.com';
-// 项目环境网关控制台（hosts: 10.9.22.52 gateway.oa.fenqile.com，2026-11-02 用户提供并实测）；变化时用 --console-ip 覆盖。
-const DEFAULT_PRJ_CONSOLE_IP = '10.9.22.52';
 const RULE_API = '/rc_oa_gateway/application/url_interface_rule';
 const NOT_LOGGED_IN = '16051006';
 const NOT_ROUTED = '16051005';
@@ -130,7 +128,10 @@ async function openConsole(args, env) {
 }
 
 function consoleIp(args) {
-  return args['console-ip'] || DEFAULT_PRJ_CONSOLE_IP;
+  // 项目环境控制台地址不入库，来自 env/credentials.env（bin/with-env 载入）或 --console-ip
+  const ip = args['console-ip'] || process.env.OA_GATEWAY_PRJ_CONSOLE_IP;
+  if (!ip) throw new Error('项目环境需要 OA_GATEWAY_PRJ_CONSOLE_IP 或 --console-ip');
+  return ip;
 }
 
 async function queryRules(call, filter) {
@@ -238,4 +239,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { approvalInfo, buildPayload, classifyProbe, normalizeRuleUrl, runAdd, sameRuleUrl, validateAddArgs };
+module.exports = { approvalInfo, buildPayload, classifyProbe, consoleIp, normalizeRuleUrl, runAdd, sameRuleUrl, validateAddArgs };
