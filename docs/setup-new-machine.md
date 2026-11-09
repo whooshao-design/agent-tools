@@ -98,3 +98,63 @@ python3 skills/common/spawn-model-agent/scripts/spawn_model_agent.py --backend <
 ## 10. 卸载与回滚
 
 `python3 install.py --uninstall --with-global --with-subagents --with-session-cleanup --with-mcp` 只删 manifest 记录且未被改动的链接、副本、env 键与 MCP 注册，恢复被 `--force` 替换的原注册；指向其他克隆的指针文件与用户改过值的 env 键保留并逐项说明。回滚某次升级：新版 `--uninstall` → `git checkout` 旧版本 → 旧版重新安装。
+
+## 11. Claude Code 权限放行清单（auto mode）
+
+auto mode 的分类器对三类调用不会自动放行：改 `~/.claude` 下配置文件的动作（硬拦截，用户授权和 allow 规则都绕不过，只能切出 auto mode 后人工确认，或在 `/permissions` 里放行单次调用）；MCP 工具（不做判定，必须列在 `permissions.allow` 里）；它看不懂的 shell（`python3 - <<EOF` 这类内联脚本）。下面是本仓库只读动作的放行清单，并进 `~/.claude/settings.json` 的 `permissions.allow`（或用 `/permissions` 逐条加）。规则按命令文本前缀匹配、不展开变量，所以 `<AGENT_TOOLS_ROOT>` 要替换成本机克隆的绝对路径，`<WORKSPACE_ROOT>` 替换成代码工作区（`AGENT_TOOLS_WORKSPACE_ROOT`，默认 `~/projects`）：
+
+```json
+"Edit(<WORKSPACE_ROOT>/**)",
+"Bash(python3 -m unittest:*)", "Bash(python3 -m py_compile:*)",
+"Bash(node --test:*)", "Bash(node --check:*)", "Bash(bash -n:*)",
+"Bash(node -e:*)", "Bash(node -p:*)", "Bash(node --version:*)",
+"Bash(git diff:*)", "Bash(git log:*)", "Bash(git status:*)", "Bash(git show:*)", "Bash(git ls-files:*)",
+"Bash(python3 install.py --dry-run:*)",
+"Bash(python3 <AGENT_TOOLS_ROOT>/skills/lexin/test-dubbo-api/scripts/dubbo_request.py:*)",
+"Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/query-mysql-data/scripts/mysql_readonly.js *)",
+"Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/query-hippo-config/scripts/hippo_query.js *)",
+"Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/query-app-instances/scripts/query_app_instances.js *)",
+"Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/query-hive-data/scripts/hive_query.js *)",
+"Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/query-clickhouse-water/scripts/clickhouse_http.js *)",
+"Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/query-dubbo-registry/scripts/query_dubbo_registry.js *)",
+"Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/query-app-logs/scripts/log_platform_query.js *)",
+"Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/inspect-healthy-metrics/scripts/inspect_metrics.js *)",
+"Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/inspect-healthy-jvm-dashboard/scripts/inspect_dashboard.js *)",
+"Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/inspect-app-call-topology/scripts/inspect_call_topology.js *)",
+"Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/diagnose-healthy-alert/scripts/diagnose_alert.js *)",
+"Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/fetch-tapd-story/scripts/fetch_tapd_story.js *)",
+"Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/locate-frontend-page/scripts/locate_frontend_page.js *)",
+"Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/java-server-diagnostics/scripts/webshell_log_check.js *)",
+"Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/java-server-diagnostics/scripts/container_log_check.js *)",
+"Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/get-browser-session/scripts/browser_session.js --status*)",
+"Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/get-browser-session/scripts/browser_session.js --doctor*)",
+"Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/start-local-frontend/scripts/frontend_env.js doctor*)",
+"Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/configure-hippo/scripts/hippo_draft_config.js status *)",
+"Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/configure-hippo/scripts/hippo_draft_config.js plan *)",
+"Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/configure-hippo/scripts/hippo_draft_config.js verify *)",
+"Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/configure-hippo/scripts/hippo_draft_config.js upsert --env=stable *)",
+"mcp__bastion__connect_bastion", "mcp__bastion__connection_status", "mcp__bastion__execute_command", "mcp__bastion__clickhouse_query",
+"mcp__bastion_dba__connect_bastion", "mcp__bastion_dba__connection_status", "mcp__bastion_dba__execute_command", "mcp__bastion_dba__clickhouse_query",
+"mcp__devtools__mysql_lxcloud_query", "mcp__devtools__dubbo_dry_run", "mcp__devtools__fetch_with_session", "mcp__devtools__internal_http_get",
+"mcp__devtools__registry_get", "mcp__devtools__nacos_get_config", "mcp__devtools__nacos_list_instances", "mcp__devtools__redis_query",
+"mcp__devtools__healthy_query_metrics", "mcp__devtools__healthy_read_board", "mcp__devtools__healthy_verify_board",
+"mcp__devtools__prometheus_query", "mcp__devtools__prometheus_query_range", "mcp__devtools__loki_query_range", "mcp__devtools__jaeger_trace", "mcp__devtools__skywalking_graphql",
+"mcp__devtools__check_session", "mcp__devtools__browser_doctor", "mcp__devtools__browser_page_snapshot",
+"mcp__devtools__current_repo_context", "mcp__devtools__list_local_git_repos", "mcp__devtools__local_code_search", "mcp__devtools__normalize_project_path",
+"mcp__devtools__gitlab_code_search", "mcp__devtools__get_project", "mcp__devtools__get_merge_request", "mcp__devtools__list_merge_requests",
+"mcp__devtools__get_pipeline", "mcp__devtools__get_pipeline_stages", "mcp__devtools__list_project_pipelines", "mcp__devtools__get_build_status", "mcp__devtools__get_console_summary", "mcp__devtools__get_testng_summary",
+"mcp__devtools__get_sonarqube_quality_gate_status", "mcp__devtools__list_sonarqube_branches", "mcp__devtools__list_sonarqube_issues", "mcp__devtools__list_sonarqube_pull_requests", "mcp__devtools__parse_sonarqube_project", "mcp__devtools__show_sonarqube_rule", "mcp__devtools__transition_sonarqube_issues",
+"mcp__devtools__maven_local_find", "mcp__devtools__maven_metadata", "mcp__devtools__maven_pom", "mcp__devtools__nexus_search",
+"mcp__devtools__lexiao_list_apps", "mcp__devtools__lexiao_project_status", "mcp__devtools__lexiao_project_build_check", "mcp__devtools__lexiao_deployment_status",
+"mcp__devtools__k8s_contexts", "mcp__devtools__k8s_get", "mcp__devtools__k8s_describe", "mcp__devtools__k8s_events", "mcp__devtools__k8s_logs", "mcp__devtools__k8s_doctor",
+"mcp__devtools__kafka_list_topics", "mcp__devtools__kafka_describe_topic", "mcp__devtools__kafka_consumer_groups", "mcp__devtools__mq_console_get", "mcp__devtools__mq_doctor", "mcp__devtools__mysql_doctor",
+"mcp__devtools__local_health_get", "mcp__devtools__network_port_status", "mcp__devtools__infer_feature_pipeline",
+"mcp__devtools__app_server_connection_status", "mcp__devtools__connect_app_server_bastion", "mcp__devtools__discover_java_apps", "mcp__devtools__find_java_process",
+"mcp__devtools__java_process_status", "mcp__devtools__java_jvm_summary", "mcp__devtools__java_thread_summary", "mcp__devtools__java_gc_log_summary", "mcp__devtools__server_basic_status",
+"mcp__devtools__list_log_files", "mcp__devtools__tail_app_log", "mcp__devtools__grep_app_log", "mcp__devtools__check_app_error_log", "mcp__devtools__recent_error_summary",
+"mcp__devtools__list_version_log_files", "mcp__devtools__tail_version_log", "mcp__devtools__grep_version_log"
+```
+
+有意不放行（每次都要人工确认）：写 Hippo 的 `hippo_draft_config.js upsert`（非 stable）/`publish`/`namespace-create`/`namespace-grant`/`delete-item`，乐效 `lexiao_*` 脚本与 `mcp__devtools__lexiao_branch_integrate|build_app|build_many|project_build|project_deploy|deploy_one|open_order`，发布系统 `publish_order.js`/`publish_plan.js`/`lexiao_cr.js`，TQM `tqm_cases.js`，TAPD `tapd_workitem.js`，雷神写入 `register_metrics.js`/`healthy_dashboard_config.js`/`mcp__devtools__healthy_update_board`/`healthy_apply_hawk_read_through`，`mcp__devtools__rocketmq_admin`、`dubbo_call`、`browser_click_*`、`ensure_session`/`renew_session`/`export_session`、`get_cookies`，`okr_weekly.mjs write`，不带 `--dry-run` 的 `install.py`，以及任何改 `~/.claude`、`~/.codex` 配置的动作。`transition_sonarqube_issues` 会改 Sonar 问题状态，放行是本机使用者的选择，新机器可去掉。
+
+这份清单只对 Claude Code 生效；Codex 不读 `settings.json`，它的放行由 `~/.codex/config.toml` 的 sandbox 与 approval 策略决定。
