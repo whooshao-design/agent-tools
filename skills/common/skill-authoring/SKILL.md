@@ -2,7 +2,7 @@
 name: skill-authoring
 description: Use when 需要在 agent-tools 仓库中创建新 skill、修改 skill 分类，或检查现有 skill 是否符合仓库约定（frontmatter、路径、分类、双端安装）。
 metadata:
-  version: 1.3.0
+  version: 1.3.1
 ---
 
 # skill-authoring
@@ -54,6 +54,9 @@ metadata:
 - 脚本不自己拼仓库路径：按扩展名复制 `lib/agent_tools/bootstrap.js` / `bootstrap.mjs` / `bootstrap.py` 的引导代码块（两条标记之间逐字一致），
   之后用 `skillDir('<skill>', ...)` 取兄弟 skill 文件、`repoRoot()` 取仓库级文件、`os.homedir()` / `Path.home()` 取家目录；
   浏览器类脚本经 `browserRuntime()` 取 Playwright 与 Chromium 路径，不写 `chrome-linux64`、`runtime-libs` 字面量。
+- bash 脚本没有引导模板，照 `skills/lexin/okr-weekly-progress/scripts/run_scheduled.sh` 开头的写法：`SCRIPT_DIR`、`SKILL_DIR`，仓库根按
+  “上三层 → `AGENT_TOOLS_ROOT` → `~/.config/agent-tools/root`”三来源取第一个满足 `[ -f "$ROOT/install.py" ] && [ -d "$ROOT/skills" ]` 的目录，
+  都没有则退出码 2；GNU 专有命令（`sort -z`、`xargs -r`、`timeout`、`sha256sum`）要么回退（`shasum -a 256`）要么在 SKILL.md 写明只在 Linux/WSL 运行。
 - 与某个 MCP server 能力重叠时，开头注明"MCP 优先、脚本兜底"。
 - 不在正文中写入任何凭据、token、真实 IP 清单；此类数据放本地文件并加入 `.gitignore`。
 
@@ -89,7 +92,7 @@ cd "$AGENT_TOOLS_ROOT" && python3 install.py
 然后跑仓库测试与评测：
 
 ```bash
-cd "$AGENT_TOOLS_ROOT" && python3 -m unittest discover -s tests   # 含六条可移植 lint 规则，AGENT_TOOLS_LINT_ENFORCE=1 时命中即失败
+cd "$AGENT_TOOLS_ROOT" && python3 -m unittest discover -s tests   # 含六条可移植 lint 规则，命中即失败（AGENT_TOOLS_LINT_ENFORCE=0 临时只打印）
 python3 bin/skill_routing_eval.py   # 改了 description 时
 ```
 

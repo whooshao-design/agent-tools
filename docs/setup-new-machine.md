@@ -23,6 +23,7 @@ cd <任意目录>
 cp env/local.env.example env/local.env            # 可选，见第 3 节；不建也能装
 python3 install.py --dry-run --with-global --with-subagents --with-session-cleanup --with-mcp
 python3 install.py --with-global --with-subagents --with-session-cleanup --with-mcp
+git config core.hooksPath bin/git-hooks      # 提交前自动跑六条可移植 lint（硬门禁）
 ```
 
 一次安装做的事（顺序固定）：读 `env/local.env` → 链接 skill 到 `~/.claude/skills` 与 `~/.codex/skills` → 渲染 `AGENTS.global.md`（追加 `env/AGENTS.local.md`）为 `~/.claude/CLAUDE.md` 与 `~/.codex/AGENTS.md` → 渲染 agents 副本与 hook → `claude mcp add` / `codex mcp add` 注册 `devtools`、`bastion`、`bastion_dba` → 写 `~/.claude/settings.json` 的 `env` 键与 `~/.codex/config.toml` 的 `[shell_environment_policy.set]` 标记块 → 写指针文件 `~/.config/agent-tools/root` → 写 manifest（`~/.claude/.agent-tools-install.json`、`~/.codex/.agent-tools-install.json`）。

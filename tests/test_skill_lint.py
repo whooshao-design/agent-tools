@@ -23,8 +23,8 @@ portability rules (CHG-013):
   6. a bootstrap block (start marker to `agent-tools bootstrap end`) equals the template for the
      file's extension in lib/agent_tools/bootstrap.{js,mjs,py} byte for byte.
 
-Rules 1-6 only print their hits unless AGENT_TOOLS_LINT_ENFORCE is set to a value other than
-"0" (DEFAULT_ENFORCE flips to "1" in stage 4 of the migration).
+Rules 1-6 fail the suite on any hit (DEFAULT_ENFORCE = "1"); set AGENT_TOOLS_LINT_ENFORCE=0 to only
+print the hits while fixing them. They read the working tree, so untracked files are checked too.
 """
 
 import json
@@ -126,7 +126,7 @@ class SkillLintTest(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # Portability rules (CHG-013)
 
-DEFAULT_ENFORCE = "0"  # 阶段 4（DEV-019）改为 "1"
+DEFAULT_ENFORCE = "1"  # 2026-11-09 起硬门禁（DEV-019）；排查时 AGENT_TOOLS_LINT_ENFORCE=0 临时降为告警
 ENFORCE = os.environ.get("AGENT_TOOLS_LINT_ENFORCE", DEFAULT_ENFORCE) != "0"
 FORBIDDEN_FILE = REPO / "tests/lint_forbidden_identifiers.json"
 ALLOWLIST_FILE = REPO / "tests/lint_allowlist.json"

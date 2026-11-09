@@ -68,7 +68,7 @@ python3 install.py --with-subagents --uninstall
 测试只用标准库 `unittest` 和 Node 内置 `node:test`；不依赖 pytest（当前 Python 环境也未安装），仓库没有统一的 lint 配置。
 
 ```bash
-python3 -m unittest discover -s tests                    # 仓库级：install.py、bin/toolchain_audit.py、dev-workflow 契约一致性、skill 结构 lint（description 含 Use when、改内容必 bump version、六条可移植规则：本机路径与标识符、`$AGENT_TOOLS_ROOT` 引用存在、`scripts/` `references/` 相对引用存在、脚本跨 skill 经 `skillDir()`、浏览器路径字面量、引导代码与模板一致；未设 `AGENT_TOOLS_LINT_ENFORCE=1` 时只打印命中）、skill 路由评测
+python3 -m unittest discover -s tests                    # 仓库级：install.py、bin/toolchain_audit.py、dev-workflow 契约一致性、skill 结构 lint（description 含 Use when、改内容必 bump version、六条可移植规则：本机路径与标识符、`$AGENT_TOOLS_ROOT` 引用存在、`scripts/` `references/` 相对引用存在、脚本跨 skill 经 `skillDir()`、浏览器路径字面量、引导代码与模板一致；命中即失败，排查时可用 `AGENT_TOOLS_LINT_ENFORCE=0` 临时降为告警）、skill 路由评测
 python3 bin/skill_routing_eval.py [--probe "一句话"]        # skill 触发/路由评测报告；行为评测见 evals/README.md（花 token，不进单测）
 python3 -m unittest discover -s hooks/tests              # SubagentStop 结果守卫
 python3 -m unittest discover -s mcp/devtools-mcp/tests   # devtools_mcp（测试自行把包目录加入 sys.path）
@@ -78,6 +78,8 @@ node --test tools/mdview/tests/*.test.mjs                # mdview 评论存储�
 python3 -m unittest discover -s skills/lexin/get-browser-session/tests -p 'test_*.py'   # 需要 node
 ```
 
+- 提交前自动跑 lint：每个克隆执行一次 `git config core.hooksPath bin/git-hooks`，之后 `bin/git-hooks/pre-commit` 在每次 commit 前运行
+  `python3 -m unittest tests.test_skill_lint`（检查工作区，含未跟踪文件），命中即拒绝提交。
 - 单个用例：`python3 -m unittest tests.test_install.InstallTest.test_default_still_installs_only_skills`，
   或在 discover 命令后加 `-k <关键字>`；JS 直接指定文件，如 `node --test skills/lexin/configure-hippo/tests/delete_item.test.js`。
 - `node --test` 必须传文件路径或 glob；Node 24 会把目录参数当成单个测试文件而直接失败。

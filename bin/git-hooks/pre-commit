@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# git pre-commit：提交前跑 tests/test_skill_lint.py（frontmatter、版本号、六条可移植规则，硬门禁）。
+# 启用（每个克隆一次）：git config core.hooksPath bin/git-hooks
+# 检查的是工作区（含未暂存与未跟踪文件），不是暂存区；排查命中时 AGENT_TOOLS_LINT_ENFORCE=0 python3 -m unittest tests.test_skill_lint
+set -uo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
+cd "$ROOT"
+out="$(mktemp)"
+trap 'rm -f "$out"' EXIT
+if ! python3 -m unittest tests.test_skill_lint >"$out" 2>&1; then
+  cat "$out" >&2
+  echo "pre-commit: tests/test_skill_lint.py 未通过，提交被拒绝（lint 命中见上；--no-verify 可跳过但不建议）" >&2
+  exit 1
+fi
