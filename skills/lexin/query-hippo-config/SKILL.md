@@ -2,7 +2,7 @@
 name: query-hippo-config
 description: 通过 Hippo 配置中心只读查看应用配置和实际生效 release，支持标准 Hippo、stable/测试/项目环境以及墨西哥、印尼海外站点的独立域名，应用名或 namespace 不明确时可按关键字定位。Use when 用户要求查看 Hippo 配置、只给出应用关键字或业务语义要求定位配置项落在哪个应用和 namespace、线上/预发/灰度/OA/stable 配置、墨西哥或印尼海外配置、代码分支依赖的配置 key、应用默认配置、namespace 配置项，或需要根据代码里的 ConfigService/getAppConfig/@HippoConfigProperty 判断真实配置走向；默认环境为 prod/fql_prod，最终必须输出查询接口 URL 和配置结果。
 metadata:
-  version: 1.5.5
+  version: 1.5.6
 ---
 
 # query-hippo-config
@@ -79,7 +79,7 @@ key 的确定顺序：
 ## 预置脚本
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/query-hippo-config/scripts/hippo_query.js <command> [options]
+node scripts/hippo_query.js <command> [options]
 ```
 
 - `get`：查目标 key 的生效值，只输出命中项和 `missingKeys`。必须传 `--key=a,b`（英文逗号分隔）或 `--key-prefix=<前缀>`。
@@ -128,7 +128,7 @@ node .../hippo_query.js find --app-id=server-hawk-decision-task-mexyw --hippo-si
 
 ## API Reference
 
-Hippo API 路径、参数和示例见 `/home/joney/projects/ai/agent-tools/skills/lexin/query-hippo-config/references/hippo-api.md`。需要拼接接口、查公共 namespace、区分 items 与 active release，或排查 401/404/空结果时读取该 reference。
+Hippo API 路径、参数和示例见 `references/hippo-api.md`。需要拼接接口、查公共 namespace、区分 items 与 active release，或排查 401/404/空结果时读取该 reference。
 
 ## 输出格式
 

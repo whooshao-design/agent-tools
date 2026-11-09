@@ -8,8 +8,9 @@ Usage:
   python3 install.py --targets claude         # only one client
   python3 install.py --copy                   # copy instead of symlink
   python3 install.py --with-subagents         # also install reviewer agents/hooks
-  python3 install.py --with-global            # also link AGENTS.global.md as client-level instructions
+  python3 install.py --with-global            # also render AGENTS.global.md (+ env/AGENTS.local.md) as client-level instructions
   python3 install.py --with-session-cleanup   # also add Claude SessionEnd hook that removes the session temp dir
+  python3 install.py --with-mcp               # also register devtools / bastion / bastion_dba MCP servers
   python3 install.py --dry-run                # report without writing
   python3 install.py --list                   # show available groups/skills
   python3 install.py --uninstall              # remove owned installations
@@ -27,13 +28,20 @@ import secrets
 import shlex
 import shutil
 import stat
+import subprocess
 import sys
 import tempfile
+if sys.version_info < (3, 11):  # tomllib
+    sys.stderr.write("install.py needs Python >= 3.11 (tomllib); found %d.%d\n" % sys.version_info[:2])
+    sys.exit(2)
+import tomllib
 from pathlib import Path
 from typing import Any
 
 
 REPO = Path(__file__).resolve().parent
+sys.path.insert(0, str(REPO / "lib"))
+from agent_tools.locate import render_placeholders  # noqa: E402
 TARGETS = {
     "claude": Path.home() / ".claude" / "skills",
     "codex": Path.home() / ".codex" / "skills",
@@ -48,7 +56,35 @@ HOOK_CONFIG_NAMES = {
 }
 OWNER = "agent-tools-subagent-result-v1"
 MANIFEST_NAME = ".agent-tools-install.json"
-MANIFEST_VERSION = 3
+MANIFEST_VERSION = 4
+# version 4 新增的 manifest 字段；--uninstall 清空后写回 version 3 形态
+MANIFEST_V4_FIELDS = (
+    "env_entries",
+    "pending_env_entries",
+    "pointer_file",
+    "pointer_fingerprint",
+    "mcp_servers",
+    "mcp_servers_replaced",
+)
+LOCAL_ENV_SOURCE = REPO / "env" / "local.env"
+LOCAL_OVERLAY_SOURCE = REPO / "env" / "AGENTS.local.md"
+# local.env 里用户可设的四个键；AGENT_TOOLS_ROOT 只由本文件推导
+LOCAL_ENV_KEYS = (
+    "AGENT_TOOLS_DOCS_ROOT",
+    "AGENT_TOOLS_WORKSPACE_ROOT",
+    "BROWSER_SESSION_TOOL_DIR",
+    "AGENT_TOOLS_OPEN_CMD",
+)
+LOCAL_ENV_PATH_KEYS = LOCAL_ENV_KEYS[:3]
+PLACEHOLDER_KEYS = ("AGENT_TOOLS_ROOT", "AGENT_TOOLS_DOCS_ROOT", "AGENT_TOOLS_WORKSPACE_ROOT")
+POINTER_FILE = Path.home() / ".config" / "agent-tools" / "root"
+CLAUDE_SETTINGS = Path.home() / ".claude" / "settings.json"
+CLAUDE_MCP_CONFIG = Path.home() / ".claude.json"
+CODEX_CONFIG = Path.home() / ".codex" / "config.toml"
+ENV_BLOCK_START = "# >>> agent-tools (owner: agent-tools-env-v1) >>>"
+ENV_BLOCK_END = "# <<< agent-tools <<<"
+ENV_TABLE_HEADER = "[shell_environment_policy.set]"
+MCP_IDENTITY_KEYS = ("command", "args", "env")
 AGENT_NAMES = (
     "agent-tools-requirements-reviewer",
     "agent-tools-solution-reviewer",
@@ -114,6 +150,12 @@ def _new_manifest() -> dict[str, Any]:
         "links": {},
         "copies": {},
         "pending_copies": {},
+        "env_entries": {},
+        "pending_env_entries": {},
+        "pointer_file": None,
+        "pointer_fingerprint": None,
+        "mcp_servers": [],
+        "mcp_servers_replaced": [],
     }
 
 
@@ -135,15 +177,19 @@ def _load_manifest(path: Path) -> dict[str, Any]:
     manifest = _load_json_object(path, default=_new_manifest())
     if (
         manifest.get("owner") != OWNER
-        or manifest.get("version") not in (1, 2, MANIFEST_VERSION)
+        or manifest.get("version") not in (1, 2, 3, MANIFEST_VERSION)
         or not isinstance(manifest.get("copies"), dict)
     ):
         raise InstallError(f"invalid ownership manifest: {path}")
     if manifest.get("version") == 1:
         manifest["links"] = {}
     if manifest.get("version") in (1, 2):
-        manifest["version"] = MANIFEST_VERSION
         manifest["pending_copies"] = {}
+    if manifest.get("version") in (1, 2, 3):
+        # 版本号抬升并补空字段
+        manifest["version"] = MANIFEST_VERSION
+        for field, empty in zip(MANIFEST_V4_FIELDS, ({}, {}, None, None, [], [])):
+            manifest.setdefault(field, copy_module.deepcopy(empty))
     if not isinstance(manifest.get("links"), dict):
         raise InstallError(f"invalid link ownership state: {path}")
     if not isinstance(manifest.get("pending_copies"), dict):
@@ -151,7 +197,29 @@ def _load_manifest(path: Path) -> dict[str, Any]:
     hook_config = manifest.get("hook_config")
     if hook_config is not None and not isinstance(hook_config, dict):
         raise InstallError(f"invalid hook ownership state: {path}")
+    if not isinstance(manifest.get("env_entries"), dict) or not isinstance(
+        manifest.get("pending_env_entries"), dict
+    ):
+        raise InstallError(f"invalid env ownership state: {path}")
+    if not isinstance(manifest.get("mcp_servers"), list) or not isinstance(
+        manifest.get("mcp_servers_replaced"), list
+    ):
+        raise InstallError(f"invalid MCP ownership state: {path}")
     return manifest
+
+
+def _manifest_v3_shape(manifest: dict[str, Any]) -> dict[str, Any]:
+    """卸载后六个新字段都为空时写回 version 3 形态，旧版 install.py 才读得了。"""
+    if any(manifest.get(field) for field in MANIFEST_V4_FIELDS):
+        return manifest
+    downgraded = {
+        key: value for key, value in manifest.items() if key not in MANIFEST_V4_FIELDS
+    }
+    downgraded["version"] = 3
+    for record in downgraded["copies"].values():
+        if isinstance(record, dict):
+            record.pop("rendered", None)
+    return downgraded
 
 
 def _atomic_write(path: Path, content: bytes, *, mode: int = 0o600) -> None:
@@ -670,6 +738,7 @@ def _manifest_has_state(manifest: dict[str, Any]) -> bool:
         or manifest["copies"]
         or manifest["pending_copies"]
         or manifest.get("hook_config")
+        or any(manifest.get(field) for field in MANIFEST_V4_FIELDS)
     )
 
 
@@ -918,6 +987,7 @@ def _stage_copy_ownership(
     """Persist planned copy ownership before files can be partially installed."""
     planned = copy_module.deepcopy(state["manifest"])
     simulated = copy_module.deepcopy(planned)
+    # 全局指令副本与 agents 是渲染对象，由 _install_rendered() 自行预登记渲染后内容的指纹
     for name, source in skills.items():
         install(
             name,
@@ -928,28 +998,7 @@ def _stage_copy_ownership(
             manifest=simulated,
             dry_run=True,
         )
-    if with_global:
-        install(
-            GLOBAL_NAMES[client],
-            GLOBAL_SOURCE,
-            state["root"],
-            copy=True,
-            force=force,
-            manifest=simulated,
-            dry_run=True,
-        )
     if with_subagents:
-        agents_dir = state["root"] / "agents"
-        for name, source in find_agents(client).items():
-            install(
-                name,
-                source,
-                agents_dir,
-                copy=True,
-                force=force,
-                manifest=simulated,
-                dry_run=True,
-            )
         if not isinstance(planned.get("hook_config"), dict):
             config = state["config"]
             hooks = config.get("hooks")
@@ -981,7 +1030,7 @@ def _install_subagents(
     client: str,
     state: dict[str, Any],
     *,
-    copy: bool,
+    values: dict[str, str],
     force: bool,
     uninstalling: bool,
     dry_run: bool,
@@ -992,21 +1041,17 @@ def _install_subagents(
     print(f"  [{client} subagents]")
     for name, source in find_agents(client).items():
         if uninstalling:
-            status = uninstall(
-                name,
-                source,
-                agents_dir,
-                manifest=manifest,
-                dry_run=dry_run,
+            status = _uninstall_rendered(
+                name, source, agents_dir, _render(source, values), state=state, dry_run=dry_run
             )
         else:
-            status = install(
+            status = _install_rendered(
                 name,
                 source,
                 agents_dir,
-                copy=copy,
+                _render(source, values),
+                state=state,
                 force=force,
-                manifest=manifest,
                 dry_run=dry_run,
             )
             if status.startswith("skip"):
@@ -1071,6 +1116,894 @@ def _install_subagents(
     )
 
 
+def _persist_manifest(state: dict[str, Any], *, dry_run: bool) -> None:
+    """每个新增步骤完成后立即保存 manifest，并刷新 before / revision 以便下一步再保存。"""
+    _save_manifest(
+        state["manifest_path"],
+        state["manifest_before"],
+        state["manifest"],
+        dry_run=dry_run,
+        expected_revision=state["manifest_revision"],
+    )
+    if not dry_run:
+        state["manifest_before"] = copy_module.deepcopy(state["manifest"])
+        state["manifest_revision"] = _file_revision(state["manifest_path"])
+
+
+def _value_fingerprint(value: str) -> str:
+    return "sha256-v1:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _content_fingerprint(content: bytes, mode: int = 0o644) -> str:
+    """与 _fingerprint() 对同一内容、同一权限位的普通文件给出相同结果。"""
+    digest = hashlib.sha256()
+    _feed_hash(digest, b".")
+    _feed_hash(digest, f"{mode:o}".encode("ascii"))
+    _feed_hash(digest, b"file")
+    digest.update(content)
+    return f"sha256-v1:{digest.hexdigest()}"
+
+
+def _read_env_file(path: Path) -> dict[str, str]:
+    """KEY=VALUE 文本；# 开头与空行跳过，不处理引号、export 前缀与行内注释，重复键后者覆盖。"""
+    values: dict[str, str] = {}
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return values
+    except OSError as error:
+        raise InstallError(f"cannot read {path}: {error}") from error
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, _, value = stripped.partition("=")
+        values[key.strip()] = value.strip()
+    return values
+
+
+def _load_local_env() -> dict[str, str]:
+    """读 env/local.env 的四个白名单键，加上推导的 AGENT_TOOLS_ROOT。
+
+    三个路径键去掉两端空白并展开开头的 ~ 后写成绝对路径；AGENT_TOOLS_OPEN_CMD 原样；
+    键不存在与值为空同样视为未设置，不进入返回值；其他键忽略并在 stderr 列出。
+    """
+    values: dict[str, str] = {"AGENT_TOOLS_ROOT": str(REPO)}
+    ignored = []
+    for key, raw in _read_env_file(LOCAL_ENV_SOURCE).items():
+        if key not in LOCAL_ENV_KEYS:
+            ignored.append(key)
+            continue
+        if not raw:
+            continue
+        if key in LOCAL_ENV_PATH_KEYS:
+            raw = str(Path(raw).expanduser())
+            if not Path(raw).is_absolute():
+                raw = str((REPO / raw).resolve())
+        values[key] = raw
+    if ignored:
+        print(
+            f"warning: {LOCAL_ENV_SOURCE} ignores keys {', '.join(sorted(ignored))} "
+            f"(only {', '.join(LOCAL_ENV_KEYS)} are read; AGENT_TOOLS_ROOT is derived)",
+            file=sys.stderr,
+        )
+    return values
+
+
+def _render_values(values: dict[str, str]) -> dict[str, str]:
+    """渲染占位符用的三个值；未设置的文档根与工作区根填默认值展开后的绝对路径。"""
+    home = Path.home()
+    return {
+        "AGENT_TOOLS_ROOT": values["AGENT_TOOLS_ROOT"],
+        "AGENT_TOOLS_DOCS_ROOT": values.get("AGENT_TOOLS_DOCS_ROOT", str(home / "docs")),
+        "AGENT_TOOLS_WORKSPACE_ROOT": values.get("AGENT_TOOLS_WORKSPACE_ROOT", str(home / "projects")),
+    }
+
+
+def _render(source: Path, values: dict[str, str]) -> bytes:
+    """渲染全局指令源文件或 agent 文件：替换三个占位符；TOML 先转义再解析校验；全局指令追加 overlay。"""
+    try:
+        text = source.read_text(encoding="utf-8")
+    except OSError as error:
+        raise InstallError(f"cannot read render source {source}: {error}") from error
+    rendered_values = _render_values(values)
+    if source.suffix == ".toml":
+        rendered_values = {
+            key: value.replace("\\", "\\\\").replace('"', '\\"')
+            for key, value in rendered_values.items()
+        }
+    try:
+        text = render_placeholders(text, rendered_values)
+    except ValueError as error:
+        raise InstallError(f"{source}: {error}") from error
+    if source.suffix == ".toml":
+        try:
+            tomllib.loads(text)
+        except tomllib.TOMLDecodeError as error:
+            raise InstallError(f"rendered TOML is invalid for {source}: {error}") from error
+    if source == GLOBAL_SOURCE and LOCAL_OVERLAY_SOURCE.is_file():
+        overlay = LOCAL_OVERLAY_SOURCE.read_text(encoding="utf-8")
+        if not text.endswith("\n"):
+            text += "\n"
+        text += "\n" + overlay
+    return text.encode("utf-8")
+
+
+def _install_rendered(
+    name: str,
+    source: Path,
+    target_dir: Path,
+    content: bytes,
+    *,
+    state: dict[str, Any],
+    force: bool,
+    dry_run: bool,
+) -> str:
+    """以复制方式安装渲染副本；写目标前把渲染后内容的指纹预登记到 pending_copies。"""
+    manifest = state["manifest"]
+    dst = target_dir / name
+    record = _copy_record(manifest, dst, source)
+    fingerprint = _content_fingerprint(content)
+
+    if dst.is_symlink():
+        if dst.resolve() != source.resolve() and not force:
+            return "skip (foreign link, use --force)"
+        if not dry_run:
+            dst.unlink()
+        for key in ("copies", "pending_copies", "links"):
+            manifest[key].pop(str(dst), None)
+    elif dst.exists():
+        owned_unchanged = record is not None and _fingerprint(dst) == record["fingerprint"]
+        if owned_unchanged and record["fingerprint"] == fingerprint:
+            manifest["copies"][str(dst)] = {**record, "rendered": True}
+            manifest["pending_copies"].pop(str(dst), None)
+            return "ok"
+        if not owned_unchanged and not force:
+            return "skip (exists, use --force)"
+        if not dry_run:
+            _remove_path(dst)
+        for key in ("copies", "pending_copies", "links"):
+            manifest[key].pop(str(dst), None)
+
+    pending = {"source": str(source.resolve()), "fingerprint": fingerprint, "rendered": True}
+    manifest["pending_copies"][str(dst)] = copy_module.deepcopy(pending)
+    _persist_manifest(state, dry_run=dry_run)
+    if not dry_run:
+        target_dir.mkdir(parents=True, exist_ok=True)
+        _atomic_write(dst, content, mode=0o644)
+    manifest["copies"][str(dst)] = pending
+    manifest["pending_copies"].pop(str(dst), None)
+    manifest["links"].pop(str(dst), None)
+    return "would copy" if dry_run else "copied"
+
+
+def _uninstall_rendered(
+    name: str,
+    source: Path,
+    target_dir: Path,
+    own_content: bytes,
+    *,
+    state: dict[str, Any],
+    dry_run: bool,
+) -> str:
+    """只删本克隆渲染出的副本：目标指纹等于当前渲染结果，或等于 manifest 记录（记录的 source 已钉死本克隆，
+    源文件或渲染值在安装后变了也算自有）才删；没有记录且内容不是本克隆渲染结果的副本（另一克隆或用户写的）保留。"""
+    manifest = state["manifest"]
+    dst = target_dir / name
+    if dst.is_symlink():
+        if dst.resolve() != source.resolve():
+            return "skip (foreign link)"
+        if not dry_run:
+            dst.unlink()
+        for key in ("copies", "pending_copies", "links"):
+            manifest[key].pop(str(dst), None)
+        return "would remove" if dry_run else "removed"
+    if dst.exists():
+        record = _copy_record(manifest, dst, source)
+        current = _fingerprint(dst)
+        if current == _content_fingerprint(own_content) or (record is not None and current == record["fingerprint"]):
+            if not dry_run:
+                _remove_path(dst)
+            for key in ("copies", "pending_copies", "links"):
+                manifest[key].pop(str(dst), None)
+            return "would remove" if dry_run else "removed"
+        return "skip (unowned path)" if record is None else "skip (owned copy modified)"
+    for key in ("copies", "pending_copies", "links"):
+        manifest[key].pop(str(dst), None)
+    return "absent"
+
+
+# ---------------------------------------------------------------------------
+# 本机配置变量：Claude settings.json 的 env 对象 / Codex config.toml 的标记块
+
+
+def _env_key_action(
+    manifest: dict[str, Any], key: str, current: str | None, target: str, *, force: bool
+) -> str:
+    """write | unconverged：键不存在则写；当前值指纹等于记录、等于预登记或等于目标值则覆盖。"""
+    if current is None or current == target or force:
+        return "write"
+    fingerprint = _value_fingerprint(current)
+    if fingerprint in (manifest["env_entries"].get(key), manifest["pending_env_entries"].get(key)):
+        return "write"
+    return "unconverged"
+
+
+def _install_claude_env(
+    values: dict[str, str],
+    state: dict[str, Any],
+    *,
+    uninstalling: bool,
+    force: bool,
+    dry_run: bool,
+) -> list[tuple[str, str, str]]:
+    manifest = state["manifest"]
+    results = []
+    revision = _file_revision(CLAUDE_SETTINGS)
+    before = _load_json_object(CLAUDE_SETTINGS, default={})
+    env = before.get("env")
+    if env is not None and not isinstance(env, dict):
+        raise InstallError(f"env must be a JSON object: {CLAUDE_SETTINGS}")
+    after = copy_module.deepcopy(before)
+    env_after = after.setdefault("env", {}) if not uninstalling else after.get("env", {})
+
+    if uninstalling:
+        # 预登记（写入后、晋升前中断）的键同样归本安装器：按预登记指纹一起删
+        owned = dict(manifest["env_entries"])
+        owned.update(manifest["pending_env_entries"])
+        for key in list(owned):
+            current = env_after.get(key)
+            if current is None:
+                manifest["env_entries"].pop(key, None)
+                results.append((f"claude env {key}", "absent", ""))
+                continue
+            if key == "AGENT_TOOLS_ROOT" and current != values["AGENT_TOOLS_ROOT"]:
+                results.append((f"claude env {key}", "skip (owned by another clone)", f"current value {current}"))
+                continue
+            if not isinstance(current, str) or _value_fingerprint(current) != owned[key]:
+                results.append((f"claude env {key}", "skip (value modified)", "kept as is"))
+                continue
+            env_after.pop(key)
+            manifest["env_entries"].pop(key, None)
+            results.append((f"claude env {key}", "would remove" if dry_run else "removed", ""))
+        manifest["pending_env_entries"].clear()
+        if not env_after and "env" in after:
+            after.pop("env")
+    else:
+        for key in ("AGENT_TOOLS_ROOT", *LOCAL_ENV_KEYS):
+            if key not in values:
+                continue
+            target = values[key]
+            current = env_after.get(key)
+            if isinstance(current, str) and current == target and key in manifest["env_entries"]:
+                results.append((f"claude env {key}", "ok", ""))
+                continue
+            if current is not None and not isinstance(current, str):
+                # 外来的非字符串值（数字、数组、对象）不是“键不存在”，无 --force 不覆盖
+                action = "write" if force else "unconverged"
+                reason = f"existing value is not a string ({CLAUDE_SETTINGS}); use --force"
+            else:
+                action = _env_key_action(manifest, key, current, target, force=force)
+                reason = f"existing value differs ({CLAUDE_SETTINGS}); use --force"
+            if action == "unconverged":
+                results.append((f"claude env {key}", "unconverged", reason))
+                continue
+            manifest["pending_env_entries"][key] = _value_fingerprint(target)
+            _persist_manifest(state, dry_run=dry_run)
+            env_after[key] = target
+            results.append((f"claude env {key}", "would write" if dry_run else "written", ""))
+
+    _write_json_if_needed(CLAUDE_SETTINGS, before, after, dry_run=dry_run, expected_revision=revision)
+    if not uninstalling:
+        for key in list(manifest["pending_env_entries"]):
+            if key in values and env_after.get(key) == values[key]:
+                manifest["env_entries"][key] = manifest["pending_env_entries"].pop(key)
+    _persist_manifest(state, dry_run=dry_run)
+    return results
+
+
+def _toml_literal(value: Any) -> str:
+    """只接受字符串、整数、浮点、布尔与这四类标量的数组；其他类型抛 ValueError。"""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int) or isinstance(value, float):
+        return repr(value)
+    if isinstance(value, str):
+        escaped = (
+            value.replace("\\", "\\\\")
+            .replace('"', '\\"')
+            .replace("\n", "\\n")
+            .replace("\t", "\\t")
+            .replace("\r", "\\r")
+        )
+        return f'"{escaped}"'
+    if isinstance(value, list) and all(
+        isinstance(item, (str, int, float, bool)) for item in value
+    ):
+        return "[" + ", ".join(_toml_literal(item) for item in value) + "]"
+    raise ValueError(f"unsupported TOML value: {value!r}")
+
+
+TOML_KEY_LINE = re.compile(r'^\s*(?:"(?P<quoted>[^"]+)"|(?P<bare>[A-Za-z0-9_-]+))\s*=')
+TOML_HEADER_LINE = re.compile(r"^\s*\[")
+
+
+def _toml_key_of(line: str) -> str | None:
+    match = TOML_KEY_LINE.match(line)
+    if not match:
+        return None
+    return match.group("quoted") or match.group("bare")
+
+
+def _locate_env_block(lines: list[str]) -> tuple[int, int, bool] | None:
+    """返回 (表头行号, 表结束行号(不含), 是否带标记)；找不到表头返回 None。"""
+    try:
+        start = lines.index(ENV_BLOCK_START)
+    except ValueError:
+        start = -1
+    if start >= 0:
+        try:
+            end = lines.index(ENV_BLOCK_END, start)
+        except ValueError:
+            raise InstallError(f"{CODEX_CONFIG}: env block start marker without end marker")
+        header = next(
+            (index for index in range(start + 1, end) if lines[index].strip().startswith(ENV_TABLE_HEADER)),
+            None,
+        )
+        if header is None:
+            raise InstallError(f"{CODEX_CONFIG}: env block without {ENV_TABLE_HEADER} header")
+        return header, end, True
+    header = next(
+        (
+            index
+            for index, line in enumerate(lines)
+            if line.strip() == ENV_TABLE_HEADER or line.strip().startswith(ENV_TABLE_HEADER + " ")
+            or line.strip().startswith(ENV_TABLE_HEADER + "#")
+        ),
+        None,
+    )
+    if header is None:
+        return None
+    end = header + 1
+    while end < len(lines) and not TOML_HEADER_LINE.match(lines[end]):
+        end += 1
+    return header, end, False
+
+
+def _install_codex_env(
+    values: dict[str, str],
+    state: dict[str, Any],
+    *,
+    uninstalling: bool,
+    force: bool,
+    dry_run: bool,
+) -> list[tuple[str, str, str]]:
+    manifest = state["manifest"]
+    results = []
+    revision = _file_revision(CODEX_CONFIG)
+    text = CODEX_CONFIG.read_text(encoding="utf-8") if CODEX_CONFIG.exists() else ""
+    try:
+        parsed = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as error:
+        raise InstallError(f"cannot parse {CODEX_CONFIG}: {error}") from error
+    table_exists = isinstance(parsed.get("shell_environment_policy"), dict) and isinstance(
+        parsed["shell_environment_policy"].get("set"), dict
+    )
+    lines = text.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    located = _locate_env_block(lines)
+    wanted = [key for key in ("AGENT_TOOLS_ROOT", *LOCAL_ENV_KEYS) if key in values]
+
+    if located is None and table_exists:
+        # dotted key / inline table 形态：tomllib 读得到，文本定位不到表头，拒绝写入；卸载同样拒绝删除，逐键提示手工删除
+        dotted_values = parsed["shell_environment_policy"]["set"]
+        if uninstalling:
+            owned = dict(manifest["env_entries"])
+            owned.update(manifest["pending_env_entries"])
+            for key in owned:
+                if key in dotted_values:
+                    results.append(
+                        (f"codex env {key}", "unconverged",
+                         f"{CODEX_CONFIG} defines shell_environment_policy.set without a [shell_environment_policy.set] header; remove {key} = {dotted_values[key]!r} by hand, then rerun --uninstall")
+                    )
+                else:
+                    manifest["env_entries"].pop(key, None)
+                    manifest["pending_env_entries"].pop(key, None)
+                    results.append((f"codex env {key}", "absent", ""))
+            return results
+        for key in wanted:
+            results.append(
+                (f"codex env {key}", "unconverged",
+                 f"{CODEX_CONFIG} defines shell_environment_policy.set without a [shell_environment_policy.set] header; merge {key} = {values.get(key, '')!r} by hand")
+            )
+        return results
+
+    if located is None:
+        header_index, end_index, has_markers = len(lines), len(lines), False
+        key_lines: list[str] = []
+    else:
+        header_index, end_index, has_markers = located
+        key_lines = lines[header_index + 1:end_index]
+
+    current_values = parsed.get("shell_environment_policy", {}).get("set", {}) if table_exists else {}
+    owned = dict(manifest["env_entries"])
+    if uninstalling:
+        owned.update(manifest["pending_env_entries"])  # 写入后、晋升前中断的键一起删
+    new_key_lines = []
+    handled = set()
+    for line in key_lines:
+        key = _toml_key_of(line)
+        if key is None:
+            new_key_lines.append(line)
+            continue
+        if uninstalling:
+            if key in owned:
+                current = current_values.get(key)
+                if key == "AGENT_TOOLS_ROOT" and current != values["AGENT_TOOLS_ROOT"]:
+                    results.append((f"codex env {key}", "skip (owned by another clone)", str(current)))
+                    new_key_lines.append(line)
+                elif isinstance(current, str) and _value_fingerprint(current) == owned[key]:
+                    manifest["env_entries"].pop(key, None)
+                    results.append((f"codex env {key}", "would remove" if dry_run else "removed", ""))
+                else:
+                    results.append((f"codex env {key}", "skip (value modified)", "kept as is"))
+                    new_key_lines.append(line)
+                handled.add(key)
+            else:
+                new_key_lines.append(line)
+            continue
+        if key in wanted:
+            handled.add(key)
+            target = values[key]
+            current = current_values.get(key)
+            if current == target and key in manifest["env_entries"]:
+                new_key_lines.append(line)
+                results.append((f"codex env {key}", "ok", ""))
+                continue
+            if current is not None and not isinstance(current, str):
+                action = "write" if force else "unconverged"
+                reason = f"existing value is not a string ({CODEX_CONFIG}); use --force"
+            else:
+                action = _env_key_action(manifest, key, current, target, force=force)
+                reason = f"existing value differs ({CODEX_CONFIG}); use --force"
+            if action == "unconverged":
+                new_key_lines.append(line)
+                results.append((f"codex env {key}", "unconverged", reason))
+                continue
+            manifest["pending_env_entries"][key] = _value_fingerprint(target)
+            new_key_lines.append(f"{key} = {_toml_literal(target)}")
+            results.append((f"codex env {key}", "would write" if dry_run else "written", ""))
+        else:
+            new_key_lines.append(line)
+    if uninstalling:
+        for key in list(owned):
+            if key not in handled:
+                manifest["env_entries"].pop(key, None)
+                results.append((f"codex env {key}", "absent", ""))
+        manifest["pending_env_entries"].clear()
+    else:
+        for key in wanted:
+            if key in handled:
+                continue
+            manifest["pending_env_entries"][key] = _value_fingerprint(values[key])
+            new_key_lines.append(f"{key} = {_toml_literal(values[key])}")
+            results.append((f"codex env {key}", "would write" if dry_run else "written", ""))
+    if manifest["pending_env_entries"]:
+        _persist_manifest(state, dry_run=dry_run)
+
+    remaining_keys = [line for line in new_key_lines if _toml_key_of(line) is not None]
+    if remaining_keys:
+        block = [ENV_BLOCK_START, ENV_TABLE_HEADER, *new_key_lines, ENV_BLOCK_END]
+    else:
+        block = []
+    if located is None:
+        new_lines = lines + ([""] if lines and lines[-1].strip() else []) + block
+    else:
+        block_start = header_index - 1 if has_markers else header_index
+        block_end = end_index + 1 if has_markers else end_index
+        new_lines = lines[:block_start] + block + lines[block_end:]
+    new_text = "\n".join(new_lines) + ("\n" if new_lines else "")
+    if new_text != text:
+        try:
+            reparsed = tomllib.loads(new_text)
+        except tomllib.TOMLDecodeError as error:
+            raise InstallError(f"refusing to write invalid TOML to {CODEX_CONFIG}: {error}") from error
+        if not dry_run:
+            _check_revision(CODEX_CONFIG, revision)
+            mode = stat.S_IMODE(CODEX_CONFIG.stat().st_mode) if CODEX_CONFIG.exists() else 0o600
+            _atomic_write(CODEX_CONFIG, new_text.encode("utf-8"), mode=mode)
+            if block and (ENV_BLOCK_START not in new_lines or ENV_BLOCK_END not in new_lines):
+                raise InstallError(f"{CODEX_CONFIG}: env block markers missing after write")
+        written_values = reparsed.get("shell_environment_policy", {}).get("set", {})
+    else:
+        written_values = current_values
+    if not uninstalling:
+        for key in list(manifest["pending_env_entries"]):
+            if key in values and written_values.get(key) == values[key]:
+                manifest["env_entries"][key] = manifest["pending_env_entries"].pop(key)
+    _persist_manifest(state, dry_run=dry_run)
+    return results
+
+
+def _install_client_env(
+    client: str,
+    values: dict[str, str],
+    state: dict[str, Any],
+    *,
+    uninstalling: bool,
+    force: bool,
+    dry_run: bool,
+) -> list[tuple[str, str, str]]:
+    if client == "claude":
+        return _install_claude_env(values, state, uninstalling=uninstalling, force=force, dry_run=dry_run)
+    return _install_codex_env(values, state, uninstalling=uninstalling, force=force, dry_run=dry_run)
+
+
+def _install_pointer(
+    root: str, state: dict[str, Any], *, uninstalling: bool, dry_run: bool
+) -> tuple[str, str, str]:
+    """~/.config/agent-tools/root 一行仓库根；任何有效克隆或无效内容都覆盖（最后安装生效）。"""
+    manifest = state["manifest"]
+    current = None
+    if POINTER_FILE.exists() or POINTER_FILE.is_symlink():
+        try:
+            current = POINTER_FILE.read_text(encoding="utf-8").strip()
+        except OSError as error:
+            raise InstallError(f"cannot read pointer file {POINTER_FILE}: {error}") from error
+    if uninstalling:
+        manifest["pointer_file"] = None
+        manifest["pointer_fingerprint"] = None
+        if current is None:
+            return ("pointer", "absent", "")
+        if current != root:
+            return ("pointer", "skip (points to another clone)", current)
+        if not dry_run:
+            POINTER_FILE.unlink()
+        return ("pointer", "would remove" if dry_run else "removed", "")
+    note = ""
+    if current is not None and current != root:
+        note = f"replaced previous value {current}"
+    content = (root + "\n").encode("utf-8")
+    if current != root and not dry_run:
+        try:
+            _atomic_write(POINTER_FILE, content, mode=0o644)
+        except OSError as error:
+            raise InstallError(f"cannot write pointer file {POINTER_FILE}: {error}") from error
+    manifest["pointer_file"] = str(POINTER_FILE)
+    manifest["pointer_fingerprint"] = _content_fingerprint(content)
+    if current == root:
+        return ("pointer", "ok", "")
+    return ("pointer", "would write" if dry_run else "written", note)
+
+
+# ---------------------------------------------------------------------------
+# MCP 注册：devtools / bastion / bastion_dba
+
+
+def _mcp_targets(root: str) -> dict[str, dict[str, Any]]:
+    bastion = f"{root}/mcp/bastion-mcp"
+    return {
+        "devtools": {
+            "command": "python3",
+            "args": ["-m", "devtools_mcp.aggregate_server"],
+            "env": {
+                "PYTHONPATH": f"{root}/mcp/devtools-mcp:{bastion}",
+                "BASTION_CONFIG": f"{bastion}/config.json",
+            },
+        },
+        "bastion": {
+            "command": "python3",
+            "args": ["-m", "bastion_mcp.server"],
+            "env": {"PYTHONPATH": bastion, "BASTION_CONFIG": f"{bastion}/config.json"},
+        },
+        "bastion_dba": {
+            "command": "python3",
+            "args": ["-m", "bastion_mcp.server"],
+            "env": {"PYTHONPATH": bastion, "BASTION_CONFIG": f"{bastion}/config.dba.json"},
+        },
+    }
+
+
+def _identity(entry: dict[str, Any]) -> dict[str, Any]:
+    """command/args/env 三元组；手写注册常缺 args 或 env，归一为 [] / {}，备份、比对与恢复命令都经这里取值。"""
+    return {"command": entry.get("command"), "args": list(entry.get("args") or []), "env": dict(entry.get("env") or {})}
+
+
+def _identity_equal(left: dict[str, Any] | None, right: dict[str, Any] | None) -> bool:
+    return left is not None and right is not None and _identity(left) == _identity(right)
+
+
+def _identity_under_root(entry: dict[str, Any], root: str) -> bool:
+    """身份里 PYTHONPATH 与 BASTION_CONFIG 的每个路径都以 <root>/ 为前缀（含分隔符）。"""
+    env = entry.get("env") or {}
+    prefix = root.rstrip("/") + "/"
+    paths = env.get("PYTHONPATH", "").split(":") + [env.get("BASTION_CONFIG", "")]
+    return all(path.startswith(prefix) for path in paths if path)
+
+
+def _read_mcp_registration(client: str, name: str) -> dict[str, Any] | None:
+    """读当前注册：Claude 读 ~/.claude.json 的 mcpServers.<name>，Codex 读 config.toml 的 [mcp_servers.<name>]。"""
+    if client == "claude":
+        data = _load_json_object(CLAUDE_MCP_CONFIG, default={})
+        servers = data.get("mcpServers")
+        if not isinstance(servers, dict):
+            return None
+        entry = servers.get(name)
+        return copy_module.deepcopy(entry) if isinstance(entry, dict) else None
+    if not CODEX_CONFIG.exists():
+        return None
+    try:
+        parsed = tomllib.loads(CODEX_CONFIG.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError as error:
+        raise InstallError(f"cannot parse {CODEX_CONFIG}: {error}") from error
+    servers = parsed.get("mcp_servers")
+    if not isinstance(servers, dict):
+        return None
+    entry = servers.get(name)
+    return copy_module.deepcopy(entry) if isinstance(entry, dict) else None
+
+
+def _mcp_cli(client: str) -> str | None:
+    return shutil.which(client)
+
+
+def _mcp_add_command(client: str, name: str, target: dict[str, Any]) -> list[str]:
+    env_flag = "-e" if client == "claude" else "--env"
+    command = [client, "mcp", "add"]
+    if client == "claude":
+        command += ["--scope", "user"]
+    command.append(name)
+    ident = _identity(target)
+    for key, value in ident["env"].items():
+        command += [env_flag, f"{key}={value}"]
+    command += ["--", ident["command"], *ident["args"]]
+    return command
+
+
+def _mcp_remove_command(client: str, name: str) -> list[str]:
+    if client == "claude":
+        return [client, "mcp", "remove", "--scope", "user", name]
+    return [client, "mcp", "remove", name]
+
+
+def _run_cli(command: list[str]) -> None:
+    completed = subprocess.run(command, capture_output=True, text=True, check=False)
+    if completed.returncode != 0:
+        raise InstallError(
+            f"{' '.join(shlex.quote(part) for part in command)} failed ({completed.returncode}): "
+            f"{(completed.stderr or completed.stdout).strip()}"
+        )
+
+
+def _write_mcp_extra(client: str, name: str, extra: dict[str, Any], *, dry_run: bool) -> list[str]:
+    """把被替换注册的额外键写回新注册；返回写回失败（不支持的类型）的键。"""
+    unsupported = []
+    if not extra:
+        return unsupported
+    if client == "claude":
+        revision = _file_revision(CLAUDE_MCP_CONFIG)
+        before = _load_json_object(CLAUDE_MCP_CONFIG, default={})
+        after = copy_module.deepcopy(before)
+        entry = after.setdefault("mcpServers", {}).setdefault(name, {})
+        for key, value in extra.items():
+            entry.setdefault(key, value)
+        _write_json_if_needed(
+            CLAUDE_MCP_CONFIG, before, after, dry_run=dry_run, expected_revision=revision
+        )
+        return unsupported
+    if dry_run:
+        return unsupported
+    revision = _file_revision(CODEX_CONFIG)
+    text = CODEX_CONFIG.read_text(encoding="utf-8")
+    lines = text.split("\n")
+    header = f"[mcp_servers.{name}]"
+    try:
+        index = next(i for i, line in enumerate(lines) if line.strip() == header)
+    except StopIteration:
+        raise InstallError(f"{CODEX_CONFIG}: table {header} not found after codex mcp add")
+    insert = []
+    for key, value in extra.items():
+        try:
+            insert.append(f'"{key}" = {_toml_literal(value)}')
+        except ValueError:
+            unsupported.append(key)
+    if insert:
+        new_text = "\n".join(lines[: index + 1] + insert + lines[index + 1 :])
+        try:
+            tomllib.loads(new_text)
+        except tomllib.TOMLDecodeError as error:
+            raise InstallError(f"refusing to write invalid TOML to {CODEX_CONFIG}: {error}") from error
+        _check_revision(CODEX_CONFIG, revision)
+        _atomic_write(CODEX_CONFIG, new_text.encode("utf-8"), mode=stat.S_IMODE(CODEX_CONFIG.stat().st_mode))
+    return unsupported
+
+
+def _find_backup(manifest: dict[str, Any], name: str) -> dict[str, Any] | None:
+    return next((item for item in manifest["mcp_servers_replaced"] if item.get("name") == name), None)
+
+
+def _find_recorded(manifest: dict[str, Any], name: str) -> dict[str, Any] | None:
+    return next((item for item in manifest["mcp_servers"] if item.get("name") == name), None)
+
+
+def _record_mcp(manifest: dict[str, Any], name: str, target: dict[str, Any]) -> None:
+    manifest["mcp_servers"] = [item for item in manifest["mcp_servers"] if item.get("name") != name]
+    manifest["mcp_servers"].append({"name": name, **_identity(target)})
+
+
+def _register_mcp(
+    client: str,
+    root: str,
+    state: dict[str, Any],
+    *,
+    force: bool,
+    dry_run: bool,
+) -> list[tuple[str, str, str]]:
+    """按 3.4 注册三项 MCP：完整身份比对；--force 先备份并保存 manifest，再删再加，再写回额外键。"""
+    manifest = state["manifest"]
+    results = []
+    cli = _mcp_cli(client)
+    for name, target in _mcp_targets(root).items():
+        label = f"{client} mcp {name}"
+        add_command = _mcp_add_command(client, name, target)
+        printable = " ".join(shlex.quote(part) for part in add_command)
+        if cli is None:
+            results.append((label, "unconverged", f"{client} CLI not in PATH; run: {printable}"))
+            continue
+        current = _read_mcp_registration(client, name)
+        if current is not None and _identity_equal(current, target):
+            if _find_recorded(manifest, name) is not None:
+                results.append((label, "ok", ""))
+                continue
+            backup = _find_backup(manifest, name)
+            if backup is not None:
+                missing = {k: v for k, v in backup.get("extra", {}).items() if k not in current}
+                if missing:
+                    unsupported = _write_mcp_extra(client, name, missing, dry_run=dry_run)
+                    written = {k: v for k, v in missing.items() if k not in unsupported}
+                    if written and not dry_run:
+                        after = _read_mcp_registration(client, name) or {}
+                        if any(after.get(k) != v for k, v in written.items()):
+                            results.append((label, "unconverged", f"extra keys not written back: {written}"))
+                            continue
+                        print(f"    {label}: restored extra keys {', '.join(sorted(written))}")
+                    if unsupported:
+                        results.append((label, "unconverged", f"unsupported extra values for {unsupported}; add by hand"))
+                        continue
+            _record_mcp(manifest, name, target)
+            _persist_manifest(state, dry_run=dry_run)
+            results.append((label, "ok", "recorded existing registration"))
+            continue
+        if current is not None and not force:
+            results.append((label, "unconverged", f"registered with a different identity; use --force or run: {printable}"))
+            continue
+        if dry_run:
+            results.append((label, "would register", printable))
+            continue
+        extra: dict[str, Any] = {}
+        if current is not None:
+            recorded = _find_recorded(manifest, name)
+            extra = {k: v for k, v in current.items() if k not in MCP_IDENTITY_KEYS}
+            if not _identity_equal(current, recorded) and _find_backup(manifest, name) is None:
+                manifest["mcp_servers_replaced"].append({"name": name, **_identity(current), "extra": extra})
+                _persist_manifest(state, dry_run=dry_run)
+            else:
+                backup = _find_backup(manifest, name)
+                extra = dict(backup.get("extra", {})) if backup else {}
+            _run_cli(_mcp_remove_command(client, name))
+        else:
+            backup = _find_backup(manifest, name)
+            extra = dict(backup.get("extra", {})) if backup else {}
+        _run_cli(add_command)
+        unsupported = _write_mcp_extra(client, name, extra, dry_run=False)
+        after = _read_mcp_registration(client, name)
+        if not _identity_equal(after, target):
+            results.append((label, "unconverged", f"registration differs after add; run: {printable}"))
+            continue
+        written = {k: v for k, v in extra.items() if k not in unsupported}
+        if any(after.get(k) != v for k, v in written.items()):
+            results.append((label, "unconverged", f"extra keys not written back: {written}"))
+            continue
+        _record_mcp(manifest, name, target)
+        _persist_manifest(state, dry_run=False)
+        note = f"restored extra keys {', '.join(sorted(written))}" if written else ""
+        if unsupported:
+            note += f"; unsupported extra values for {unsupported}, add by hand"
+            results.append((label, "unconverged", note))
+            continue
+        results.append((label, "registered", note))
+    return results
+
+
+def _unregister_mcp(
+    client: str, root: str, state: dict[str, Any], *, dry_run: bool
+) -> list[tuple[str, str, str]]:
+    """--uninstall：删与记录全等或与目标身份全等且根在本克隆下的注册，再按备份恢复原注册。"""
+    manifest = state["manifest"]
+    results = []
+    cli = _mcp_cli(client)
+    for name, target in _mcp_targets(root).items():
+        label = f"{client} mcp {name}"
+        current = _read_mcp_registration(client, name)
+        recorded = _find_recorded(manifest, name)
+        backup = _find_backup(manifest, name)
+        own = current is not None and _identity_under_root(current, root) and (
+            _identity_equal(current, recorded) or _identity_equal(current, target)
+        )
+        if cli is None and (own or backup):
+            results.append((label, "unconverged", f"{client} CLI not in PATH; remove/restore by hand"))
+            continue
+        if own:
+            if not dry_run:
+                _run_cli(_mcp_remove_command(client, name))
+            current = None
+            results.append((label, "would remove" if dry_run else "removed", ""))
+        elif current is not None and recorded is not None:
+            results.append((label, "skip (not this clone's registration)", ""))
+        manifest["mcp_servers"] = [item for item in manifest["mcp_servers"] if item.get("name") != name]
+        if backup is None:
+            continue
+        backup_extra = backup.get("extra", {})
+        if current is None:
+            if not dry_run:
+                _run_cli(_mcp_add_command(client, name, backup))
+                unsupported = _write_mcp_extra(client, name, backup_extra, dry_run=False)
+                after = _read_mcp_registration(client, name) or {}
+                written = {k: v for k, v in backup_extra.items() if k not in unsupported}
+                problems = []
+                if not _identity_equal(after, backup):
+                    problems.append("identity differs after add")
+                if any(after.get(k) != v for k, v in written.items()):
+                    problems.append(f"extra keys not written back: {written}")
+                if unsupported:
+                    problems.append(f"unsupported extra values for {unsupported}, add by hand")
+                if problems:
+                    results.append((f"{label} restore", "unconverged",
+                                    "; ".join(problems) + f"; original was {json.dumps({**_identity(backup), 'extra': backup_extra}, ensure_ascii=False)}; backup kept in manifest"))
+                    continue
+            results.append((f"{label} restore", "would restore" if dry_run else "restored", ""))
+        elif _identity_equal(current, backup) and all(current.get(k) == v for k, v in backup_extra.items()):
+            results.append((f"{label} restore", "ok", "original registration already present"))
+        else:
+            results.append((f"{label} restore", "unconverged", f"a different registration exists; original was {json.dumps({**_identity(backup), 'extra': backup_extra}, ensure_ascii=False)}"))
+            continue
+        if not dry_run:
+            manifest["mcp_servers_replaced"] = [
+                item for item in manifest["mcp_servers_replaced"] if item.get("name") != name
+            ]
+    _persist_manifest(state, dry_run=dry_run)
+    return results
+
+
+def _report_unconverged(results: list[tuple[str, str, str]], *, uninstalling: bool = False) -> int:
+    """汇总 skill、全局指令、env 键、指针文件、MCP 五类结果并决定退出码。
+
+    安装：skip* 与 unconverged 都算未收敛，逐项打印并返回 1。
+    卸载：skip* 是有意保留的用户内容（已逐项打印原因），只有 unconverged（恢复或删除没完成）返回 1。
+    """
+    if uninstalling:
+        unconverged = [item for item in results if item[1] == "unconverged"]
+        if not unconverged:
+            return 0
+        print(f"unconverged: uninstall left {len(unconverged)} item(s) unresolved:")
+        for identifier, status, reason in unconverged:
+            print(f"  {identifier}: {status}" + (f" — {reason}" if reason else ""))
+        print("  fix: restore or remove by hand using the printed original value, then rerun --uninstall; backups stay in the manifest")
+        return 1
+    unconverged = [
+        item for item in results if item[1].startswith("skip") or item[1] == "unconverged"
+    ]
+    if not unconverged:
+        return 0
+    print(f"unconverged: {len(unconverged)} item(s) still do not point at this repository:")
+    for identifier, status, reason in unconverged:
+        detail = f" — {reason}" if reason else ""
+        print(f"  {identifier}: {status}{detail}")
+    print("  fix: move the foreign content away or rerun with --force; run printed commands by hand")
+    return 1
+
+
 def _parse_targets(raw_targets: str) -> list[str]:
     clients = []
     for raw in raw_targets.split(","):
@@ -1113,6 +2046,9 @@ def _run(args: argparse.Namespace) -> int:
                     print(f"  {name}")
         return 0
 
+    values = _load_local_env()
+    root = values["AGENT_TOOLS_ROOT"]
+    results: list[tuple[str, str, str]] = []
     states = _prepare_targets(clients, with_subagents=args.with_subagents)
     subagent_revisions = {}
     if args.with_subagents and not args.uninstall:
@@ -1167,52 +2103,80 @@ def _run(args: argparse.Namespace) -> int:
                     dry_run=args.dry_run,
                 )
             print(f"  {name}: {status}")
+            results.append((f"{client} skill {name}", status, str(target_dir / name)))
+        _persist_manifest(state, dry_run=args.dry_run)
 
         if args.with_global:
             name = GLOBAL_NAMES[client]
+            rendered = _render(GLOBAL_SOURCE, values)
             if args.uninstall:
-                status = uninstall(
-                    name,
-                    GLOBAL_SOURCE,
-                    state["root"],
-                    manifest=manifest,
-                    dry_run=args.dry_run,
+                status = _uninstall_rendered(
+                    name, GLOBAL_SOURCE, state["root"], rendered, state=state, dry_run=args.dry_run
                 )
             else:
-                status = install(
+                status = _install_rendered(
                     name,
                     GLOBAL_SOURCE,
                     state["root"],
-                    copy=args.copy,
+                    rendered,
+                    state=state,
                     force=args.force,
-                    manifest=manifest,
                     dry_run=args.dry_run,
                 )
             print(f"  [global] {name}: {status}")
+            results.append((f"{client} global {name}", status, str(state["root"] / name)))
+            _persist_manifest(state, dry_run=args.dry_run)
 
         if args.with_subagents:
             _install_subagents(
                 client,
                 state,
-                copy=args.copy,
+                values=values,
                 force=args.force,
                 uninstalling=args.uninstall,
                 dry_run=args.dry_run,
             )
+            _persist_manifest(state, dry_run=args.dry_run)
 
-        _save_manifest(
-            state["manifest_path"],
-            state["manifest_before"],
-            manifest,
+        if getattr(args, "with_mcp", False):
+            # MCP 注册先于 Codex 标记块：codex mcp add 会重写 config.toml
+            if args.uninstall:
+                mcp_results = _unregister_mcp(client, root, state, dry_run=args.dry_run)
+            else:
+                mcp_results = _register_mcp(
+                    client, root, state, force=args.force, dry_run=args.dry_run
+                )
+            for identifier, status, reason in mcp_results:
+                print(f"  [mcp] {identifier}: {status}" + (f" ({reason})" if reason and status != "ok" else ""))
+            results.extend(mcp_results)
+
+        env_results = _install_client_env(
+            client,
+            values,
+            state,
+            uninstalling=args.uninstall,
+            force=args.force,
             dry_run=args.dry_run,
-            expected_revision=state["manifest_revision"],
         )
+        for identifier, status, reason in env_results:
+            print(f"  [env] {identifier}: {status}" + (f" ({reason})" if reason and status != "ok" else ""))
+        results.extend(env_results)
+
+        pointer_result = _install_pointer(
+            root, state, uninstalling=args.uninstall, dry_run=args.dry_run
+        )
+        print(f"  [pointer] {POINTER_FILE}: {pointer_result[1]}" + (f" ({pointer_result[2]})" if pointer_result[2] else ""))
+        results.append((f"{client} {pointer_result[0]}", pointer_result[1], pointer_result[2]))
+
+        if args.uninstall:
+            state["manifest"] = _manifest_v3_shape(manifest)
+        _persist_manifest(state, dry_run=args.dry_run)
     if args.with_session_cleanup:
         if "claude" in clients:
             _install_session_cleanup(uninstalling=args.uninstall, dry_run=args.dry_run)
         else:
             print("  [hook] SessionEnd session cleanup: skip (claude target only)")
-    return 0
+    return _report_unconverged(results, uninstalling=args.uninstall)
 
 
 def main() -> int:
@@ -1234,12 +2198,17 @@ def main() -> int:
     parser.add_argument(
         "--with-global",
         action="store_true",
-        help="also link AGENTS.global.md as ~/.claude/CLAUDE.md and ~/.codex/AGENTS.md",
+        help="also render AGENTS.global.md (plus env/AGENTS.local.md if present) as ~/.claude/CLAUDE.md and ~/.codex/AGENTS.md",
     )
     parser.add_argument(
         "--with-session-cleanup",
         action="store_true",
         help="also add a Claude SessionEnd hook that removes the session's temp dir",
+    )
+    parser.add_argument(
+        "--with-mcp",
+        action="store_true",
+        help="also register devtools / bastion / bastion_dba MCP servers in both clients",
     )
     parser.add_argument("--dry-run", action="store_true", help="report without writing")
     parser.add_argument("--list", action="store_true")

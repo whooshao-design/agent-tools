@@ -10,7 +10,7 @@
 ## 启动
 
 ```bash
-/home/joney/projects/ai/agent-tools/mcp/third-party-mcp/markitdown/bin/markitdown-mcp
+$AGENT_TOOLS_ROOT/mcp/third-party-mcp/markitdown/bin/markitdown-mcp
 ```
 
 launcher 优先使用 PATH 中已有的 `markitdown-mcp`；如果不存在，会在运行时缓存目录创建 venv，

@@ -115,7 +115,7 @@ const {
   pickAppRow, branchOfRow, pickPipeline, classifyBuildConfirm, classifyBuild,
 } = require('../scripts/lexiao_project_env');
 
-const appRow = (name, t = 0, r = 0) => ({ t, r, cells: [name, `${name}-java`, '分期乐 GROUP: project_1092458', 'rel_processOwnerAlert_1426731 研发: joneyshao', '待合并', '执行成功'] });
+const appRow = (name, t = 0, r = 0) => ({ t, r, cells: [name, `${name}-java`, '分期乐 GROUP: project_1092458', 'rel_processOwnerAlert_1426731 研发: zhangsan', '待合并', '执行成功'] });
 
 test('app row is matched by an exact cell, not by prefix or by an enclosing row', () => {
   const rows = [

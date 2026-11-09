@@ -1,6 +1,6 @@
 # 测试清单准备判定细则
 
-供 `dev-auto-loop` 编排 `dev-derive-test-cases` ⇄ `dev-review-test-cases` 时使用。本文件只规定自动编排的路由、预算和止损；产物身份遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/artifact-identity.md`。
+供 `dev-auto-loop` 编排 `dev-derive-test-cases` ⇄ `dev-review-test-cases` 时使用。本文件只规定自动编排的路由、预算和止损；产物身份遵循 `$AGENT_TOOLS_ROOT/skills/dev-workflow/references/artifact-identity.md`。
 
 ## 进入与退出约束
 

@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { pickTargetGroup, rewriteGatewayLines } = require('../scripts/frontend_env');
+const { parseSwapUsage, parseVmStat, pickTargetGroup, resolveWhistle, rewriteGatewayLines } = require('../scripts/frontend_env');
 
 const GROUP_DATA = [
     '121.46.128.40 vui.oa.fenqile.com',
@@ -53,4 +53,29 @@ test('pickTargetGroup refuses when zero or several enabled groups qualify', () =
     ];
     assert.throws(() => pickTargetGroup(two), /有 2 个（a, b）/);
     assert.throws(() => pickTargetGroup(two, 'c'), /没有分组「c」/);
+});
+
+test('parseVmStat sums free/inactive/speculative/purgeable pages (MemAvailable 口径)', () => {
+    const text = [
+        'Mach Virtual Memory Statistics: (page size of 16384 bytes)',
+        'Pages free:                               100000.',
+        'Pages active:                             500000.',
+        'Pages inactive:                           200000.',
+        'Pages speculative:                         50000.',
+        'Pages purgeable:                           50000.',
+    ].join('\n');
+    assert.equal(parseVmStat(text), 400000 * 16384 / 1024 / 1024 / 1024);
+    assert.ok(Number.isNaN(parseVmStat('garbage')));
+});
+
+test('parseSwapUsage reads the free field of sysctl vm.swapusage', () => {
+    assert.equal(parseSwapUsage('total = 2048.00M  used = 1024.00M  free = 1024.00M  (encrypted)'), 1);
+    assert.equal(parseSwapUsage('total = 4.00G  used = 1.50G  free = 2.50G'), 2.5);
+    assert.ok(Number.isNaN(parseSwapUsage('')));
+});
+
+test('resolveWhistle defaults to 127.0.0.1:8899 outside WSL and honours --whistle', () => {
+    assert.deepEqual(resolveWhistle({}, 'darwin'), { host: '127.0.0.1', port: 8899 });
+    assert.deepEqual(resolveWhistle({}, 'linux'), { host: '127.0.0.1', port: 8899 });
+    assert.deepEqual(resolveWhistle({ whistle: '10.0.0.2:9000' }, 'wsl'), { host: '10.0.0.2', port: 9000 });
 });

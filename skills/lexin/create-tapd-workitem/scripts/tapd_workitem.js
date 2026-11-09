@@ -1,18 +1,28 @@
 #!/usr/bin/env node
 'use strict';
+// agent-tools bootstrap（模板 lib/agent_tools/bootstrap.js，lint 规则六校验逐字一致）
+const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
+// probe 返回 'hit' | 'miss' | <异常码>：与 locate.py 同序先看 install.py（缺失即 miss），再看 skills/；用会抛错的 statSync，不用对一切错误都返回 false 的 existsSync
+const probe = (d) => { if (!d) return 'miss'; try { const i = fs.statSync(path.join(d, 'install.py'), { throwIfNoEntry: false }); if (!i || !i.isFile()) return 'miss'; const s = fs.statSync(path.join(d, 'skills'), { throwIfNoEntry: false }); return s && s.isDirectory() ? 'hit' : 'miss'; } catch (e) { return e.code || 'error'; } };
+const tried = []; let root = '', r = 'miss';
+try { let d = fs.realpathSync(__dirname); tried.push(`上溯起点 ${d}`); while ((r = probe(d)) === 'miss' && path.dirname(d) !== d) d = path.dirname(d); if (r === 'hit') root = d; else tried[0] += r === 'miss' ? ' 未命中有效根（install.py 文件 + skills/ 目录）' : ` ${r}（放弃上溯）`; }
+catch (e) { tried.push(`上溯起点 ${__dirname} ${e.code || e.message}`); }
+if (!root) { const v = process.env.AGENT_TOOLS_ROOT || ''; r = probe(v); tried.push(`AGENT_TOOLS_ROOT=${v || '<unset>'}${r === 'hit' || r === 'miss' ? '' : ' ' + r}`); if (r === 'hit') root = v; }
+if (!root) { const p = path.join(os.homedir(), '.config/agent-tools/root'); try { const v = fs.readFileSync(p, 'utf8').trim(); r = probe(v); tried.push(`${p} = ${v}${r === 'hit' || r === 'miss' ? '' : ' ' + r}`); if (r === 'hit') root = v; } catch (e) { tried.push(`${p} ${e.code === 'ENOENT' ? '<absent>' : e.code}`); } }
+if (!root) { console.error(['agent-tools: 未找到仓库根', ...tried, '请在仓库目录运行 python3 install.py'].join('\n')); process.exit(2); }
+// agent-tools bootstrap end
 // Create TAPD work items through the real "新建" page with the get-browser-session profile. Only bugs for now.
 // The page builds the payload itself: this script fills form items by their data-field-name and clicks 创建 (a#_view).
 // --dry-run fills and prints the form without clicking 创建. Cookies are never printed or written.
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
 const { createRequire } = require('module');
+const { skillDir, browserRuntime } = require(path.join(root, 'lib/agent_tools/locate.js'));
 
-const B = '/home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/';
+const B = skillDir('get-browser-session', 'scripts');
 const { buildBrowserEnv, chromiumArgsFor } = require(path.join(B, 'browser_network'));
 const { launchLockedContext } = require(path.join(B, 'browser_session'));
 
-const TOOL_DIR = path.join(os.homedir(), 'tools/lexiao-browser');
+let RUNTIME;
+try { RUNTIME = browserRuntime(); } catch (error) { console.error(error.message); process.exit(2); }
 const DEFAULT_PROFILE = path.join(os.homedir(), '.local/state/agent-tools/browser-profiles/main');
 // TAPD's WAF rejects the HeadlessChrome user agent.
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
@@ -55,7 +65,7 @@ function validateBugSpec(spec, baseDir = '.') {
   }
   if (!/^\d+$/.test(String(spec.workspace))) throw new TapdError(`workspace must be a TAPD project id: ${spec.workspace}`);
   if (spec.template !== undefined && !/^\d+$/.test(String(spec.template))) throw new TapdError(`template must be a TAPD template id: ${spec.template}`);
-  if (/[;,；，\s]/.test(String(spec.owner).trim())) throw new TapdError('owner must be a single TAPD account (e.g. joneyshao)');
+  if (/[;,；，\s]/.test(String(spec.owner).trim())) throw new TapdError('owner must be a single TAPD account (e.g. zhangsan)');
   let description = spec.description || '';
   if (spec.description_file) description = fs.readFileSync(path.resolve(baseDir, spec.description_file), 'utf8');
   if (!String(description).trim()) throw new TapdError('description or description_file is required');
@@ -71,7 +81,7 @@ function validateBugSpec(spec, baseDir = '.') {
   };
 }
 
-// The user chooser adds every prefix match while typing (typing joneyshao also added jojoduan); keep the target account only.
+// The user chooser adds every prefix match while typing (typing one account also adds the others sharing its prefix); keep the target account only.
 function keepAccountTokens(value, account) {
   return String(value || '').split(';').map((t) => t.trim()).filter((t) => t.startsWith(account)).map((t) => `${t};`).join('');
 }
@@ -91,15 +101,15 @@ function missingRequired(items) {
 // ---------- browser ----------
 
 async function openContext(args, url, headed = false) {
-  const chromium = createRequire(path.join(TOOL_DIR, 'package.json'))('playwright').chromium;
-  const env = { ...buildBrowserEnv(url, { ...process.env }).env, LD_LIBRARY_PATH: path.join(TOOL_DIR, 'runtime-libs/usr/lib/x86_64-linux-gnu') };
+  const chromium = createRequire(path.join(RUNTIME.toolDir, 'package.json'))('playwright').chromium;
+  const env = { ...buildBrowserEnv(url, { ...process.env }).env, LD_LIBRARY_PATH: [RUNTIME.runtimeLibDir, process.env.LD_LIBRARY_PATH].filter(Boolean).join(':') };
   if (headed) {
     if (!env.DISPLAY && fs.existsSync('/tmp/.X11-unix/X0')) env.DISPLAY = ':0';
     if (!env.WAYLAND_DISPLAY && fs.existsSync('/mnt/wslg/runtime-dir/wayland-0')) env.WAYLAND_DISPLAY = 'wayland-0';
     if (!env.XDG_RUNTIME_DIR && fs.existsSync('/mnt/wslg/runtime-dir')) env.XDG_RUNTIME_DIR = '/mnt/wslg/runtime-dir';
   }
   const context = await launchLockedContext(chromium, path.resolve(args.profile || DEFAULT_PROFILE), {
-    executablePath: path.join(TOOL_DIR, 'browsers/chrome-linux64/chrome'),
+    executablePath: RUNTIME.executablePath,
     headless: !headed,
     env,
     userAgent: USER_AGENT,

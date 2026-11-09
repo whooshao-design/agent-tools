@@ -2,7 +2,7 @@
 name: register-healthy-metrics
 description: 注册、查询和复查 Healthy/雷神/Nightingale 指标。Use when 用户要求检查雷神指标是否存在、批量注册 stable 或线上雷神指标、按 metric 列表或应用维度展开指标清单、调用 /api/n9e/metric-manage 做先查后注册、或确认指标注册中的 desc/app/business_line 填写规则。
 metadata:
-  version: 1.0.2
+  version: 1.0.3
 ---
 
 # register-healthy-metrics
@@ -66,13 +66,13 @@ Content-Type: application/json;charset=UTF-8
 脚本路径：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/register-healthy-metrics/scripts/register_metrics.js
+node scripts/register_metrics.js
 ```
 
 离线展开和字段预览，不访问接口：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/register-healthy-metrics/scripts/register_metrics.js \
+node scripts/register_metrics.js \
   --env stable \
   --apps server_hawk_decision_dispatcher,server_hawk_decision_dispatcher_ec \
   --suffixes dubbo_active_count,dubbo_pool_size,dubbo_queue_size,dubbo_queue_remaining_capacity \
@@ -82,7 +82,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/register-healthy-metrics/s
 dry-run 查询，不写入：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/register-healthy-metrics/scripts/register_metrics.js \
+node scripts/register_metrics.js \
   --env stable \
   --metrics fql_fk_server_hawk_decision_dispatcher_ec_dubbo_active_count \
   --token "$HEALTHY_METRIC_TOKEN"
@@ -91,7 +91,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/register-healthy-metrics/s
 实际注册并复查：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/register-healthy-metrics/scripts/register_metrics.js \
+node scripts/register_metrics.js \
   --env prod \
   --apps server_hawk_decision_dispatcher,server_hawk_decision_dispatcher_ec,server_hawk_decision_dispatcher_batch,server_hawk_decision_dispatcher_simulate \
   --suffixes dubbo_active_count,dubbo_pool_size,dubbo_queue_size,dubbo_queue_remaining_capacity \
@@ -138,7 +138,7 @@ ${应用中文名或app}Dubbo线程池${指标含义}
 使用方式：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/register-healthy-metrics/scripts/register_metrics.js \
+node scripts/register_metrics.js \
   --env stable \
   --metrics-file /tmp/metrics.json \
   --desc-map /tmp/desc-map.json \

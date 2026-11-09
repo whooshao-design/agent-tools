@@ -2,7 +2,7 @@
 name: diagnose-healthy-alert
 description: 从雷神告警排查告警原因。Use when 用户给出 Healthy/雷神告警 ID 或 alert-show-detail 链接、要求排查告警原因、判断告警是真实故障还是误报或规则过敏、需要把告警关联到触发指标、埋点代码和应用日志。
 metadata:
-  version: 1.1.5
+  version: 1.1.6
 ---
 
 # diagnose-healthy-alert
@@ -71,7 +71,7 @@ L3 排在 L5 之前：代码检索是本地 `rg`，秒级且不需要堡垒机�
 ## 脚本
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/diagnose-healthy-alert/scripts/diagnose_alert.js \
+node scripts/diagnose_alert.js \
   --alert 16343328 --env prod --with-rule --replay --window 30m
 ```
 
@@ -83,7 +83,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/diagnose-healthy-alert/scr
   `--step` 应与规则的 `prom_eval_interval` 对齐；拉长窗口时放大 step 会把多次触发压缩成一个点，
   此时 `firing_points` 只能读作"至少 N 次"。
 - L3 代码线索默认输出，`--no-code-hint` 关闭；`--code-hint-only --metric <m> --app <a>` 纯本地推导，不联网。
-- `--code-root`：扫描候选仓库的根目录，默认 `/home/joney/projects`。
+- `--code-root`：扫描候选仓库的根目录，默认 `~/projects`。
 - token 缓存在 `~/.cache/healthy-alert-token.json`（权限 0600），避免同一次排查里
   每条命令都重起浏览器（每次 30~40 秒）；缓存失效会自动回退浏览器刷新并重写。
   `--no-token-cache` 关闭，删除该文件即清空。
@@ -194,7 +194,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/diagnose-healthy-alert/scr
 
 - 只读：不调用任何写接口，不改规则、大盘、指标、配置或服务。
 - 默认按“定性结论与已知影响 → 决定性证据及限制 → 建议动作”简短回复；规则过敏、单次抖动等已能清楚解释的告警，不生成完整报告，不按 L0–L6 堆叠过程。
-- 仅当用户要求故障复盘/完整根因报告，或需要综合日志、指标、代码、配置/变更等证据解释故障机制、业务影响与处置取舍时，读取 [复杂故障分析报告指南](/home/joney/projects/ai/agent-tools/skills/common/debug-systematic/references/diagnostic-output.md)。按需展示关键数字、根因链、时间线和分阶段建议；多实例或告警次数多本身不触发报告。
+- 仅当用户要求故障复盘/完整根因报告，或需要综合日志、指标、代码、配置/变更等证据解释故障机制、业务影响与处置取舍时，读取 [复杂故障分析报告指南]($AGENT_TOOLS_ROOT/skills/common/debug-systematic/references/diagnostic-output.md)。按需展示关键数字、根因链、时间线和分阶段建议；多实例或告警次数多本身不触发报告。
 - 保留告警 ID、规则、环境/实例、触发与恢复时间、查询窗口和代码基线。区分告警恢复与业务恢复；回放命中点数不能当真实告警次数，未验证业务结果时不写“主流程无影响”。
 - 不输出 token、ticket、Cookie、完整登录跳转参数。
 - `receiver`、`app_owner` 等人员字段可在终端回复中保留，但不要写入外发文档或外部服务。

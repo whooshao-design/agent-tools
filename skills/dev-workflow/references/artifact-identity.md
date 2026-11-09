@@ -117,6 +117,6 @@ finding/限制项内容、当前阶段绑定或条件任一变化，旧授权立
 
 ## 6. Agent 溯源与独立评审
 
-Agent 实例身份、委派结果和独立性判定统一遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/delegation-contract.md`。正式评审记录必须同时保存 `producer_agent_refs[]`、`reviewer_agent_ref` 和独立性校验结果；`reviewer_agent_ref` 与任一 producer 相同时，只能形成非正式自检，不能形成审批或复核通过事实。
+Agent 实例身份、委派结果和独立性判定统一遵循 `$AGENT_TOOLS_ROOT/skills/dev-workflow/references/delegation-contract.md`。正式评审记录必须同时保存 `producer_agent_refs[]`、`reviewer_agent_ref` 和独立性校验结果；`reviewer_agent_ref` 与任一 producer 相同时，只能形成非正式自检，不能形成审批或复核通过事实。
 
 评审者一旦修改被评产物或代码，就成为新 producer：本轮评审立即失效，必须冻结新产物并派发另一个独立 reviewer。

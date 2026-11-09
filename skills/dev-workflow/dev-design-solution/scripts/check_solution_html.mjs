@@ -8,23 +8,27 @@
 //   --md 默认取同目录同名的 .md，用于比对图源码和指纹。
 // 浏览器工具链与 check_mermaid.js 相同：PW_PATH / CHROME_PATH / RUNTIME_LIBS。
 // 退出码：0 全部通过；1 任一项失败或无法运行。F4 未匹配的节点只列出，不算失败。
-
+// agent-tools bootstrap（模板 lib/agent_tools/bootstrap.mjs，lint 规则六校验逐字一致）
+import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'; import { fileURLToPath } from 'node:url';
+// probe 返回 'hit' | 'miss' | <异常码>：与 locate.py 同序先看 install.py（缺失即 miss），再看 skills/；用会抛错的 statSync，不用对一切错误都返回 false 的 existsSync
+const probe = (d) => { if (!d) return 'miss'; try { const i = fs.statSync(path.join(d, 'install.py'), { throwIfNoEntry: false }); if (!i || !i.isFile()) return 'miss'; const s = fs.statSync(path.join(d, 'skills'), { throwIfNoEntry: false }); return s && s.isDirectory() ? 'hit' : 'miss'; } catch (e) { return e.code || 'error'; } };
+const tried = []; let root = '', r = 'miss';
+try { let d = fs.realpathSync(path.dirname(fileURLToPath(import.meta.url))); tried.push(`上溯起点 ${d}`); while ((r = probe(d)) === 'miss' && path.dirname(d) !== d) d = path.dirname(d); if (r === 'hit') root = d; else tried[0] += r === 'miss' ? ' 未命中有效根（install.py 文件 + skills/ 目录）' : ` ${r}（放弃上溯）`; }
+catch (e) { tried.push(`上溯起点 ${path.dirname(fileURLToPath(import.meta.url))} ${e.code || e.message}`); }
+if (!root) { const v = process.env.AGENT_TOOLS_ROOT || ''; r = probe(v); tried.push(`AGENT_TOOLS_ROOT=${v || '<unset>'}${r === 'hit' || r === 'miss' ? '' : ' ' + r}`); if (r === 'hit') root = v; }
+if (!root) { const p = path.join(os.homedir(), '.config/agent-tools/root'); try { const v = fs.readFileSync(p, 'utf8').trim(); r = probe(v); tried.push(`${p} = ${v}${r === 'hit' || r === 'miss' ? '' : ' ' + r}`); if (r === 'hit') root = v; } catch (e) { tried.push(`${p} ${e.code === 'ENOENT' ? '<absent>' : e.code}`); } }
+if (!root) { console.error(['agent-tools: 未找到仓库根', ...tried, '请在仓库目录运行 python3 install.py'].join('\n')); process.exit(2); }
+// agent-tools bootstrap end
 import crypto from 'node:crypto';
-import fs from 'node:fs';
 import http from 'node:http';
-import os from 'node:os';
-import path from 'node:path';
 import { createRequire } from 'node:module';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import { DEFAULT_VENDOR } from './render_solution.mjs';
 
 const require = createRequire(import.meta.url);
+const { browserRuntime } = require(path.join(root, 'lib/agent_tools/locate.js'));
 const here = path.dirname(fileURLToPath(import.meta.url));
 const { extractMermaidBlocks } = require(path.join(here, 'check_mermaid.js'));
-const home = os.homedir();
-const PW_PATH = process.env.PW_PATH || path.join(home, 'tools/lexiao-browser/node_modules/playwright');
-const CHROME_PATH = process.env.CHROME_PATH || path.join(home, 'tools/lexiao-browser/browsers/chrome-linux64/chrome');
-const RUNTIME_LIBS = process.env.RUNTIME_LIBS || path.join(home, 'tools/lexiao-browser/runtime-libs/usr/lib/x86_64-linux-gnu');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
 
 const args = process.argv.slice(2);
@@ -36,6 +40,11 @@ if (!htmlFile) {
   process.exit(1);
 }
 const mdFile = path.resolve(mdArg || htmlFile.replace(/\.html?$/, '.md'));
+let RUNTIME;
+try { RUNTIME = browserRuntime(); } catch (error) { console.error(error.message); process.exit(1); }
+const PW_PATH = process.env.PW_PATH || RUNTIME.playwrightDir;
+const CHROME_PATH = process.env.CHROME_PATH || RUNTIME.executablePath;
+const RUNTIME_LIBS = process.env.RUNTIME_LIBS || RUNTIME.runtimeLibDir;
 
 const results = [];
 const record = (mode, id, pass, detail) => {

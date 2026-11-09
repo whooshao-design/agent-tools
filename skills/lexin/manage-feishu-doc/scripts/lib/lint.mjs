@@ -1,11 +1,25 @@
 // 写前检查：发布到飞书前找出会出错或不好读的写法。规则来自 lexin 租户实测和 references/authoring-rules.md。
 // lintMarkdown 只做静态检查，返回 [{level: "error"|"warning", rule, line, message}]，line 是源文件行号；
 // lintFile 另外调用 dev-design-solution 的 check_mermaid.js 做 mermaid 语法校验。
+// agent-tools bootstrap（模板 lib/agent_tools/bootstrap.mjs，lint 规则六校验逐字一致）
+import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'; import { fileURLToPath } from 'node:url';
+// probe 返回 'hit' | 'miss' | <异常码>：与 locate.py 同序先看 install.py（缺失即 miss），再看 skills/；用会抛错的 statSync，不用对一切错误都返回 false 的 existsSync
+const probe = (d) => { if (!d) return 'miss'; try { const i = fs.statSync(path.join(d, 'install.py'), { throwIfNoEntry: false }); if (!i || !i.isFile()) return 'miss'; const s = fs.statSync(path.join(d, 'skills'), { throwIfNoEntry: false }); return s && s.isDirectory() ? 'hit' : 'miss'; } catch (e) { return e.code || 'error'; } };
+const tried = []; let root = '', r = 'miss';
+try { let d = fs.realpathSync(path.dirname(fileURLToPath(import.meta.url))); tried.push(`上溯起点 ${d}`); while ((r = probe(d)) === 'miss' && path.dirname(d) !== d) d = path.dirname(d); if (r === 'hit') root = d; else tried[0] += r === 'miss' ? ' 未命中有效根（install.py 文件 + skills/ 目录）' : ` ${r}（放弃上溯）`; }
+catch (e) { tried.push(`上溯起点 ${path.dirname(fileURLToPath(import.meta.url))} ${e.code || e.message}`); }
+if (!root) { const v = process.env.AGENT_TOOLS_ROOT || ''; r = probe(v); tried.push(`AGENT_TOOLS_ROOT=${v || '<unset>'}${r === 'hit' || r === 'miss' ? '' : ' ' + r}`); if (r === 'hit') root = v; }
+if (!root) { const p = path.join(os.homedir(), '.config/agent-tools/root'); try { const v = fs.readFileSync(p, 'utf8').trim(); r = probe(v); tried.push(`${p} = ${v}${r === 'hit' || r === 'miss' ? '' : ' ' + r}`); if (r === 'hit') root = v; } catch (e) { tried.push(`${p} ${e.code === 'ENOENT' ? '<absent>' : e.code}`); } }
+if (!root) { console.error(['agent-tools: 未找到仓库根', ...tried, '请在仓库目录运行 python3 install.py'].join('\n')); process.exit(2); }
+// agent-tools bootstrap end
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+
+const require = createRequire(import.meta.url);
+const { skillDir } = require(path.join(root, "lib/agent_tools/locate.js"));
 
 const CJK = /[\u3400-\u9fff\uf900-\ufaff]/;
 const FENCE_OPEN = /^( {0,3})(`{3,}|~{3,})\s*([^`\s]*)/;
@@ -24,7 +38,7 @@ const CHINESE_NUMBERING = /^(第[一二三四五六七八九十百零]+[章节�
 const DECIMAL_NUMBERING = /^\d{1,2}\.\d{1,2}/;
 const QUOTE_REQUIRED = new Set(["quadrantchart", "xychart", "xychart-beta", "sankey", "sankey-beta"]);
 
-export const CHECK_MERMAID = fileURLToPath(new URL("../../../../dev-workflow/dev-design-solution/scripts/check_mermaid.js", import.meta.url));
+export const CHECK_MERMAID = skillDir("dev-design-solution", "scripts", "check_mermaid.js");
 
 // 行内代码里的内容不参与检查：替换成等长空格，列位置不变
 const stripCodeSpans = (line) => line.replace(/(`+)([\s\S]*?)\1/g, (whole) => " ".repeat(whole.length));

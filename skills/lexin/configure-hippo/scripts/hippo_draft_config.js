@@ -1,17 +1,27 @@
 #!/usr/bin/env node
 'use strict';
+// agent-tools bootstrap（模板 lib/agent_tools/bootstrap.js，lint 规则六校验逐字一致）
+const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
+// probe 返回 'hit' | 'miss' | <异常码>：与 locate.py 同序先看 install.py（缺失即 miss），再看 skills/；用会抛错的 statSync，不用对一切错误都返回 false 的 existsSync
+const probe = (d) => { if (!d) return 'miss'; try { const i = fs.statSync(path.join(d, 'install.py'), { throwIfNoEntry: false }); if (!i || !i.isFile()) return 'miss'; const s = fs.statSync(path.join(d, 'skills'), { throwIfNoEntry: false }); return s && s.isDirectory() ? 'hit' : 'miss'; } catch (e) { return e.code || 'error'; } };
+const tried = []; let root = '', r = 'miss';
+try { let d = fs.realpathSync(__dirname); tried.push(`上溯起点 ${d}`); while ((r = probe(d)) === 'miss' && path.dirname(d) !== d) d = path.dirname(d); if (r === 'hit') root = d; else tried[0] += r === 'miss' ? ' 未命中有效根（install.py 文件 + skills/ 目录）' : ` ${r}（放弃上溯）`; }
+catch (e) { tried.push(`上溯起点 ${__dirname} ${e.code || e.message}`); }
+if (!root) { const v = process.env.AGENT_TOOLS_ROOT || ''; r = probe(v); tried.push(`AGENT_TOOLS_ROOT=${v || '<unset>'}${r === 'hit' || r === 'miss' ? '' : ' ' + r}`); if (r === 'hit') root = v; }
+if (!root) { const p = path.join(os.homedir(), '.config/agent-tools/root'); try { const v = fs.readFileSync(p, 'utf8').trim(); r = probe(v); tried.push(`${p} = ${v}${r === 'hit' || r === 'miss' ? '' : ' ' + r}`); if (r === 'hit') root = v; } catch (e) { tried.push(`${p} ${e.code === 'ENOENT' ? '<absent>' : e.code}`); } }
+if (!root) { console.error(['agent-tools: 未找到仓库根', ...tried, '请在仓库目录运行 python3 install.py'].join('\n')); process.exit(2); }
+// agent-tools bootstrap end
 
 const crypto = require('crypto');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
 const { TextDecoder } = require('util');
 const { createRequire } = require('module');
+const { skillDir, browserRuntime } = require(path.join(root, 'lib/agent_tools/locate.js'));
+const SESSION_SCRIPTS = skillDir('get-browser-session', 'scripts');
 const {
   buildBrowserEnv,
   chromiumArgsFor,
-} = require('../../get-browser-session/scripts/browser_network');
-const { launchLockedContext } = require('../../get-browser-session/scripts/browser_session');
+} = require(path.join(SESSION_SCRIPTS, 'browser_network'));
+const { launchLockedContext } = require(path.join(SESSION_SCRIPTS, 'browser_session'));
 
 const SITE_BASE_URLS = {
   standard: 'http://hippo.oa.fenqile.com',
@@ -21,8 +31,7 @@ const SITE_BASE_URLS = {
 };
 const STANDARD_BASE_URL = SITE_BASE_URLS.standard;
 const STABLE_BASE_URL = SITE_BASE_URLS.stable;
-const DEFAULT_PROFILE = '/home/joney/.local/state/agent-tools/browser-profiles/healthy';
-const DEFAULT_TOOL_DIR = path.join(os.homedir(), 'tools/lexiao-browser');
+const DEFAULT_PROFILE = path.join(os.homedir(), '.local/state/agent-tools/browser-profiles/healthy');
 const COMMANDS = new Set([
   'doctor',
   'status',
@@ -49,9 +58,15 @@ const NAMESPACE_COMMANDS = new Set([
 ]);
 // 新建 namespace 后授权：POST /apps/<appId>/namespaces/<ns>/roles/<roleType>，body 就是用户 id。
 const NAMESPACE_ROLE_TYPES = { modify: 'ModifyNamespace', release: 'ReleaseNamespace' };
-// 新建 namespace 默认就给这些人授修改权和发布权，不再单独询问；
+// 新建 namespace 默认授修改权和发布权的账号：env/credentials.env 的 HIPPO_DEFAULT_GRANT_USERS（逗号分隔，经 bin/with-env 加载），
+// 不再单独询问；未配置时不自动授权，创建结果的 autoGrant.reason 说明怎么配。
 // Hippo 通常已经把创建者自动加上，这里做兜底，也覆盖“换人创建”的情况。
-const DEFAULT_NAMESPACE_GRANT_USERS = ['joneyshao'];
+const DEFAULT_GRANT_USERS_ENV = 'HIPPO_DEFAULT_GRANT_USERS';
+const DEFAULT_GRANT_USERS_HINT = `${DEFAULT_GRANT_USERS_ENV} not set (env/credentials.env, loaded by bin/with-env): no auto grant; use namespace-grant --grant-users=<id> --grant-authorization=explicit`;
+function defaultGrantUsers(env = process.env) {
+  const raw = String(env[DEFAULT_GRANT_USERS_ENV] || '').trim();
+  return raw ? parseGrantUsers(raw) : [];
+}
 const PUBLISH_AUTHORIZATION_VALUE = 'explicit';
 // 删除是不可逆的高危动作：授权值不是常量，而是目标全路径 <app>/<env>/<namespace>/<key>，
 // 写错任一字段即拒绝；另外要求 --confirm-env、delete-plan 的 token 与实例数，公共 namespace 还要单独放行。
@@ -872,7 +887,7 @@ function appOwnersFrom(app) {
 // namespace-create 的自动授权名单：默认名单不需要额外授权，换成别人必须显式授权。
 function resolveAutoGrantUsers(args) {
   if (flagEnabled(args['no-auto-grant'])) return [];
-  if (args['grant-users'] === undefined) return [...DEFAULT_NAMESPACE_GRANT_USERS];
+  if (args['grant-users'] === undefined) return defaultGrantUsers();
   assert(String(args['grant-authorization'] || '') === GRANT_AUTHORIZATION_VALUE,
     'GRANT_AUTHORIZATION_REQUIRED',
     '给默认名单以外的用户授权必须明确授权：加 --grant-authorization=explicit，或改用 namespace-grant');
@@ -948,7 +963,10 @@ function resolveRuntime(args, command) {
     assert(args['allow-non-pre'], 'NON_PRE_WRITE_REJECTED',
       `写入 ${env} 必须由用户明确指定环境并传 --allow-non-pre`);
   }
-  const toolDir = path.resolve(expandHome(args['tool-dir'] || DEFAULT_TOOL_DIR));
+  if (args['tool-dir']) process.env.BROWSER_SESSION_TOOL_DIR = path.resolve(expandHome(args['tool-dir']));
+  let browser;
+  try { browser = browserRuntime(); } catch (error) { fail('PLAYWRIGHT_NOT_FOUND', error.message); }
+  const toolDir = browser.toolDir;
   return {
     env,
     site,
@@ -960,9 +978,8 @@ function resolveRuntime(args, command) {
     paths: target ? buildPaths(target) : null,
     profile: path.resolve(expandHome(args.profile || DEFAULT_PROFILE)),
     toolDir,
-    chromePath: path.resolve(expandHome(args.chrome || path.join(toolDir, 'browsers/chrome-linux64/chrome'))),
-    runtimeLibDir: path.resolve(expandHome(args['runtime-lib-dir']
-      || path.join(toolDir, 'runtime-libs/usr/lib/x86_64-linux-gnu'))),
+    chromePath: path.resolve(expandHome(args.chrome || browser.executablePath)),
+    runtimeLibDir: args['runtime-lib-dir'] ? path.resolve(expandHome(args['runtime-lib-dir'])) : browser.runtimeLibDir,
   };
 }
 
@@ -1363,7 +1380,8 @@ async function namespacePermissionDetails(page, target, access, roles = 'modify,
   const app = await fetchRaw(page, `/apps/${encodeSegment(target.appId)}`);
   const site = Object.entries(SITE_BASE_URLS).find(([, baseUrl]) => baseUrl === target.baseUrl)?.[0];
   assert(site, 'HIPPO_SITE_INVALID', '无法确定原请求站点，禁止生成默认站点的补授权命令');
-  const grantArgv = [process.execPath, __filename, 'namespace-grant',
+  // 经 bin/with-env 运行，自助补权限才能读到 env/credentials.env 的 HIPPO_DEFAULT_GRANT_USERS
+  const grantArgv = [path.join(root, 'bin/with-env'), process.execPath, __filename, 'namespace-grant',
     `--hippo-site=${site}`, `--env=${target.env}`, `--cluster=${target.cluster}`,
     `--app-id=${target.appId}`, `--namespace=${target.namespaceName}`, `--roles=${roles}`];
   return {
@@ -1834,7 +1852,8 @@ Namespace options: --format=properties|xml|sh|json|yml (default properties), --e
 Namespace roles: POST /apps/<app>/namespaces/<ns>/roles/ModifyNamespace|ReleaseNamespace, one user
 per request; roles are only added, never removed, and every grant is verified by reading role_users
 back. Grouped namespaces use <groupPath>!<namespaceName> in the role path.
-namespace-create auto grants the default owners (joneyshao) modify plus release right after the
+namespace-create auto grants the accounts in HIPPO_DEFAULT_GRANT_USERS (env/credentials.env, loaded
+by bin/with-env; unset = no auto grant, the result says so) modify plus release right after the
 namespace is verified - no extra prompt, since the create authorization already covers it. Pass
 --no-auto-grant to skip it. namespace-grant with no --grant-users does the same self service grant
 on an existing namespace; granting anyone else needs --grant-users with --grant-authorization=explicit.
@@ -2035,18 +2054,26 @@ function runSelfTest() {
     'SELF_TEST_FAILED', '角色别名或去重失败');
   assert(namespaceRejects(() => normalizeRoleTypes('admin'), 'NAMESPACE_ROLE_INVALID'),
     'SELF_TEST_FAILED', '非法角色未被拒绝');
-  assert(JSON.stringify(parseGrantUsers('joneyshao, peterzhong ,joneyshao'))
-    === JSON.stringify(['joneyshao', 'peterzhong']), 'SELF_TEST_FAILED', '授权用户解析或去重失败');
+  assert(JSON.stringify(parseGrantUsers('alice, bob ,alice'))
+    === JSON.stringify(['alice', 'bob']), 'SELF_TEST_FAILED', '授权用户解析或去重失败');
   assert(namespaceRejects(() => parseGrantUsers(''), 'GRANT_USERS_REQUIRED'),
     'SELF_TEST_FAILED', '空授权用户未被拒绝');
   assert(namespaceRejects(() => parseGrantUsers('bad user'), 'GRANT_USER_INVALID'),
     'SELF_TEST_FAILED', '非法用户 id 未被拒绝');
-  assert(JSON.stringify(appOwnersFrom({ ownerName: 'joneyshao;peterzhong, taurusjiang ;' }))
-    === JSON.stringify(['joneyshao', 'peterzhong', 'taurusjiang']),
+  assert(JSON.stringify(appOwnersFrom({ ownerName: 'alice;bob, carol ;' }))
+    === JSON.stringify(['alice', 'bob', 'carol']),
     'SELF_TEST_FAILED', '应用负责人解析失败');
   assert(JSON.stringify(appOwnersFrom({})) === '[]', 'SELF_TEST_FAILED', '空负责人解析失败');
-  assert(JSON.stringify(resolveAutoGrantUsers({})) === JSON.stringify(DEFAULT_NAMESPACE_GRANT_USERS),
-    'SELF_TEST_FAILED', '默认自动授权名单失败');
+  const savedGrantEnv = process.env[DEFAULT_GRANT_USERS_ENV];
+  try {
+    process.env[DEFAULT_GRANT_USERS_ENV] = 'alice, bob';
+    assert(JSON.stringify(resolveAutoGrantUsers({})) === JSON.stringify(['alice', 'bob']),
+      'SELF_TEST_FAILED', '默认自动授权名单未从 HIPPO_DEFAULT_GRANT_USERS 读取');
+    delete process.env[DEFAULT_GRANT_USERS_ENV];
+    assert(JSON.stringify(resolveAutoGrantUsers({})) === '[]', 'SELF_TEST_FAILED', '未配置 HIPPO_DEFAULT_GRANT_USERS 时应不自动授权');
+  } finally {
+    if (savedGrantEnv === undefined) delete process.env[DEFAULT_GRANT_USERS_ENV]; else process.env[DEFAULT_GRANT_USERS_ENV] = savedGrantEnv;
+  }
   assert(JSON.stringify(resolveAutoGrantUsers({ 'no-auto-grant': true })) === '[]',
     'SELF_TEST_FAILED', '--no-auto-grant 未生效');
   assert(namespaceRejects(() => resolveAutoGrantUsers({ 'grant-users': 'someoneelse' }),
@@ -2059,20 +2086,20 @@ function runSelfTest() {
     && roleNamespacePath('encryption', 'hawk') === 'hawk!encryption',
     'SELF_TEST_FAILED', '分组 namespace 角色路径拼接失败');
   const beforeRoles = roleUsersSummary({
-    modifyRoleUsers: [{ userId: 'peterzhong' }, { userId: 'joneyshao' }],
-    releaseRoleUsers: [{ userId: 'peterzhong' }],
+    modifyRoleUsers: [{ userId: 'bob' }, { userId: 'alice' }],
+    releaseRoleUsers: [{ userId: 'bob' }],
   });
-  assert(JSON.stringify(beforeRoles.modifyRoleUsers) === JSON.stringify(['joneyshao', 'peterzhong']),
+  assert(JSON.stringify(beforeRoles.modifyRoleUsers) === JSON.stringify(['alice', 'bob']),
     'SELF_TEST_FAILED', '角色用户解析失败');
-  const rolePlan = pendingRoleGrants(beforeRoles, ['ModifyNamespace', 'ReleaseNamespace'], ['joneyshao']);
+  const rolePlan = pendingRoleGrants(beforeRoles, ['ModifyNamespace', 'ReleaseNamespace'], ['alice']);
   assert(rolePlan.pending.length === 1 && rolePlan.pending[0].roleType === 'ReleaseNamespace'
     && rolePlan.already.length === 1, 'SELF_TEST_FAILED', '待授权项计算失败');
   const afterRoles = roleUsersSummary({
-    modifyRoleUsers: [{ userId: 'peterzhong' }, { userId: 'joneyshao' }],
-    releaseRoleUsers: [{ userId: 'peterzhong' }, { userId: 'joneyshao' }],
+    modifyRoleUsers: [{ userId: 'bob' }, { userId: 'alice' }],
+    releaseRoleUsers: [{ userId: 'bob' }, { userId: 'alice' }],
   });
   const rolesDiff = roleUsersDiff(beforeRoles, afterRoles);
-  assert(JSON.stringify(rolesDiff.release.added) === JSON.stringify(['joneyshao'])
+  assert(JSON.stringify(rolesDiff.release.added) === JSON.stringify(['alice'])
     && !rolesDiff.release.removed.length && !rolesDiff.modify.added.length,
     'SELF_TEST_FAILED', '角色变化计算失败');
   const nsTokenContext = { site: 'standard', appId: 'demo', fullName: 'encryption', envs: nsProbes };
@@ -2174,7 +2201,8 @@ async function runNamespaceRoleCommand(command, args, page, state) {
   // 不传 --grant-users 就是给默认名单补授权，和 namespace-create 的自动授权同一条规则。
   const users = resolveAutoGrantUsers(args);
   assert(users.length > 0, 'GRANT_USERS_REQUIRED',
-    'namespace-grant 的授权名单为空；去掉 --no-auto-grant 或显式传 --grant-users');
+    'namespace-grant 的授权名单为空：在 env/credentials.env 填 HIPPO_DEFAULT_GRANT_USERS 并经 bin/with-env 运行，'
+    + '或显式传 --grant-users（--no-auto-grant 时不授权）');
   assert(before.hasAssignRolePermission, 'ASSIGN_ROLE_PERMISSION_DENIED',
     '当前账号没有该应用的授权权限（AssignRole），无法自助补授权；'
     + '这说明你没有该应用的 Hippo 权限，需要向应用负责人申请后再重试', {
@@ -2322,7 +2350,11 @@ async function runNamespaceCommand(command, runtime, args, page) {
   const roleNamespace = roleNamespacePath(fullName,
     createdRows.find((row) => row.env === summary.readbackEnv)?.detail?.groupPath
       || createdRows[0].detail?.groupPath || '');
-  let autoGrant = { skipped: true, reason: 'disabled by --no-auto-grant', users: [], granted: [], alreadyGranted: [] };
+  let autoGrant = {
+    skipped: true,
+    reason: flagEnabled(args['no-auto-grant']) ? 'disabled by --no-auto-grant' : DEFAULT_GRANT_USERS_HINT,
+    users: [], granted: [], alreadyGranted: [],
+  };
   if (autoGrantUsers.length) {
     const beforeRoles = await readNamespaceRoles(page, namespace.appId, roleNamespace);
     const { pending } = pendingRoleGrants(beforeRoles.roleUsers, autoGrantRoles, autoGrantUsers);
@@ -2764,6 +2796,8 @@ module.exports = {
   resolveBaseUrl,
   resolveNamespacePublicity,
   resolveAutoGrantUsers,
+  defaultGrantUsers,
+  DEFAULT_GRANT_USERS_ENV,
   resolveSite,
   resolveRuntime,
   roleNamespacePath,

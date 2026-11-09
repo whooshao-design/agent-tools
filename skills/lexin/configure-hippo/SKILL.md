@@ -2,7 +2,7 @@
 name: configure-hippo
 description: 安全新增、修改并在明确授权后发布 Hippo 配置，并支持在明确授权后为应用新建 namespace；支持标准 Hippo、stable/测试/项目环境以及墨西哥、印尼海外站点的独立域名；默认使用预发布 fql_pre 且只保存草稿、不发布；stable/测试环境保存后自动按 key 发布。Use when 用户要求在 Hippo 配置中心新增 key、修改配置值、更新预发布或 stable 配置、修改墨西哥或印尼海外配置、把本地文件写入 namespace、给某个 appId 新建 namespace、给 namespace 授修改权或发布权，或明确授权“修改并发布”；内置变更前检查、并发草稿保护、非目标项保护、key 粒度发布、新建 namespace 与授权的二次确认和 active release 校验。
 metadata:
-  version: 1.9.7
+  version: 1.9.8
 ---
 
 # configure-hippo
@@ -34,7 +34,7 @@ namespace 不会出现在 stable 上，授权也一样。所有 `namespace-*` �
 不需要 `--allow-non-pre`，站点选择本身就是用户意图的一部分，创建/授权仍按各自的授权规则走。
 
 新 namespace 要有人能改能发，授权接口是 `POST /apps/<appId>/namespaces/<namespaceName>/roles/<roleType>`，
-请求体就是用户 id，一次一个用户。`namespace-create` 会在创建校验通过后**自动**给默认名单（`joneyshao`）
+请求体就是用户 id，一次一个用户。`namespace-create` 会在创建校验通过后**自动**给默认名单（`env/credentials.env` 的 `HIPPO_DEFAULT_GRANT_USERS`，逗号分隔，经 `bin/with-env` 加载；没配则不自动授权，结果 `autoGrant.reason` 会说明）
 授修改权（`ModifyNamespace`）和发布权（`ReleaseNamespace`），不再单独询问——创建授权已经覆盖这一步；
 需要跳过时传 `--no-auto-grant`。Hippo 一般已经把创建者自动加上，这时自动授权会命中 `alreadyGranted` 并跳过，
 不会重复发请求。给默认名单以外的人授权仍然要单独明确授权，用 `namespace-grant`。
@@ -42,7 +42,7 @@ namespace 归到分组时，角色接口里的 namespace 名要写成 `<groupPat
 
 已有 namespace 但当前账号没有修改权/发布权时，`status`/`plan` 会先暴露 `hasModifyPermission`/`hasReleasePermission`，
 `upsert` 会在写入前拒绝（`NAMESPACE_MODIFY_PERMISSION_DENIED` / `NAMESPACE_RELEASE_PERMISSION_DENIED`）。
-这时直接跑 `namespace-grant`（不传 `--grant-users` 就是给默认名单自助补权限，不用再问）；如果 `namespace-grant`
+这时直接跑 `namespace-grant`（不传 `--grant-users` 就是给默认名单 `HIPPO_DEFAULT_GRANT_USERS` 自助补权限，命令要经 `$AGENT_TOOLS_ROOT/bin/with-env` 运行，`grantCommand` 已带；不用再问）；如果 `namespace-grant`
 报 `ASSIGN_ROLE_PERMISSION_DENIED`，说明当前账号根本没有这个应用的 Hippo 权限，脚本会把 `appOwners` 一起返回，
 此时必须停下来告知用户去向应用负责人申请权限，不要反复重试或换路径绕过。
 
@@ -75,7 +75,7 @@ namespace 归到分组时，角色接口里的 namespace 名要写成 `<groupPat
 - 目标 namespace 在任一 env 已存在时停止并报告 `NAMESPACE_ALREADY_EXISTS`。本 skill 不改名、不删除 namespace、不关联公共 namespace，也不处理发布系统配置 `__pub__`，只处理普通应用配置 `__app__`。
 - 新建 namespace 后必须验证 `otherNamespacesUnchanged=true`、`targetNamespaceEmpty=true`、`hasActiveRelease=false`，且 public/加密/格式与请求一致、`fieldMismatches` 为空。
 - namespace 名称只能包含字母、数字和下划线，含部门前缀不超过 64 字符；备注必填且 10-64 字符；加密存储只支持 `properties` 格式。public/private 由应用类型决定（实体应用=private，虚拟应用=public 且自动加 `<orgId>.` 前缀），不接受手工指定。
-- 默认名单（`joneyshao`）的授权随 `namespace-create` 自动执行，不要再问用户；给默认名单以外的人授权只能通过 `namespace-grant --grant-authorization=explicit`，且必须显式传 `--grant-users`，不要凭猜测扩大名单。
+- 默认名单（`HIPPO_DEFAULT_GRANT_USERS`）的授权随 `namespace-create` 自动执行，不要再问用户；没配该键时结果里 `autoGrant.skipped=true`，提示用户填 `env/credentials.env` 或用 `namespace-grant`；给默认名单以外的人授权只能通过 `namespace-grant --grant-authorization=explicit`，且必须显式传 `--grant-users`，不要凭猜测扩大名单。
 - `namespace-create` 上的 `--grant-users` 只在同时传 `--grant-authorization=explicit` 时才生效；否则脚本报 `GRANT_AUTHORIZATION_REQUIRED`，不会静默按默认名单处理。
 - 写配置前先看 `plan` 里的 `hasModifyPermission`（要发布再看 `hasReleasePermission`）。为 false 时按脚本给出的 `grantCommand` 自动跑一次 `namespace-grant` 自助补权限再重试，这一步不用问用户；`grantCommand` 已带 `--roles`，只补本次操作缺的角色（存草稿只补 modify，要发布才连 release 一起补），不要自行加角色；`namespace-grant` 报 `ASSIGN_ROLE_PERMISSION_DENIED` 就停止，把 `appId`、`namespace`、`appOwners` 报给用户让其申请权限，不要再重试、不要试图用别的接口写入。
 - 授权只做加法。脚本不调用任何 remove role 接口；已经有该角色的用户直接跳过并计入 `alreadyGranted`，授权后必须验证 `nonTargetRoleUsersUnchanged=true`（没有用户被移除、没有非目标用户被加进来）。
@@ -86,7 +86,7 @@ namespace 归到分组时，角色接口里的 namespace 名要写成 `<groupPat
 统一入口：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/configure-hippo/scripts/hippo_draft_config.js <command> [options]
+node scripts/hippo_draft_config.js <command> [options]
 ```
 
 支持的 command：
@@ -118,7 +118,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/configure-hippo/scripts/hi
 --key=<配置 key>                  doctor 之外必填
 --value-file=<UTF-8 文件>         plan/upsert/verify 必填
 --comment=<备注>                  可选；修改时缺省则保留原备注
---profile=/home/joney/.local/state/agent-tools/browser-profiles/healthy
+--profile=~/.local/state/agent-tools/browser-profiles/healthy
 --expected-current-token=<token>  覆盖已有未发布目标草稿时必填
 --allow-non-pre                   非当前站点 pre 环境写入的二次保护
 --allow-empty-value               明确允许写入空值
@@ -140,7 +140,7 @@ namespace 命令的专用参数：
 --group-id=<分组 id>              可选；默认 0（不分组），且必须是该应用已有的 namespace 分组
 --create-authorization=explicit   新建 namespace 的授权二次保护，必须与 namespace-create 同时传
 --expected-current-token=<token>  namespace-create 必填，使用本次 namespace-plan 返回值
---grant-users=<id1,id2>           可选；不传就是默认名单（joneyshao）；传了必须配 --grant-authorization
+--grant-users=<id1,id2>           可选；不传就是默认名单（HIPPO_DEFAULT_GRANT_USERS）；传了必须配 --grant-authorization
 --roles=modify,release            可选；默认同时授修改权和发布权
 --grant-authorization=explicit    给默认名单以外的用户授权时的二次保护
 --no-auto-grant                   可选；namespace-create 跳过默认名单的自动授权
@@ -150,7 +150,7 @@ namespace 命令的专用参数：
 
 1. 明确 `appId/env/cluster/namespace/key`。appId 未给时从当前仓库 `app.properties` 推断；候选不唯一就停止并让用户确认。应用名或目标 key 所在 namespace 不确定时，先用 `query-hippo-config` 的 `apps --keyword=` 和 `find --key=`（都是只读）定位，确认到唯一的 `appId/namespace` 后再回到本 skill 写入，不要凭猜测往 `application` 里写。用户说 stable/测试/项目环境时传 `--env=stable` 或同义别名，并确认脚本输出的 `baseUrl` 是 `http://stable-hippo.oa.fenqile.com`、`env` 是 `fql_pre`。若要写 `pdwl_pre` 这类 navtree 显示的 stable env，传 `--env=pdwl_pre --hippo-site=stable`。用户说墨西哥或印尼时传 `--hippo-site=mx|id` 加 `--env=pre|prod`，并确认输出的 `baseUrl` 和 `env` 前缀（`mxyw_*`/`ynyw_*`）与目标国家一致，不确定 env 是否存在时先查该 app 的 `navtree`。
 2. 把目标值保存到本地 UTF-8 文件。若值已在仓库文件中，直接使用该文件，不创建临时副本。
-3. 可先运行 `doctor`（可加 `--hippo-site` 检查目标站点）；登录失效时调用 `get-browser-session`，标准环境目标 URL 使用 `http://hippo.oa.fenqile.com/#/app/dashboard`，stable/测试/项目环境使用 `http://stable-hippo.oa.fenqile.com/#/app/dashboard`，墨西哥使用 `https://hippo.oa.wowcredito.com/#/app/dashboard`，印尼使用 `https://hippo.oa.kredito.id/#/app/dashboard`，profile 保持 `/home/joney/.local/state/agent-tools/browser-profiles/healthy`。四个站点共用同一个 passport 登录态和同一个 profile。
+3. 可先运行 `doctor`（可加 `--hippo-site` 检查目标站点）；登录失效时调用 `get-browser-session`，标准环境目标 URL 使用 `http://hippo.oa.fenqile.com/#/app/dashboard`，stable/测试/项目环境使用 `http://stable-hippo.oa.fenqile.com/#/app/dashboard`，墨西哥使用 `https://hippo.oa.wowcredito.com/#/app/dashboard`，印尼使用 `https://hippo.oa.kredito.id/#/app/dashboard`，profile 保持 `~/.local/state/agent-tools/browser-profiles/healthy`。四个站点共用同一个 passport 登录态和同一个 profile。
 4. 运行 `plan`，检查 `operation`、`targetHasUnpublishedDraft`、`draftDiffKeys`。非目标草稿只保留并报告，不得清除。
 5. 若 `operation=noop`，草稿不必再写：`targetHasUnpublishedDraft=false` 时直接运行 `verify`；有未发布草稿且本次要发布（stable 自动发布或用户已授权）时仍运行 `upsert`（带 token），脚本在 noop 路径上只做发布并回读 active，不要跳过。若目标有未发布草稿且需覆盖，将刚返回的 `currentStateToken` 原样传给 `upsert`；用户没有明确授权覆盖目标草稿时先说明并等待确认。
 6. 未授权发布时，运行 `upsert`。必须看到 `publishAttempted=false`、`activeReleaseKeyUnchanged=true`、`activeConfigurationsUnchanged=true`、`otherItemsUnchanged=true`；实际写入时还必须有 `targetItemValidated=true`。stable 站点例外：`upsert --env=stable` 会自动发布，输出应是 `autoPublish=true`，实际发布时 `published=true`、`activeChangedKeys` 只有目标 key、`nonTargetActiveConfigurationsUnchanged=true`；active 已等于目标值时是 `publishSkipped=true`。最终措辞写“stable 已自动发布目标 key”。
@@ -161,17 +161,17 @@ stable 站点的同一套操作，只多一个 `--env=stable`（墨西哥/印尼
 `site`/`baseUrl` 指向目标站点再继续：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/configure-hippo/scripts/hippo_draft_config.js namespace-status \
+node scripts/hippo_draft_config.js namespace-status \
   --env=stable --app-id=server_hawk_decision_manage --namespace=encryption
 
-node /home/joney/projects/ai/agent-tools/skills/lexin/configure-hippo/scripts/hippo_draft_config.js namespace-plan \
+node scripts/hippo_draft_config.js namespace-plan \
   --env=stable --app-id=server_hawk_decision_manage --namespace=encryption --comment="米霍克加解密相关配置"
 
-node /home/joney/projects/ai/agent-tools/skills/lexin/configure-hippo/scripts/hippo_draft_config.js namespace-create \
+"$AGENT_TOOLS_ROOT/bin/with-env" node scripts/hippo_draft_config.js namespace-create \
   --env=stable --app-id=server_hawk_decision_manage --namespace=encryption --comment="米霍克加解密相关配置" \
   --create-authorization=explicit --expected-current-token=<stable 站点 namespace-plan 返回值>
 
-node /home/joney/projects/ai/agent-tools/skills/lexin/configure-hippo/scripts/hippo_draft_config.js namespace-grant \
+"$AGENT_TOOLS_ROOT/bin/with-env" node scripts/hippo_draft_config.js namespace-grant \
   --env=stable --app-id=server_hawk_decision_manage --namespace=encryption
 ```
 
@@ -199,7 +199,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/configure-hippo/scripts/hi
 默认预发布 plan：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/configure-hippo/scripts/hippo_draft_config.js plan \
+node scripts/hippo_draft_config.js plan \
   --app-id=server_hawk_decision_manage \
   --namespace=ai_config \
   --key=gpt_cr_aviator_role_user_prompt \
@@ -209,7 +209,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/configure-hippo/scripts/hi
 保存草稿；仅当 plan 提示需要时添加 token：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/configure-hippo/scripts/hippo_draft_config.js upsert \
+node scripts/hippo_draft_config.js upsert \
   --app-id=server_hawk_decision_manage \
   --namespace=ai_config \
   --key=gpt_cr_aviator_role_user_prompt \
@@ -220,7 +220,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/configure-hippo/scripts/hi
 保存并按用户明确授权发布目标 key：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/configure-hippo/scripts/hippo_draft_config.js upsert \
+node scripts/hippo_draft_config.js upsert \
   --app-id=server_hawk_decision_manage \
   --namespace=ai_config \
   --key=gpt_cr_aviator_role_user_prompt \
@@ -234,7 +234,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/configure-hippo/scripts/hi
 检查新建 namespace 的前置状态：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/configure-hippo/scripts/hippo_draft_config.js namespace-status \
+node scripts/hippo_draft_config.js namespace-status \
   --app-id=server_hawk_decision_manage \
   --namespace=encryption
 ```
@@ -242,7 +242,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/configure-hippo/scripts/hi
 校验参数并取并发保护 token：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/configure-hippo/scripts/hippo_draft_config.js namespace-plan \
+node scripts/hippo_draft_config.js namespace-plan \
   --app-id=server_hawk_decision_manage \
   --namespace=encryption \
   --comment="米霍克加解密相关配置"
@@ -251,7 +251,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/configure-hippo/scripts/hi
 用户明确授权后新建 namespace：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/configure-hippo/scripts/hippo_draft_config.js namespace-create \
+"$AGENT_TOOLS_ROOT/bin/with-env" node scripts/hippo_draft_config.js namespace-create \
   --app-id=server_hawk_decision_manage \
   --namespace=encryption \
   --comment="米霍克加解密相关配置" \
@@ -262,11 +262,11 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/configure-hippo/scripts/hi
 查看授权现状，以及给默认名单以外的人补授权（默认名单已由 `namespace-create` 自动授权）：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/configure-hippo/scripts/hippo_draft_config.js namespace-roles \
+node scripts/hippo_draft_config.js namespace-roles \
   --app-id=server_hawk_decision_manage \
   --namespace=encryption
 
-node /home/joney/projects/ai/agent-tools/skills/lexin/configure-hippo/scripts/hippo_draft_config.js namespace-grant \
+"$AGENT_TOOLS_ROOT/bin/with-env" node scripts/hippo_draft_config.js namespace-grant \
   --app-id=server_hawk_decision_manage \
   --namespace=encryption \
   --grant-users=joneyshao \
@@ -279,9 +279,9 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/configure-hippo/scripts/hi
 - `LOGIN_REQUIRED` / `ANGULAR_INJECTOR_UNAVAILABLE`：用下面的预置会话脚本刷新同一 profile，完成浏览器登录后重跑 `doctor`。这里显式收窄登录关键词，避免 Hippo 帮助文字中的“登录”造成误判。stable/测试/项目环境把 `--url` 换成 `http://stable-hippo.oa.fenqile.com/#/app/dashboard`，墨西哥换成 `https://hippo.oa.wowcredito.com/#/app/dashboard`，印尼换成 `https://hippo.oa.kredito.id/#/app/dashboard`。
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js \
+node $AGENT_TOOLS_ROOT/skills/lexin/get-browser-session/scripts/browser_session.js \
   --ensure \
-  --profile=/home/joney/.local/state/agent-tools/browser-profiles/healthy \
+  --profile=~/.local/state/agent-tools/browser-profiles/healthy \
   --url=http://hippo.oa.fenqile.com/#/app/dashboard \
   --success-text=Welcome \
   --login-pattern='Work Happy|QR Code|Use MOA|Account Login|Password Login|乐空间传送门|ATrust'

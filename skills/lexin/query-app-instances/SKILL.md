@@ -2,7 +2,7 @@
 name: query-app-instances
 description: 通过乐效只读查询应用在各环境的虚拟机和容器实例地址。Use when 用户要求查应用服务器 IP、容器/Pod 地址、某应用线上/灰度/预发布/OA/稳定实例清单、需要为日志排查或部署验证定位机器；未指定应用名时从当前目录 app.properties 的 application.name 推断，未指定环境时默认预发布 pre。
 metadata:
-  version: 1.2.1
+  version: 1.2.2
 ---
 
 # query-app-instances
@@ -18,7 +18,7 @@ MCP 暂无专用实例发现工具，使用固定脚本兜底。脚本复用本�
 - 未指定应用名：从当前工作目录递归查 `app.properties`，读取 `application.name`。
 - 未指定环境：默认 `pre`，即预发布环境。
 - 未指定实例类型：默认同时查 VM/KVM 和容器 Pod。
-- 默认浏览器 profile：脚本依次尝试 `/home/joney/.local/state/agent-tools/browser-profiles/healthy`、`~/.local/state/agent-tools/browser-profiles/main`。
+- 默认浏览器 profile：脚本依次尝试 `~/.local/state/agent-tools/browser-profiles/healthy`、`~/.local/state/agent-tools/browser-profiles/main`。
 - 访问乐效内网域名时，脚本只在自身 Chromium 子进程中清除 VPS 代理并设置 `NO_PROXY`；不修改当前 shell、系统代理或用户 Chrome 配置。
 - 如果登录态不可用，先使用 `get-browser-session` 刷新乐效登录态；不要向用户索要 Cookie、密码或 OTP。
 
@@ -27,24 +27,24 @@ MCP 暂无专用实例发现工具，使用固定脚本兜底。脚本复用本�
 在用户当前项目目录执行默认查询：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/query-app-instances/scripts/query_app_instances.js
+node scripts/query_app_instances.js
 ```
 
 常用参数：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/query-app-instances/scripts/query_app_instances.js \
+node scripts/query_app_instances.js \
   --app server-hawk-decision-executor-simulate \
   --env prod \
   --type all
 
-node /home/joney/projects/ai/agent-tools/skills/lexin/query-app-instances/scripts/query_app_instances.js \
+node scripts/query_app_instances.js \
   --app-id 5286 \
   --env pre \
   --json
 
-node /home/joney/projects/ai/agent-tools/skills/lexin/query-app-instances/scripts/query_app_instances.js \
-  --cwd /home/joney/projects/backend/hawk/server_hawk_decision_executor \
+node scripts/query_app_instances.js \
+  --cwd ~/projects/backend/hawk/server_hawk_decision_executor \
   --env pre,gray \
   --type vm
 ```
@@ -87,7 +87,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/query-app-instances/script
 
 需要排查接口字段或扩展脚本时读取：
 
-`/home/joney/projects/ai/agent-tools/skills/lexin/query-app-instances/references/lexiao-app-instances-api.md`
+`references/lexiao-app-instances-api.md`
 
 已验证的核心接口：
 

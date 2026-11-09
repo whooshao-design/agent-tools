@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# 只读 codex 评审者。三层独立防护，任意一层单独失效都还有兜底：
+#   L1 bwrap（内核强制，不需要 sudo；没有 bwrap 时跳过，见下面的 isolation 输出）：$HOME、本仓库与当前目录(评审材料)只读挂载，
+#      仅 $CODEX_HOME（默认 ~/.codex）留可写窗口。这一层能罩住 MCP server 和 hook 这类 codex 自己的沙箱管不到的子进程。
+#   L2 codex 沙箱：-s read-only 配 approval_policy=never。never 是关键——
+#      默认的 on-request 会在被沙箱拦住后自动批准提权重试，从而绕过沙箱。
+#   L3 --ignore-user-config：不加载 $CODEX_HOME/config.toml，那里注册的 MCP server 一个都不挂载。
+#      auth.json 和二进制仍共用 $CODEX_HOME，不复制凭据、不维护第二份配置。
+#
+# 用法：cd <评审材料目录> && codex-reviewer "<评审 prompt>" </dev/null
+# 注意：</dev/null 必须加，否则 codex exec 在非交互下会卡在读 stdin。
+# 评审结论从 stdout 取，由调用方负责落盘——评审者写不了任何文件。
+# stderr 第一行输出 isolation=...：bwrap+codex-sandbox（三层）或 codex-sandbox-only（无 bwrap，只有 L2/L3），调用方据此决定是否算正式只读评审。
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+MATERIAL="$(pwd -P)"
+CODEX_HOME_DIR="${CODEX_HOME:-$HOME/.codex}"
+# 模型从主配置 $CODEX_HOME/config.toml 动态读取（--ignore-user-config 会跳过该文件，所以必须显式传 -m）。
+MODEL="${CODEX_REVIEWER_MODEL:-}"
+if [[ -z "$MODEL" && ! -f "$CODEX_HOME_DIR/config.toml" ]]; then
+  echo "codex-reviewer: 没有 $CODEX_HOME_DIR/config.toml（codex 未初始化或 CODEX_HOME 不对）；准备步骤见 $ROOT/docs/setup-new-machine.md 第 6 节" >&2; exit 2
+fi
+if [[ -z "$MODEL" ]]; then
+  MODEL="$(sed -n '/^\[/q; s/^model[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$CODEX_HOME_DIR/config.toml")"
+fi
+[[ -n "$MODEL" ]] || { echo "codex-reviewer: 无法从 $CODEX_HOME_DIR/config.toml 读出 model" >&2; exit 1; }
+CODEX_VPS="$(command -v codex-vps || true)"
+[[ -n "$CODEX_VPS" ]] || { echo "codex-reviewer: PATH 中没有 codex-vps；外部模型 wrapper 的准备步骤见 $ROOT/docs/setup-new-machine.md 第 6 节" >&2; exit 2; }
+
+CODEX_ARGS=(exec --skip-git-repo-check --ignore-user-config --ephemeral -s read-only -c approval_policy='"never"' -m "$MODEL" "$@")
+if command -v bwrap >/dev/null 2>&1; then
+  echo "isolation=bwrap+codex-sandbox ro=$HOME,$ROOT,$MATERIAL" >&2
+  exec bwrap \
+    --dev-bind / / \
+    --ro-bind "$HOME" "$HOME" \
+    --ro-bind "$ROOT" "$ROOT" \
+    --ro-bind "$MATERIAL" "$MATERIAL" \
+    --bind "$CODEX_HOME_DIR" "$CODEX_HOME_DIR" \
+    --proc /proc --dev /dev \
+    --setenv AGENT_TOOLS_ROOT "$ROOT" \
+    env CODEX_VPS_DISABLE_APPS=1 \
+    "$CODEX_VPS" "${CODEX_ARGS[@]}"
+fi
+echo "isolation=codex-sandbox-only" >&2
+exec env AGENT_TOOLS_ROOT="$ROOT" CODEX_VPS_DISABLE_APPS=1 "$CODEX_VPS" "${CODEX_ARGS[@]}"

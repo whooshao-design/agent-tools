@@ -1,8 +1,8 @@
 ---
 name: handle-stable-hawk-approval
-description: 安全查询和处理 stable/测试环境米霍克与流程引擎审批。Use when 用户要求查看 stable 待审批、审批某个乐包的测试环境发布、自动通过测试审批、处理米霍克 t_hawk_approval、处理流程引擎 t_approval、按乐包 ID/发布计划 ID/序号选择审批记录并调用回调、处理墨西哥或印尼测试环境审批、优化 /home/joney/tools/hawk 下旧审批脚本流程；只适用于 stable/测试环境，线上/生产审批不使用。
+description: 安全查询和处理 stable/测试环境米霍克与流程引擎审批。Use when 用户要求查看 stable 待审批、审批某个乐包的测试环境发布、自动通过测试审批、处理米霍克 t_hawk_approval、处理流程引擎 t_approval、按乐包 ID/发布计划 ID/序号选择审批记录并调用回调、处理墨西哥或印尼测试环境审批、优化 ~/tools/hawk 下旧审批脚本流程；只适用于 stable/测试环境，线上/生产审批不使用。
 metadata:
-  version: 1.2.2
+  version: 1.2.3
 ---
 
 # handle-stable-hawk-approval
@@ -11,7 +11,7 @@ metadata:
 
 只处理 stable/测试环境的米霍克审批和流程引擎审批：先查询待审批记录，再 dry-run 展示将调用的回调，用户明确确认后才通过 Bianque 服务模拟器调用 Dubbo 回调，最后复查审批状态。
 
-MCP 优先、脚本兜底。只读查询优先复用 `query-mysql-data` / `mysql_readonly` 能力；Dubbo 回调优先复用 `test-dubbo-api` / `dubbo_test` 能力。需要批量编排或本地固定流程时，使用脚本 `/home/joney/projects/ai/agent-tools/skills/lexin/handle-stable-hawk-approval/scripts/stable_approval_cli.py`。
+MCP 优先、脚本兜底。只读查询优先复用 `query-mysql-data` / `mysql_readonly` 能力；Dubbo 回调优先复用 `test-dubbo-api` / `dubbo_test` 能力。需要批量编排或本地固定流程时，使用脚本 `scripts/stable_approval_cli.py`。
 
 ## 安全边界
 
@@ -77,14 +77,14 @@ lxcloud 单次查询最多返回 100 行且是**静默截断**，所以按乐包
 2. 查询待审批并 dry-run。用户给的通常是乐包 ID，直接用 `--package-id` 定位，不要让用户提供 `logic_id`：
 
 ```bash
-python3 /home/joney/projects/ai/agent-tools/skills/lexin/handle-stable-hawk-approval/scripts/stable_approval_cli.py \
+python3 scripts/stable_approval_cli.py \
   list --scope mexico --source hawk --package-id <package_id> --print-sql
 ```
 
 3. 需要执行时，优先用交互选择，让用户按 `no` 列选择记录：
 
 ```bash
-python3 /home/joney/projects/ai/agent-tools/skills/lexin/handle-stable-hawk-approval/scripts/stable_approval_cli.py \
+python3 scripts/stable_approval_cli.py \
   approve --scope domestic --source hawk --select \
   --target domestic.hawk_manage=<ip>:<port> \
   --target domestic.hawk_process_publish=<ip>:<port> \
@@ -139,38 +139,38 @@ Bianque 即使 Dubbo 调用失败也返回 HTTP 200，脚本按响应体里的 `
 只 dry-run 单条，不发回调：
 
 ```bash
-python3 /home/joney/projects/ai/agent-tools/skills/lexin/handle-stable-hawk-approval/scripts/stable_approval_cli.py \
+python3 scripts/stable_approval_cli.py \
   approve --scope domestic --source hawk --logic-id <logic_id>
 ```
 
 按乐包 ID 定位单条，默认仍是 dry-run：
 
 ```bash
-python3 /home/joney/projects/ai/agent-tools/skills/lexin/handle-stable-hawk-approval/scripts/stable_approval_cli.py \
+python3 scripts/stable_approval_cli.py \
   approve --scope mexico --source hawk --package-id <package_id>
 ```
 
 按业务字段列表选择，默认仍是 dry-run：
 
 ```bash
-python3 /home/joney/projects/ai/agent-tools/skills/lexin/handle-stable-hawk-approval/scripts/stable_approval_cli.py \
+python3 scripts/stable_approval_cli.py \
   approve --scope domestic --source hawk --select
 ```
 
 海外米霍克待审批（按国家分别查）：
 
 ```bash
-python3 /home/joney/projects/ai/agent-tools/skills/lexin/handle-stable-hawk-approval/scripts/stable_approval_cli.py \
+python3 scripts/stable_approval_cli.py \
   list --scope mexico --source hawk
 
-python3 /home/joney/projects/ai/agent-tools/skills/lexin/handle-stable-hawk-approval/scripts/stable_approval_cli.py \
+python3 scripts/stable_approval_cli.py \
   list --scope indonesia --source hawk
 ```
 
 流程引擎单条执行：
 
 ```bash
-python3 /home/joney/projects/ai/agent-tools/skills/lexin/handle-stable-hawk-approval/scripts/stable_approval_cli.py \
+python3 scripts/stable_approval_cli.py \
   approve --scope domestic --source process --logic-id <logic_id> \
   --target domestic.process_engine=<ip>:<port> \
   --confirm
@@ -187,4 +187,4 @@ python3 /home/joney/projects/ai/agent-tools/skills/lexin/handle-stable-hawk-appr
 
 ## 参考
 
-`/home/joney/tools/hawk/approval.py`、`approval-overseas.py` 是本 skill 的前身。它们的行为对照和已知缺陷记录在 `references/legacy-approval-scripts.md`；再遇到有人翻出旧脚本时先看那份说明，不要直接跑。
+`~/tools/hawk/approval.py`、`approval-overseas.py` 是本 skill 的前身。它们的行为对照和已知缺陷记录在 `references/legacy-approval-scripts.md`；再遇到有人翻出旧脚本时先看那份说明，不要直接跑。

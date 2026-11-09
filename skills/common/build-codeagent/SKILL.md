@@ -2,7 +2,7 @@
 name: build-codeagent
 description: Use when 需求梳理、内容整理、方案、测试或代码需要跨模型生成与轻量互审，或 dev-build-change/dev-auto-loop 需要派发 producer 与独立正式 reviewer。
 metadata:
-  version: 1.8.0
+  version: 1.8.1
 ---
 
 # build-codeagent
@@ -13,8 +13,8 @@ metadata:
 
 主会话负责交接、验收与停止判断；脚本只负责候选选择和参与记录，不自动审批内容。
 
-正式评审委派统一遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/delegation-contract.md`。
-作为 `dev-auto-loop` 后端时，producer 结果、预算预占和恢复统一遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/dev-auto-loop/references/run-state-and-resume.md`。
+正式评审委派统一遵循 `$AGENT_TOOLS_ROOT/skills/dev-workflow/references/delegation-contract.md`。
+作为 `dev-auto-loop` 后端时，producer 结果、预算预占和恢复统一遵循 `$AGENT_TOOLS_ROOT/skills/dev-workflow/dev-auto-loop/references/run-state-and-resume.md`。
 
 候选、分数和调用模板见 `model-routing.json`，由 `scripts/pick_agent.py` 执行，见下方「选后端」。
 
@@ -46,7 +46,7 @@ metadata:
 ### producer
 
 - 在允许路径和工具内创建或修改产物，完成后由编排器把实际 runtime `agent_ref` 加入 `producer_agent_refs[]`
-- 从 `dev-build-change` 派发代码任务时，开发执行清单遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/dev-build-change/references/development-checklist.md`；每个信封只消费一个已定义 `DEV-*`，后端不得自行拆分、合并、改写来源或扩展范围
+- 从 `dev-build-change` 派发代码任务时，开发执行清单遵循 `$AGENT_TOOLS_ROOT/skills/dev-workflow/dev-build-change/references/development-checklist.md`；每个信封只消费一个已定义 `DEV-*`，后端不得自行拆分、合并、改写来源或扩展范围
 - `producer_agent_refs[]` 必须可稳定标识、可重新指认：subagent 用平台返回的实例 ID，根 agent 直接产出时用稳定的会话级 ref 并记录其强度限制；不能把角色名或会话描述充当 producer 身份。producer ref 的强度不是审批前置条件，reviewer 侧的平台可验证性才是（见 `delegation-contract.md` §1）
 - 多个 producer 并行写入时，必须能证明文件写集不相交，或为每个任务使用隔离 worktree；无法证明时串行
 - 隔离 worktree 的结果由编排器按依赖顺序吸收，不让两个 agent 直接竞争同一文件
@@ -95,7 +95,7 @@ reviewer 信封不得包含尚未产生的 `reviewer_agent_ref`。编排器在 s
 
 ```bash
 # 预览：输出选中后端、模型和待填调用模板，不写记录
-python3 /home/joney/projects/ai/agent-tools/skills/common/build-codeagent/scripts/pick_agent.py \
+python3 scripts/pick_agent.py \
   <环节> --task <任务ID> [--material <材料目录>] [--exclude 后端1,后端2] [--json]
 # 登记：实际参与后追加一条记录
 python3 .../pick_agent.py <环节> --task <任务ID> --record <实际后端> [--actual-model <运行模型ID>]
@@ -132,7 +132,7 @@ python3 .../pick_agent.py --task <任务ID> --show-record
 
 **provider 是进程级的。** 一个 Claude Code 会话连哪个网关由启动时的 `ANTHROPIC_BASE_URL` 决定，进程内 subagent 换不到别家模型。要不同模型的视角只能跨进程派发：`claude-vps` 经 `ai-vps-exec` 启动 `claude`，其他 `claude-*` 经 `claude-profile` 按各自 env 启动。
 
-**`codex-vps` 评审必须走 `/home/joney/bin/codex-reviewer`；乐信网关的 `codex-qwen` / `codex-deepseek` / `codex-kimi` / `codex-glm` 用脚本给出的 `codex_lexin_review` 模板（`exec -s read-only -c approval_policy="never" --ignore-user-config --ephemeral --skip-git-repo-check`，`</dev/null`），2026-09-20 的 eval-v2 八次运行零写入。`codex-glm` 受网关 8192 输出 token 上限约束（见路由表 `fit` 字段），手动指定它时只派轻任务，重评审改用 `claude-glm`。** 裸 `codex exec -s read-only` 不安全：沙箱拦住第一次写入后，本机配置 `approval_policy = "on-request"` 加 `approvals_reviewer = "auto_review"` 会自动批准提权，同一条命令重试即成功（2026-09-14 复现：第一次报 Read-only file system，第二次 exit 0）。`codex-reviewer` 叠加三层：bwrap 只读绑定 home（`~/.codex` 除外）和材料目录；`approval_policy=never` 断掉提权，home 外的写入由 codex 自身只读沙箱拦住；`--ignore-user-config` 不挂用户级 MCP。它内部从主配置取模型传 `-m`，是封装例外。
+**`codex-vps` 评审必须走 `$AGENT_TOOLS_ROOT/bin/codex-reviewer`；乐信网关的 `codex-qwen` / `codex-deepseek` / `codex-kimi` / `codex-glm` 用脚本给出的 `codex_lexin_review` 模板（`exec -s read-only -c approval_policy="never" --ignore-user-config --ephemeral --skip-git-repo-check`，`</dev/null`），2026-09-20 的 eval-v2 八次运行零写入。`codex-glm` 受网关 8192 输出 token 上限约束（见路由表 `fit` 字段），手动指定它时只派轻任务，重评审改用 `claude-glm`。** 裸 `codex exec -s read-only` 不安全：沙箱拦住第一次写入后，本机配置 `approval_policy = "on-request"` 加 `approvals_reviewer = "auto_review"` 会自动批准提权，同一条命令重试即成功（2026-09-14 复现：第一次报 Read-only file system，第二次 exit 0）。`codex-reviewer` 叠加三层：bwrap 只读绑定 home（`~/.codex` 除外）和材料目录；`approval_policy=never` 断掉提权，home 外的写入由 codex 自身只读沙箱拦住；`--ignore-user-config` 不挂用户级 MCP。它内部从主配置取模型传 `-m`，是封装例外。
 
 **Claude 评审用 `--tools "Read,Grep,Glob"` 加 `--strict-mcp-config`。** 前者把工具集合限到三个只读工具，后者去掉用户级 MCP；实测 claude-qwen 在此配置下工具面只有这三个、MCP 为空、skill 仍可加载。`--allowedTools` 只控制免确认，不限制工具集合，不要拿它当隔离。
 

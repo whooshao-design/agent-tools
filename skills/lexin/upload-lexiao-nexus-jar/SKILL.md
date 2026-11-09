@@ -2,7 +2,7 @@
 name: upload-lexiao-nexus-jar
 description: 在乐效「包管理」把需求分支的 jar 发布到 Nexus：查包、新建上传单、点上传并轮询到上传成功，复用浏览器登录态。Use when 修改了被其他应用按 Maven 坐标依赖的模块（如控制台 service/common、引擎 core/app），需要先把 SNAPSHOT jar 上传到 Nexus 再构建下游应用；用户说“打包”“上传 jar”“新建上传单”“发 jar 到 nexus”；或乐效构建因找不到新版本依赖失败。
 metadata:
-  version: 1.1.0
+  version: 1.1.1
 ---
 
 # upload-lexiao-nexus-jar
@@ -37,10 +37,10 @@ metadata:
 
 ## 用法
 
-脚本：`/home/joney/projects/ai/agent-tools/skills/lexin/upload-lexiao-nexus-jar/scripts/lexiao_nexus_upload.js`
+脚本：`scripts/lexiao_nexus_upload.js`
 
 ```bash
-S=/home/joney/projects/ai/agent-tools/skills/lexin/upload-lexiao-nexus-jar/scripts/lexiao_nexus_upload.js
+S=scripts/lexiao_nexus_upload.js
 
 # 1. 查包，拿 jar_id（按名称模糊匹配，自动翻页）
 node $S list --name-like=process-engine-console
@@ -66,7 +66,7 @@ node $S status --deploy-id=133177,133180 --wait
 node $S status --deploy-id=133177
 ```
 
-参数：`--version-type` 默认 `snapshot`（可选 `release`）；`--profile` 默认 `/home/joney/.local/state/agent-tools/browser-profiles/main`；`history` 可加 `--creator=<OA 账号>`。
+参数：`--version-type` 默认 `snapshot`（可选 `release`）；`--profile` 默认 `~/.local/state/agent-tools/browser-profiles/main`；`history` 可加 `--creator=<OA 账号>`。
 
 字段口径：
 

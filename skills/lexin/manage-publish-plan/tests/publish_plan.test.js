@@ -93,7 +93,7 @@ test('formatDate renders Asia/Shanghai dates and descriptionText trims trailing 
 });
 
 test('parseCurrentUser and parseArgs', () => {
-  assert.equal(parseCurrentUser('邵鹏(joneyshao)'), 'joneyshao');
+  assert.equal(parseCurrentUser('张三(zhangsan)'), 'zhangsan');
   assert.equal(parseCurrentUser('someone'), 'someone');
   const args = parseArgs(['modify', '--id=44107', '--dry-run', '--file', 'p.json']);
   assert.deepEqual(args._, ['modify']);

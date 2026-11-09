@@ -2,7 +2,7 @@
 name: verify-browser-qa
 description: Use when 需要对页面、浏览器交互或部署结果做专项验收，并收集可视化证据，但这类检查不是本次验证的日常主入口。
 metadata:
-  version: 1.2.0
+  version: 1.2.1
 ---
 
 # verify-browser-qa
@@ -69,7 +69,7 @@ metadata:
 页面改动（弹窗、表单、表格、按钮区）在交付前用 `ui_check.js` 量一遍，再看截图。它用一个全新的无头 Chromium（不读已保存的登录 profile，强制直连），按场景文件把接口请求改写到本地 dev server 或返回模拟 JSON，执行步骤打开要检查的界面，然后在每个视口测量目标元素并截图：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/dev-quality/verify-browser-qa/scripts/ui_check.js \
+node scripts/ui_check.js \
   --scenario=<scenario.json> [--out=<截图目录>]
 ```
 
@@ -77,7 +77,7 @@ node /home/joney/projects/ai/agent-tools/skills/dev-quality/verify-browser-qa/sc
 - 请求的处理顺序：`rewrite` → `mocks` → `passthrough` → `defaultMock`，都不匹配就拦截。输出里的 `unmatchedRequests` 列出被 `defaultMock` 兜底的接口；页面显示不对时先给这些接口补 mock。
 - 检查项与级别：`fail` 有 `cramped`（按钮或文字块离目标元素边框小于 `minPadding`）、`overlap`（按钮、文字块互相重叠）、`clipped`（`overflow: hidden/clip` 的元素里有内容被裁掉）；`warn` 有 `button-height`（同一行按钮高度差超过 2px）、`primary-count`（主按钮多于 1 个）、`left-edges`（文字块的左边线多于 `maxLeftEdges` 条）、`align`（图标中心与配对文字首行中心相差超过 `alignTolerance`）。有 `fail` 时退出码为 1，无法运行时为 2。
 - 截图写到 `--out`；不传时写到 `<系统临时目录>/agent-tools-ui-check/<场景文件名>/`，每次覆盖。量完必须打开 `target-*.png` 看一遍：测量只覆盖上面这些项，配色、层级、文案仍要靠看图判断。
-- 米霍克 OA 的基础场景和示例在 `start-local-frontend` 的 `references/ui-check/`。其他项目照同样字段写自己的基础场景。
+- 米霍克 OA 的基础场景和示例在 `$AGENT_TOOLS_ROOT/skills/lexin/start-local-frontend/references/ui-check/`。其他项目照同样字段写自己的基础场景。
 - 用 `css` 步骤可以把怀疑的样式注入回去，确认检查会失败，用来证明一次修复确实被检查覆盖。
 
 ## 关注证据

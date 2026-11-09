@@ -2,7 +2,7 @@
 name: dev-design-solution
 description: Use when 需求边界和验收标准已基本明确，需要写技术方案、出方案或做方案设计：基于代码上下文产出可评审、可实施、可验证的技术方案，比较存在实质取舍的实现路径并收敛设计决策。
 metadata:
-  version: 4.9.1
+  version: 4.9.2
 ---
 
 # dev-design-solution
@@ -13,7 +13,7 @@ metadata:
 
 默认只读取需求、代码和配置，不在设计阶段改业务代码。用户要技术方案（"写方案""出方案""做方案设计"）时默认按文档模式落盘到产物目录；用户明确只要讨论、口头建议或不保存时才用对话模式。
 
-方案的文件构成、内容归属、追踪和可读性统一遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/solution-structure-contract.md`；表达规则遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/writing-principles.md`。
+方案的文件构成、内容归属、追踪和可读性统一遵循 `$AGENT_TOOLS_ROOT/skills/dev-workflow/references/solution-structure-contract.md`；表达规则遵循 `$AGENT_TOOLS_ROOT/skills/dev-workflow/references/writing-principles.md`。
 
 ## 参考资料路由
 
@@ -29,7 +29,7 @@ metadata:
 
 ## 默认产物
 
-正式方案默认放到 `/home/joney/docs/requirements-development/<requirement-name>/solution-design/`：
+正式方案默认放到 `~/docs/requirements-development/<requirement-name>/solution-design/`：
 
 - `key-questions.md`：写正文前与用户对齐的关键问题清单，按 `key-questions-template.md`；不进 `S`。
 - `solution.md`：给人读的设计叙事，按 `solution-template.md`。
@@ -123,13 +123,13 @@ metadata:
 
 ### 8. 校验图与指标
 
-运行 `node /home/joney/projects/ai/agent-tools/skills/dev-workflow/dev-design-solution/scripts/check_mermaid.js solution-design/solution.md solution-design/diagrams`，全部通过后再交付；改不好的图换成等宽文本块。打开渲染出的 PNG 看一遍，并按 `visualization-routing.md` 第 1 节逐行核对：满足触发条件却没画的地方补图或写理由。运行 `python3 /home/joney/projects/ai/agent-tools/skills/dev-workflow/dev-design-solution/scripts/doc_metrics.py solution-design/solution.md --traceability solution-design/traceability.md`，逐条处理它给出的提示，尤其是摘要长度、主图缺失、长段落、正文代码名过密、缺术语对照表、缺变更总览或图中无变更标识、修订痕迹和追踪引用失联。
+运行 `node scripts/check_mermaid.js solution-design/solution.md solution-design/diagrams`，全部通过后再交付；改不好的图换成等宽文本块。打开渲染出的 PNG 看一遍，并按 `visualization-routing.md` 第 1 节逐行核对：满足触发条件却没画的地方补图或写理由。运行 `python3 scripts/doc_metrics.py solution-design/solution.md --traceability solution-design/traceability.md`，逐条处理它给出的提示，尤其是摘要长度、主图缺失、长段落、正文代码名过密、缺术语对照表、缺变更总览或图中无变更标识、修订痕迹和追踪引用失联。
 
 ### 9. 输出前自检与读者测试
 
 按 `readability-and-writing.md` 第 7 节执行自检。然后按 `reader-test-protocol.md` 先写答案键 `reader-test/answer-key-v<N>.md`，交由编排器派发与设计方不同模型的 agent 读者只读 `solution.md` 作答，比对结果写入 `reader-test/agent-v<N>.md`。按协议 §5 判定不通过（全文读者七问、截断读者前五问、核心机制探针、成立的探针问题）时先修方案再进入正式评审。
 
-读者测试通过、正文不再改动后，作为送审前最后一步运行 `node /home/joney/projects/ai/agent-tools/skills/dev-workflow/dev-design-solution/scripts/render_solution.mjs solution-design/solution.md solution-design/solution.html` 生成交互阅读页，再运行同目录的 `check_solution_html.mjs solution-design/solution.html` 自检，失败时修正后重跑；渲染结束列出的 F4 未匹配节点可改节点名或加 `node-map` 指令，不作门禁。
+读者测试通过、正文不再改动后，作为送审前最后一步运行 `node scripts/render_solution.mjs solution-design/solution.md solution-design/solution.html` 生成交互阅读页，再运行同目录的 `check_solution_html.mjs solution-design/solution.html` 自检，失败时修正后重跑；渲染结束列出的 F4 未匹配节点可改节点名或加 `node-map` 指令，不作门禁。
 
 方案必须能交给 `dev-review-solution` 独立评审：reviewer 不读 `traceability.md` 也能理解机制、影响和上线验证，深读时能从两个文件定位精确契约、边界、证据及所有 CHG。
 

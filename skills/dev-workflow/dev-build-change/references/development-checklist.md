@@ -2,7 +2,7 @@
 
 本契约供 `dev-build-change` 在编码前把稳定目标拆成可执行的 `DEV-*`，并供 `build-codeagent`、`dev-auto-loop`
 消费执行状态。它不是新的需求、方案、测试清单或审批产物，不增加独立门禁。清单文件的表达遵循
-`/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/writing-principles.md`（第一屏、段落、表格、标识引用），本契约只规定结构。
+`$AGENT_TOOLS_ROOT/skills/dev-workflow/references/writing-principles.md`（第一屏、段落、表格、标识引用），本契约只规定结构。
 
 ## 1. 定位与追踪
 
@@ -76,5 +76,5 @@
 | DEV-001 | CHG-001 / TC-001 | | | [] | | | Planned |
 
 跨模块、跨 producer、需要并行或跨会话恢复时，可保存到
-`/home/joney/docs/requirements-development/<requirement-name>/code-implementation/development-checklist.md`。
+`~/docs/requirements-development/<requirement-name>/code-implementation/development-checklist.md`。
 该文件是可更新的执行视图；最终交接以 `change_revision` 中的 DEV 结果摘要、实际写集和 producer 溯源为准。

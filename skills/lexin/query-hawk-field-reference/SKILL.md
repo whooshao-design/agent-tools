@@ -1,8 +1,8 @@
 ---
 name: query-hawk-field-reference
-description: 查询米霍克字段引用关系。Use when 用户要求查询字段被哪些乐包、策略节点、执行节点或规则引用，梳理 Hawk 字段影响面，从 /home/joney/tools/hawk/HawkFieldRefUtil.java 旧脚本迁移字段引用查询流程，或要求结果默认只输出到终端、不落结果文件。
+description: 查询米霍克字段引用关系。Use when 用户要求查询字段被哪些乐包、策略节点、执行节点或规则引用，梳理 Hawk 字段影响面，从 ~/tools/hawk/HawkFieldRefUtil.java 旧脚本迁移字段引用查询流程，或要求结果默认只输出到终端、不落结果文件。
 metadata:
-  version: 1.0.0
+  version: 1.0.1
 ---
 
 # query-hawk-field-reference
@@ -11,7 +11,7 @@ metadata:
 
 只读查询米霍克字段引用关系，把字段名映射到引用它的乐包、策略节点和规则。它不修改米霍克配置、不发布乐包、不审批、不调用写接口。
 
-MCP 优先、脚本兜底。优先复用 `browser_session` MCP 或 `get-browser-session` skill 的登录态访问 `https://mihawk.oa.fenqile.com/`；MCP 不可用时，使用脚本 `/home/joney/projects/ai/agent-tools/skills/lexin/query-hawk-field-reference/scripts/hawk_field_ref.py`，并从环境变量读取临时 Cookie。
+MCP 优先、脚本兜底。优先复用 `browser_session` MCP 或 `get-browser-session` skill 的登录态访问 `https://mihawk.oa.fenqile.com/`；MCP 不可用时，使用脚本 `scripts/hawk_field_ref.py`，并从环境变量读取临时 Cookie。
 
 ## 安全边界
 
@@ -36,38 +36,38 @@ MCP 优先、脚本兜底。优先复用 `browser_session` MCP 或 `get-browser-
 默认只输出终端：
 
 ```bash
-python3 /home/joney/projects/ai/agent-tools/skills/lexin/query-hawk-field-reference/scripts/hawk_field_ref.py query --field user_age
+python3 scripts/hawk_field_ref.py query --field user_age
 ```
 
 批量字段：
 
 ```bash
-python3 /home/joney/projects/ai/agent-tools/skills/lexin/query-hawk-field-reference/scripts/hawk_field_ref.py query --field-file /tmp/fields.txt
+python3 scripts/hawk_field_ref.py query --field-file /tmp/fields.txt
 ```
 
 规则明细：
 
 ```bash
-python3 /home/joney/projects/ai/agent-tools/skills/lexin/query-hawk-field-reference/scripts/hawk_field_ref.py query --mode rule --field user_age --format table
+python3 scripts/hawk_field_ref.py query --mode rule --field user_age --format table
 ```
 
 输出 JSON 到终端：
 
 ```bash
-python3 /home/joney/projects/ai/agent-tools/skills/lexin/query-hawk-field-reference/scripts/hawk_field_ref.py query --field user_age --format json
+python3 scripts/hawk_field_ref.py query --field user_age --format json
 ```
 
 只有显式指定时才落文件：
 
 ```bash
-python3 /home/joney/projects/ai/agent-tools/skills/lexin/query-hawk-field-reference/scripts/hawk_field_ref.py query --field-file /tmp/fields.txt --format csv --output-file /tmp/hawk-field-ref.csv
+python3 scripts/hawk_field_ref.py query --field-file /tmp/fields.txt --format csv --output-file /tmp/hawk-field-ref.csv
 ```
 
 MCP 不可用、需要脚本直接请求时：
 
 ```bash
 export MIHAWK_COOKIE=<临时Cookie>
-python3 /home/joney/projects/ai/agent-tools/skills/lexin/query-hawk-field-reference/scripts/hawk_field_ref.py query --field user_age
+python3 scripts/hawk_field_ref.py query --field user_age
 ```
 
 ## 输出字段
@@ -91,7 +91,7 @@ field_name, package_id, package_name, node_id, node_name, is_common, strategy_id
 
 ## 旧脚本迁移口径
 
-旧 Java 脚本在 `/home/joney/tools/hawk/HawkFieldRefUtil.java`，核心口径保留：
+旧 Java 脚本在 `~/tools/hawk/HawkFieldRefUtil.java`，核心口径保留：
 
 - 接口路径：`/rc_oa_gateway/hawk_decision/manage/query_rule_by_field_name.json`
 - 分页参数：`field_name`、`page`、`limit`

@@ -1,6 +1,6 @@
 # 把本地 Markdown 发布到飞书
 
-`S=/home/joney/projects/ai/agent-tools/skills/lexin/manage-feishu-doc/scripts/feishu_doc.mjs`
+`S=scripts/feishu_doc.mjs`
 
 适用于技术方案、操作/指导手册、资料文档等任何在本地用 Markdown 写的文档。发布都是对外可见的写入，必须用户明确要求；试写只落 `FEISHU_TEST_FOLDER`。
 

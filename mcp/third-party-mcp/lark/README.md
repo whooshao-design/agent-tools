@@ -68,13 +68,13 @@ WSL 的 localhost 转发方向是通的（Windows → WSL），所以回调能�
 Codex：
 
 ```bash
-codex mcp add lark -- /home/joney/projects/ai/agent-tools/mcp/third-party-mcp/lark/bin/lark-mcp mcp
+codex mcp add lark -- $AGENT_TOOLS_ROOT/mcp/third-party-mcp/lark/bin/lark-mcp mcp
 ```
 
 Claude Code：
 
 ```bash
-claude mcp add lark -- /home/joney/projects/ai/agent-tools/mcp/third-party-mcp/lark/bin/lark-mcp mcp
+claude mcp add lark -- $AGENT_TOOLS_ROOT/mcp/third-party-mcp/lark/bin/lark-mcp mcp
 ```
 
 两端都不需要写任何凭据，wrapper 自己从 `env/credentials.env` 读。
@@ -98,7 +98,7 @@ lark-mcp 写入：lark-mcp 0.5.1 已停更，其 zod schema 会静默剥掉 `tab
 不要等到写入中途才发现权限不足。目标操作开始前运行：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/manage-feishu-doc/scripts/feishu_doc.mjs \
+node $AGENT_TOOLS_ROOT/skills/lexin/manage-feishu-doc/scripts/feishu_doc.mjs \
   auth-check --operation=write-json --target='https://lexin.feishu.cn/docx/<token>'
 ```
 
@@ -142,6 +142,8 @@ docx_v1_document_rawContent(obj_token) → 正文纯文本
 带上 `drive:drive:readonly` 时飞书直接报错 20027「当前应用权限不足」。这个报错**只列出真正缺失的项**，
 是很好的诊断信号。读 wiki 只需 `docx:document:readonly` + `wiki:wiki:readonly`，
 `drive:drive:readonly`（查看和下载云空间**所有**文件）范围过大且用不上，不要申请。
+
+macOS 用系统钥匙串保存登录态，不需要装 `gnome-keyring` / `libsecret`，下面这条只针对 Linux/WSL。
 
 **坑 4：Linux 上缺 `libsecret` 会导致登录不落盘。**
 表现为 `login` 显示 `✅ Successfully logged in`，但紧接着 `whoami` 返回

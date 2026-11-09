@@ -10,7 +10,7 @@
 ## 启动
 
 ```bash
-/home/joney/projects/ai/agent-tools/mcp/third-party-mcp/github/bin/github-mcp
+$AGENT_TOOLS_ROOT/mcp/third-party-mcp/github/bin/github-mcp
 ```
 
 默认行为：

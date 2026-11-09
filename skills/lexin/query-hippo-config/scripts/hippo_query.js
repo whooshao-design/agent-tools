@@ -1,8 +1,19 @@
 #!/usr/bin/env node
 'use strict';
+// agent-tools bootstrap（模板 lib/agent_tools/bootstrap.js，lint 规则六校验逐字一致）
+const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
+// probe 返回 'hit' | 'miss' | <异常码>：与 locate.py 同序先看 install.py（缺失即 miss），再看 skills/；用会抛错的 statSync，不用对一切错误都返回 false 的 existsSync
+const probe = (d) => { if (!d) return 'miss'; try { const i = fs.statSync(path.join(d, 'install.py'), { throwIfNoEntry: false }); if (!i || !i.isFile()) return 'miss'; const s = fs.statSync(path.join(d, 'skills'), { throwIfNoEntry: false }); return s && s.isDirectory() ? 'hit' : 'miss'; } catch (e) { return e.code || 'error'; } };
+const tried = []; let root = '', r = 'miss';
+try { let d = fs.realpathSync(__dirname); tried.push(`上溯起点 ${d}`); while ((r = probe(d)) === 'miss' && path.dirname(d) !== d) d = path.dirname(d); if (r === 'hit') root = d; else tried[0] += r === 'miss' ? ' 未命中有效根（install.py 文件 + skills/ 目录）' : ` ${r}（放弃上溯）`; }
+catch (e) { tried.push(`上溯起点 ${__dirname} ${e.code || e.message}`); }
+if (!root) { const v = process.env.AGENT_TOOLS_ROOT || ''; r = probe(v); tried.push(`AGENT_TOOLS_ROOT=${v || '<unset>'}${r === 'hit' || r === 'miss' ? '' : ' ' + r}`); if (r === 'hit') root = v; }
+if (!root) { const p = path.join(os.homedir(), '.config/agent-tools/root'); try { const v = fs.readFileSync(p, 'utf8').trim(); r = probe(v); tried.push(`${p} = ${v}${r === 'hit' || r === 'miss' ? '' : ' ' + r}`); if (r === 'hit') root = v; } catch (e) { tried.push(`${p} ${e.code === 'ENOENT' ? '<absent>' : e.code}`); } }
+if (!root) { console.error(['agent-tools: 未找到仓库根', ...tried, '请在仓库目录运行 python3 install.py'].join('\n')); process.exit(2); }
+// agent-tools bootstrap end
 
-const os = require('os');
-const path = require('path');
+const { skillDir, browserRuntime } = require(path.join(root, 'lib/agent_tools/locate.js'));
+const SESSION_SCRIPTS = skillDir('get-browser-session', 'scripts');
 const {
   buildPaths,
   fetchJson,
@@ -13,15 +24,14 @@ const {
   resolveAppId,
   resolveBaseUrl,
   resolveSite,
-} = require('../../configure-hippo/scripts/hippo_draft_config');
+} = require(skillDir('configure-hippo', 'scripts', 'hippo_draft_config'));
 const {
   buildBrowserEnv,
   chromiumArgsFor,
-} = require('../../get-browser-session/scripts/browser_network');
-const { launchReadOnlyContext } = require('../../get-browser-session/scripts/browser_session');
+} = require(path.join(SESSION_SCRIPTS, 'browser_network'));
+const { launchReadOnlyContext } = require(path.join(SESSION_SCRIPTS, 'browser_session'));
 
-const DEFAULT_PROFILE = '/home/joney/.local/state/agent-tools/browser-profiles/healthy';
-const DEFAULT_TOOL_DIR = path.join(os.homedir(), 'tools/lexiao-browser');
+const DEFAULT_PROFILE = path.join(os.homedir(), '.local/state/agent-tools/browser-profiles/healthy');
 const DEFAULT_ENV = 'prod';
 const DEFAULT_CLUSTER = 'default';
 const DEFAULT_NAMESPACE = 'application';
@@ -71,7 +81,7 @@ function splitKeys(value) {
 }
 
 function ensureCommandFor(baseUrl, profile) {
-  return 'node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js'
+  return `node ${skillDir('get-browser-session', 'scripts', 'browser_session.js')}`
     + ` --ensure --profile=${profile} --url=${baseUrl}/#/app/dashboard --success-text=Welcome`;
 }
 
@@ -82,7 +92,9 @@ function resolveTarget(args, options = {}) {
   const site = resolveSite(requestedEnv, args['hippo-site']);
   const env = normalizeEnv(requestedEnv, site);
   const baseUrl = resolveBaseUrl(env, requestedEnv, args['hippo-site']);
-  const toolDir = path.resolve(expandHome(args['tool-dir'] || DEFAULT_TOOL_DIR));
+  // 工具目录、Chromium 与运行库只经 browserRuntime() 取；--tool-dir 通过 BROWSER_SESSION_TOOL_DIR 传给它。
+  if (args['tool-dir']) process.env.BROWSER_SESSION_TOOL_DIR = path.resolve(expandHome(args['tool-dir']));
+  const runtime = browserRuntime();
   return {
     appId: options.appId !== undefined ? options.appId : resolveAppId(args),
     env,
@@ -93,10 +105,9 @@ function resolveTarget(args, options = {}) {
     dashboardUrl: `${baseUrl}/#/app/dashboard`,
     expectedHost: new URL(baseUrl).hostname,
     profile: path.resolve(expandHome(args.profile || DEFAULT_PROFILE)),
-    toolDir,
-    chromePath: path.resolve(expandHome(args.chrome || path.join(toolDir, 'browsers/chrome-linux64/chrome'))),
-    runtimeLibDir: path.resolve(expandHome(args['runtime-lib-dir']
-      || path.join(toolDir, 'runtime-libs/usr/lib/x86_64-linux-gnu'))),
+    toolDir: runtime.toolDir,
+    chromePath: args.chrome ? path.resolve(expandHome(args.chrome)) : runtime.executablePath,
+    runtimeLibDir: args['runtime-lib-dir'] ? path.resolve(expandHome(args['runtime-lib-dir'])) : runtime.runtimeLibDir,
   };
 }
 

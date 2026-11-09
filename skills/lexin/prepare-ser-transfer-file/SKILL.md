@@ -2,7 +2,7 @@
 name: prepare-ser-transfer-file
 description: 为米霍克 SER 迁移接口 TransferService#transfer 准备 filePath：从 decision_agent_server_java 服务器取解密后的 .ser，转成迁移工具读取的 XML，再上传到对应环境的 oss-fk 文件服务拿到 FastDFS 路径；区分线下 stable 与线上（预发布、灰度、prod 共用一套服务器和文件服务）。Use when 用户要迁移某个 SER 包（appId）到米霍克但手上没有 SER 包或迁移 XML、需要去服务器上找 SER 包、要在 stable 或预发布/线上调用 TransferService#transfer 而缺 filePath、或要把本地迁移 XML 上传到 oss-fk；只解析规则内容用 parse-experian-ser，不负责调用迁移接口本身。
 metadata:
-  version: 1.0.0
+  version: 1.0.1
 ---
 
 # prepare-ser-transfer-file
@@ -27,7 +27,7 @@ stable 与线上的上传凭据和地址不同（据此推断存储不互通，�
 
 ## 流程
 
-1. **先找现成 XML**：同一个包已迁移过时，优先复用已核对过的本地 XML（Hawk 工作区里通常是 `/home/joney/projects/backend/hawk/<包名小写>_ser_rules/<包名>.xml`），确认它就是线下验证通过的版本（比对修改时间、上次上传记录），然后直接跳到第 5 步。不要每次都从服务器重新生成，重新生成会丢掉人工修正。
+1. **先找现成 XML**：同一个包已迁移过时，优先复用已核对过的本地 XML（Hawk 工作区里通常是 `~/projects/backend/hawk/<包名小写>_ser_rules/<包名>.xml`），确认它就是线下验证通过的版本（比对修改时间、上次上传记录），然后直接跳到第 5 步。不要每次都从服务器重新生成，重新生成会丢掉人工修正。
 2. **定位 SER 文件**：用 `query-app-instances` 查 `decision_agent_server_java` 在目标环境（线下 `stable`，线上 `prod`）的实例，按上表 profile `connect_bastion` 后只读执行：
    ```bash
    ls -lt /home/publish_product/server_java/decision_agent_server_java/decision_ser_file/ | grep -i <包名>
@@ -38,12 +38,12 @@ stable 与线上的上传凭据和地址不同（据此推断存储不互通，�
 3. **拉取并校验**：按 `parse-experian-ser` 第 2、3 步分块 base64 拉取、组装并校验 size/md5。原始 `.ser` 只放会话 scratchpad。
 4. **转 XML 并人工核对**：
    ```bash
-   /home/joney/projects/ai/agent-tools/skills/lexin/parse-experian-ser/scripts/ser_render.sh WORKDIR/X.ser xml > WORKDIR/X.xml 2> WORKDIR/X.warn
+   $AGENT_TOOLS_ROOT/skills/lexin/parse-experian-ser/scripts/ser_render.sh WORKDIR/X.ser xml > WORKDIR/X.xml 2> WORKDIR/X.warn
    ```
    `X.warn` 里的 `WARN` 和 XML 里的 `UNSUPPORTED` 标记必须逐条处理后才能上传。组件名默认不加后缀；只有要求迁移新建一套组件时才传第 3 个参数作后缀。XML 含线上规则：不进 Git、不出公司。
 5. **上传拿 filePath**：
    ```bash
-   /home/joney/projects/ai/agent-tools/bin/with-env python3 -I /home/joney/projects/ai/agent-tools/skills/lexin/prepare-ser-transfer-file/scripts/upload_transfer_file.py \
+   $AGENT_TOOLS_ROOT/bin/with-env python3 -I scripts/upload_transfer_file.py \
      --env stable|online --file WORKDIR/X.xml --name <包名>.txt
    ```
    输出 `{"ok":true,"filePath":"/fehawkdecision.../M00/ex/...txt"}`。凭据只在脚本进程内读取，经 stdin 传给 curl，不进命令行参数，不打印、不落盘。`--env stable` 需要在 `env/credentials.env` 配置 `OSS_FK_STABLE_IP`，缺失时脚本报错退出。线上上传前向用户说明会把规则内容写入线上文件服务。

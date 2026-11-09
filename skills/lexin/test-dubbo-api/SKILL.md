@@ -2,7 +2,7 @@
 name: test-dubbo-api
 description: 通过 bianque 服务模拟器 HTTP 接口调用和编排 Dubbo 服务测试。Use when 用户要求调用或测试某个 Dubbo/FSOF 接口、编排多接口验收场景、在 stable/pre 环境验证服务；支持从项目配置提取 Dubbo 元信息、按 targets.json 复用 IP:Port、自动获取 Cookie，并用 JSON 场景复用多接口验收流程。
 metadata:
-  version: 1.4.0
+  version: 1.4.1
 ---
 
 # Dubbo 接口测试
@@ -15,7 +15,7 @@ devtools MCP 可用时（工具 `dubbo_call`、`dubbo_dry_run`，Claude 侧带 `
 ## 核心原则
 
 - **服务元信息从代码中自动提取**：Dubbo 接口名、group、version 从项目配置文件读取
-- **部署地址从 targets.json 读取默认值**：`/home/joney/projects/ai/agent-tools/skills/lexin/test-dubbo-api/targets.json` 存储各应用各环境的 IP:Port，优先使用默认配置
+- **部署地址从 targets.json 读取默认值**：`targets.json` 存储各应用各环境的 IP:Port，优先使用默认配置
 - **调用端点是 /request，不是 /requestParams** — 混用会导致返回空或 `types: []`，务必注意
 - **支持本项目和外部项目**：当前项目自动提取，外部项目手动指定
 
@@ -33,7 +33,7 @@ devtools MCP 可用时（工具 `dubbo_call`、`dubbo_dry_run`，Claude 侧带 `
 
 ## IP:Port 默认配置
 
-读取 `/home/joney/projects/ai/agent-tools/skills/lexin/test-dubbo-api/targets.json`：
+读取 `targets.json`：
 
 ```json
 {
@@ -63,14 +63,14 @@ devtools MCP 可用时（工具 `dubbo_call`、`dubbo_dry_run`，Claude 侧带 `
 
 ### 自动获取（推荐）
 
-固定脚本默认通过 `get-browser-session` 从共享 profile 获取 bianque Cookie，优先读取 `BROWSER_SESSION_PROFILE` / `DEVTOOLS_BROWSER_PROFILE`，否则使用 `/home/joney/.local/state/agent-tools/browser-profiles/main`。Python 入口还兼容较低优先级的旧变量 `JAVA_BACKEND_BROWSER_PROFILE`；显式 `--profile` 优先于这些变量。需要单独检查登录态时使用：
+固定脚本默认通过 `get-browser-session` 从共享 profile 获取 bianque Cookie，优先读取 `BROWSER_SESSION_PROFILE` / `DEVTOOLS_BROWSER_PROFILE`，否则使用 `~/.local/state/agent-tools/browser-profiles/main`。Python 入口还兼容较低优先级的旧变量 `JAVA_BACKEND_BROWSER_PROFILE`；显式 `--profile` 优先于这些变量。需要单独检查登录态时使用：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js \
+node $AGENT_TOOLS_ROOT/skills/lexin/get-browser-session/scripts/browser_session.js \
   --url=https://stable-bianque.lexinfintech.com \
   --cookies \
   --domain=stable-bianque.lexinfintech.com \
-  --profile=/home/joney/.local/state/agent-tools/browser-profiles/main
+  --profile=~/.local/state/agent-tools/browser-profiles/main
 ```
 
 如果默认 profile 登录态不可用，打开 headed 浏览器让用户完成 SSO/MOA 登录；不要在聊天中索要密码、OTP 或 Cookie。
@@ -96,7 +96,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/script
 优先使用固定脚本，避免重复写 Cookie 获取和 `/request` 表单逻辑：
 
 ```bash
-python3 /home/joney/projects/ai/agent-tools/skills/lexin/test-dubbo-api/scripts/dubbo_request.py \
+python3 scripts/dubbo_request.py \
   --env stable \
   --service '<SERVICE>' \
   --method '<METHOD>' \
@@ -106,7 +106,7 @@ python3 /home/joney/projects/ai/agent-tools/skills/lexin/test-dubbo-api/scripts/
   --params '<JSON_ARRAY>'
 ```
 
-目标地址可以用 `--app` 从 `targets.json` 读取，也可以直接传 `--ip '<IP>' --port '<PORT>'`。默认 profile 使用 `/home/joney/.local/state/agent-tools/browser-profiles/main`，并接受 `BROWSER_SESSION_PROFILE` / `DEVTOOLS_BROWSER_PROFILE` 覆盖。如果需要换浏览器登录态，传 `--profile=<profile-dir>`；如果已经有 Cookie，传 `--cookie='<COOKIE>'`。
+目标地址可以用 `--app` 从 `targets.json` 读取，也可以直接传 `--ip '<IP>' --port '<PORT>'`。默认 profile 使用 `~/.local/state/agent-tools/browser-profiles/main`，并接受 `BROWSER_SESSION_PROFILE` / `DEVTOOLS_BROWSER_PROFILE` 覆盖。如果需要换浏览器登录态，传 `--profile=<profile-dir>`；如果已经有 Cookie，传 `--cookie='<COOKIE>'`。
 
 手工 curl 仅作为脚本不可用时的备用：
 
@@ -141,7 +141,7 @@ curl -s --max-time 60 '<BASE_URL>/serviceEmulator/request' \
 当一次测试需要造数据、调用业务接口、查询副作用、最后清理数据时，优先使用通用场景脚本，不要为单个业务接口新增专用 Python：
 
 ```bash
-python3 /home/joney/projects/ai/agent-tools/skills/lexin/test-dubbo-api/scripts/dubbo_scenario.py \
+python3 scripts/dubbo_scenario.py \
   --scenario /tmp/scenario.json \
   --env stable \
   --target service_a=<IP>:<PORT> \

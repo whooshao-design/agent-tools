@@ -1,10 +1,21 @@
 #!/usr/bin/env node
 // 飞书云文档读写：经官方 lark-cli（用户身份）调用开放平台，写后回读校验。
+// agent-tools bootstrap（模板 lib/agent_tools/bootstrap.mjs，lint 规则六校验逐字一致）
+import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'; import { fileURLToPath } from 'node:url';
+// probe 返回 'hit' | 'miss' | <异常码>：与 locate.py 同序先看 install.py（缺失即 miss），再看 skills/；用会抛错的 statSync，不用对一切错误都返回 false 的 existsSync
+const probe = (d) => { if (!d) return 'miss'; try { const i = fs.statSync(path.join(d, 'install.py'), { throwIfNoEntry: false }); if (!i || !i.isFile()) return 'miss'; const s = fs.statSync(path.join(d, 'skills'), { throwIfNoEntry: false }); return s && s.isDirectory() ? 'hit' : 'miss'; } catch (e) { return e.code || 'error'; } };
+const tried = []; let root = '', r = 'miss';
+try { let d = fs.realpathSync(path.dirname(fileURLToPath(import.meta.url))); tried.push(`上溯起点 ${d}`); while ((r = probe(d)) === 'miss' && path.dirname(d) !== d) d = path.dirname(d); if (r === 'hit') root = d; else tried[0] += r === 'miss' ? ' 未命中有效根（install.py 文件 + skills/ 目录）' : ` ${r}（放弃上溯）`; }
+catch (e) { tried.push(`上溯起点 ${path.dirname(fileURLToPath(import.meta.url))} ${e.code || e.message}`); }
+if (!root) { const v = process.env.AGENT_TOOLS_ROOT || ''; r = probe(v); tried.push(`AGENT_TOOLS_ROOT=${v || '<unset>'}${r === 'hit' || r === 'miss' ? '' : ' ' + r}`); if (r === 'hit') root = v; }
+if (!root) { const p = path.join(os.homedir(), '.config/agent-tools/root'); try { const v = fs.readFileSync(p, 'utf8').trim(); r = probe(v); tried.push(`${p} = ${v}${r === 'hit' || r === 'miss' ? '' : ' ' + r}`); if (r === 'hit') root = v; } catch (e) { tried.push(`${p} ${e.code === 'ENOENT' ? '<absent>' : e.code}`); } }
+if (!root) { console.error(['agent-tools: 未找到仓库根', ...tried, '请在仓库目录运行 python3 install.py'].join('\n')); process.exit(2); }
+// agent-tools bootstrap end
 import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { release } from "node:os";
-import { fileURLToPath } from "node:url";
 
 import { blockText, elementsText, listAllBlocks, listChildren, TEXT_CONTAINER_KEYS } from "./lib/blocks.mjs";
 import { buildCleanupList, cleanupChecklist, readRegistry, recordCreated, writeRegistry } from "./lib/cleanup.mjs";
@@ -15,6 +26,8 @@ import { listOpenComments, MERMAID_WIDGET_TYPE, publishMarkdown, readState, stat
 import { createTransport, LARK_CLI, LarkCliError, runLarkCli } from "./lib/transport.mjs";
 
 export { blockText, listAllBlocks };
+
+const locate = createRequire(import.meta.url)(path.join(root, "lib/agent_tools/locate.js"));
 
 const SUPPORTED_HOSTS = new Set(["lexin.feishu.cn"]);
 const JSON_CHUNK_SIZE = 40_000;
@@ -496,8 +509,9 @@ export function loginOutcome(output) {
   return null;
 }
 
-// 在用户自己的桌面浏览器里打开授权页；普通 Linux 不开：组织设备策略会拦截 Linux 浏览器访问飞书。
-// Windows/WSL 用 Start-Process 打开默认浏览器并切到前台；URL 含 &，经 -EncodedCommand 传入避免被 shell 解析
+// 是否在用户自己的桌面浏览器里打开授权页（返回 null 表示不开）：普通 Linux 不开，组织设备策略会拦截 Linux 浏览器访问飞书。
+// 实际打开经 lib/agent_tools 的 openExternal()（darwin 默认 open、wsl 默认 powershell.exe Start-Process、用户可用 AGENT_TOOLS_OPEN_CMD 覆盖）；
+// 本函数保留 darwin / win32 / WSL 的命令形态供测试比对。
 export function browserCommand(url, platform = process.platform, osRelease = release()) {
   if (platform === "darwin") return ["open", url];
   if (platform === "win32" || (platform === "linux" && /microsoft/i.test(osRelease))) {
@@ -508,12 +522,11 @@ export function browserCommand(url, platform = process.platform, osRelease = rel
 }
 
 function openInBrowser(url) {
-  const command = browserCommand(url);
-  if (!command) return false;
-  const child = spawn(command[0], command.slice(1), { stdio: "ignore", detached: true });
-  child.on("error", () => process.stderr.write(`无法自动打开浏览器，请手动打开：${url}\n`));
-  child.unref();
-  return true;
+  // 普通 Linux 只在用户显式设置了 AGENT_TOOLS_OPEN_CMD 时才打开
+  if (!browserCommand(url) && !process.env.AGENT_TOOLS_OPEN_CMD) return false;
+  if (locate.openExternal(url)) return true;
+  process.stderr.write(`无法自动打开浏览器，请手动打开：${url}\n`);
+  return false;
 }
 
 // 设备码登录：自动在桌面浏览器打开授权页，lark-cli 阻塞到用户点「授权」（最长约 10 分钟）后自然结束。

@@ -2,7 +2,7 @@
 name: fix-sonarqube-issues
 description: 评估 SonarQube 新代码周期的 BLOCKER/CRITICAL 问题，真实问题修复、误报在服务端标记并写明理由。Use when 用户要求看 SonarQube 质量门禁、评估或修复 Sonar 问题、git push 被 Sonar 推送前检查拒绝、或要求把误报标记掉；按规则与代码证据区分真实问题、误报和无法确认的风险，修复后执行最小验证。只要求评估时不改代码也不改 issue 状态。
 metadata:
-  version: 1.4.0
+  version: 1.4.1
 ---
 
 # fix-sonarqube-issues
@@ -33,7 +33,7 @@ MCP 不可用时可在本机脚本内使用同一认证与 API；不要把凭据
   `--ensure --url=<base_url>/sessions/new --success-text=none` 走一次 OA 单点登录，确认出现
   `JWT-SESSION` 和 `XSRF-TOKEN` 后再标记，并把同一个 `profile` 传给工具。
 - 报 `profile is busy: .../browser-profiles/main` 是另一个进程（常见是乐效构建脚本）占着 profile，
-  不是认证失败：只读查询可改传 `profile=/home/joney/.local/state/agent-tools/browser-profiles/healthy`，
+  不是认证失败：只读查询可改传 `profile=~/.local/state/agent-tools/browser-profiles/healthy`，
   标记要等 `main` 释放后用已登录 Sonar 的 profile。
 
 ## 查询与评估

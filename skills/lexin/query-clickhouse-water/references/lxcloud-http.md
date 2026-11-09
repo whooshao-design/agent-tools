@@ -13,18 +13,18 @@
 
 ```bash
 # 不确定实例时先列清单；只输出实例标识和说明，不输出连接地址或凭据。
-node /home/joney/projects/ai/agent-tools/skills/lexin/query-clickhouse-water/scripts/clickhouse_http.js \
+node scripts/clickhouse_http.js \
   --env prod --action instances
 
 # RCbaseCK 已验证可列库；当前账号没有该实例的 SQL 查询权限。
-node /home/joney/projects/ai/agent-tools/skills/lexin/query-clickhouse-water/scripts/clickhouse_http.js \
+node scripts/clickhouse_http.js \
   --env prod --instance RCbaseCK --action databases
 
-node /home/joney/projects/ai/agent-tools/skills/lexin/query-clickhouse-water/scripts/clickhouse_http.js \
+node scripts/clickhouse_http.js \
   --env prod --instance RCbaseCK --action tables --database risk_control_base_db
 
 # stable 查询链路验证：恒假条件不读取业务明细，不代表实际流水数量。
-node /home/joney/projects/ai/agent-tools/skills/lexin/query-clickhouse-water/scripts/clickhouse_http.js \
+node scripts/clickhouse_http.js \
   --env stable --query 'SELECT count() AS matched_rows FROM risk_control_base_db.t_strategy_node_decision_water WHERE 1 = 0 LIMIT 1'
 ```
 

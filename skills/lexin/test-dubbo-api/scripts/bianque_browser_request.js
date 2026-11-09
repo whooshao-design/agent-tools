@@ -1,10 +1,20 @@
 #!/usr/bin/env node
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
+// agent-tools bootstrap（模板 lib/agent_tools/bootstrap.js，lint 规则六校验逐字一致）
+const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
+// probe 返回 'hit' | 'miss' | <异常码>：与 locate.py 同序先看 install.py（缺失即 miss），再看 skills/；用会抛错的 statSync，不用对一切错误都返回 false 的 existsSync
+const probe = (d) => { if (!d) return 'miss'; try { const i = fs.statSync(path.join(d, 'install.py'), { throwIfNoEntry: false }); if (!i || !i.isFile()) return 'miss'; const s = fs.statSync(path.join(d, 'skills'), { throwIfNoEntry: false }); return s && s.isDirectory() ? 'hit' : 'miss'; } catch (e) { return e.code || 'error'; } };
+const tried = []; let root = '', r = 'miss';
+try { let d = fs.realpathSync(__dirname); tried.push(`上溯起点 ${d}`); while ((r = probe(d)) === 'miss' && path.dirname(d) !== d) d = path.dirname(d); if (r === 'hit') root = d; else tried[0] += r === 'miss' ? ' 未命中有效根（install.py 文件 + skills/ 目录）' : ` ${r}（放弃上溯）`; }
+catch (e) { tried.push(`上溯起点 ${__dirname} ${e.code || e.message}`); }
+if (!root) { const v = process.env.AGENT_TOOLS_ROOT || ''; r = probe(v); tried.push(`AGENT_TOOLS_ROOT=${v || '<unset>'}${r === 'hit' || r === 'miss' ? '' : ' ' + r}`); if (r === 'hit') root = v; }
+if (!root) { const p = path.join(os.homedir(), '.config/agent-tools/root'); try { const v = fs.readFileSync(p, 'utf8').trim(); r = probe(v); tried.push(`${p} = ${v}${r === 'hit' || r === 'miss' ? '' : ' ' + r}`); if (r === 'hit') root = v; } catch (e) { tried.push(`${p} ${e.code === 'ENOENT' ? '<absent>' : e.code}`); } }
+if (!root) { console.error(['agent-tools: 未找到仓库根', ...tried, '请在仓库目录运行 python3 install.py'].join('\n')); process.exit(2); }
+// agent-tools bootstrap end
 const { createRequire } = require('module');
-const { launchLockedContext } = require('../../get-browser-session/scripts/browser_session');
-const sessionCache = require('../../get-browser-session/scripts/session_cache');
+const { skillDir, browserRuntime } = require(path.join(root, 'lib/agent_tools/locate.js'));
+const SESSION_SCRIPTS = skillDir('get-browser-session', 'scripts');
+const { launchLockedContext } = require(path.join(SESSION_SCRIPTS, 'browser_session'));
+const sessionCache = require(path.join(SESSION_SCRIPTS, 'session_cache'));
 
 function expandHome(value) {
   if (!value) return value;
@@ -32,18 +42,20 @@ function parseArgs(argv) {
 }
 
 function resolvePaths(args) {
-  const toolDir = expandHome(args['tool-dir'] || process.env.BROWSER_SESSION_TOOL_DIR || '~/tools/lexiao-browser');
+  // 工具目录、Chromium 与运行库只经 browserRuntime() 取；--tool-dir 通过 BROWSER_SESSION_TOOL_DIR 传给它。
+  if (args['tool-dir']) process.env.BROWSER_SESSION_TOOL_DIR = expandHome(args['tool-dir']);
+  const runtime = browserRuntime();
   return {
-    toolDir,
+    toolDir: runtime.toolDir,
     profileDir: expandHome(
       args.profile
       || process.env.BROWSER_SESSION_PROFILE
       || process.env.DEVTOOLS_BROWSER_PROFILE
       || '~/.local/state/agent-tools/browser-profiles/main'
     ),
-    chromePath: expandHome(args.chrome || path.join(toolDir, 'browsers/chrome-linux64/chrome')),
-    runtimeLibDir: expandHome(args['runtime-lib-dir'] || path.join(toolDir, 'runtime-libs/usr/lib/x86_64-linux-gnu')),
-    playwrightPackage: path.join(toolDir, 'package.json'),
+    chromePath: expandHome(args.chrome) || runtime.executablePath,
+    runtimeLibDir: expandHome(args['runtime-lib-dir']) || runtime.runtimeLibDir,
+    playwrightPackage: path.join(runtime.toolDir, 'package.json'),
   };
 }
 

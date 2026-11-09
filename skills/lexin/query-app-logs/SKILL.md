@@ -2,7 +2,7 @@
 name: query-app-logs
 description: 统一只读查询 Java 应用日志：VM/KVM 服务器日志走 java_app_diag MCP，容器 Pod 日志走 container_log_check/webshell_log_check 脚本，超出服务器保存期或需要跨机器按 traceId 汇总时走日志平台 log.oa.fenqile.com（热数据 90 天）。Use when 用户要求查某应用的日志、按 traceId/关键字/时间段找日志、看几天到几个月前的历史日志、服务器日志已轮转找不到、或明确说用日志平台；应用名必须明确。
 metadata:
-  version: 1.1.3
+  version: 1.1.4
 ---
 
 # query-app-logs
@@ -50,27 +50,27 @@ metadata:
 快检（默认 `--log-mode=quick`；kubectl 路径读的是容器 stdout，结果 `source=kubectl-stdout` 且 `limitations` 注明没读 `error.log` 文件，只有 WebShell 回退路径读 `error.log`；启动问题加 `--include-startup`）：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/java-server-diagnostics/scripts/container_log_check.js \
+node $AGENT_TOOLS_ROOT/skills/lexin/java-server-diagnostics/scripts/container_log_check.js \
   --app=<app_name> --env=pre --ip=<pod_ip> --lines=120 \
-  --profile=/home/joney/.local/state/agent-tools/browser-profiles/main
+  --profile=~/.local/state/agent-tools/browser-profiles/main
 ```
 
 取证（当前日志 + 未压缩/`.gz` 轮转，按时间戳聚合多行事件；`trace-id/rule-id/keyword` 同时给出时 AND 匹配；`--context` 0～20）：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/java-server-diagnostics/scripts/container_log_check.js \
+node $AGENT_TOOLS_ROOT/skills/lexin/java-server-diagnostics/scripts/container_log_check.js \
   --app=<app_name> --env=prod --ip=<pod_ip> --log-mode=forensics \
   --trace-id=<trace_id> --from="2026-07-13 11:39:00" --to="2026-07-13 11:42:00" \
   --files=error.log,info.log --context=2 --include-rotated --max-lines=500 --max-bytes=1048576 \
-  --profile=/home/joney/.local/state/agent-tools/browser-profiles/main
+  --profile=~/.local/state/agent-tools/browser-profiles/main
 ```
 
 已有 `login_pod_addr` 时可直接用 WebShell helper（`--mode=auto` 先 Gotty WebSocket，终端 DOM 可用才回退）。WebShell 登录态在 `browser-profiles/main`，脚本默认 `webshell` profile，所以 `--profile` 必须显式传，否则会报看似登录过期的 `LOGIN_REQUIRED`：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/java-server-diagnostics/scripts/webshell_log_check.js \
+node $AGENT_TOOLS_ROOT/skills/lexin/java-server-diagnostics/scripts/webshell_log_check.js \
   --url=<login_pod_addr> --app=<app_name> --lines=120 --since-minutes=60 --version=<version_tag> \
-  --profile=/home/joney/.local/state/agent-tools/browser-profiles/main
+  --profile=~/.local/state/agent-tools/browser-profiles/main
 ```
 
 先读输出的 `targetSource/loginUrlSource/access/accessAttempts/errorCode/warningCode`，再看 `summary` 或 `forensics`；`warningCode=RESULT_TRUNCATED` 时缩小时间窗或提高受控上限重查；自动登录失败时把返回的乐效 `manualUrl` 交给用户在浏览器打开。`--files` 可读任意文件：相对路径基于 `/home/product/logs/<app>_logs/`（如 `deploy.log`、`deploy/deploy_*.log`，支持通配符），也可传绝对路径，路径中不能有空白字符；路径 A 的 MCP `file_name` 同样不限文件。
@@ -80,7 +80,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/java-server-diagnostics/sc
 前置：脚本在 `get-browser-session` 的 `main` profile 内发请求，需要该 profile 已登录 OA。报 `browser session is not ready ... (LOGIN_REQUIRED|PROXY_INTERCEPTED|FORBIDDEN|UPSTREAM_ERROR)` 时先按 `get-browser-session` 的"登录态排查顺序"确认，确需重登再执行（MCP 优先 `browser_session.ensure_session`，脚本兜底）：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js \
+node $AGENT_TOOLS_ROOT/skills/lexin/get-browser-session/scripts/browser_session.js \
   --ensure --url='https://log.oa.fenqile.com/#/dashboard' --success-text=none
 ```
 
@@ -88,16 +88,16 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/script
 
 ```bash
 # 按 traceId 跨机器拉全链路
-node /home/joney/projects/ai/agent-tools/skills/lexin/query-app-logs/scripts/log_platform_query.js \
+node scripts/log_platform_query.js \
   --app server_hawk_decision_manage --trace-id 0A111D7C17786017331191014000ED --last 24h --order asc
 
 # 某时间段的 ERROR
-node /home/joney/projects/ai/agent-tools/skills/lexin/query-app-logs/scripts/log_platform_query.js \
+node scripts/log_platform_query.js \
   --app server_hawk_decision_manage --type error --env prod \
   --from "2026-09-10 09:00:00" --to "2026-09-10 12:00:00"
 
 # 关键字（多个 --keyword，默认"与"）并落地完整结果
-node /home/joney/projects/ai/agent-tools/skills/lexin/query-app-logs/scripts/log_platform_query.js \
+node scripts/log_platform_query.js \
   --app server_hawk_decision_manage --keyword "获锁失败" --keyword "metadata:sync" --keyword-mode and \
   --last 3d --max-pages 3 --output /tmp/hawk-lock.json
 ```
@@ -122,7 +122,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/query-app-logs/scripts/log
 - 宽泛条件（ALL + 1 小时）动辄数万条，先加 traceId、`--type error` 或关键字收窄；默认只取一页，不要为了"拉全"无限提高 `--max-pages`。
 - 平台的 `type` 字段把 INFO/WARN 都记为 0，级别以 `level` 为准；`ip` 是产生日志的机器，可据此回到路径 A/B 取完整上下文。
 - `retcode` 非 0 时脚本直接报错并带 `detail` 首行；不要改条件碰运气，先判断是冷备（起始时间早于 90 天）还是条件问题。
-- 接口字段与编码见 `/home/joney/projects/ai/agent-tools/skills/lexin/query-app-logs/references/log-platform-http.md`。
+- 接口字段与编码见 `references/log-platform-http.md`。
 
 ## 输出格式
 

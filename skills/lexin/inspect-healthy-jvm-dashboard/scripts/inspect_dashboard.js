@@ -1,18 +1,27 @@
 #!/usr/bin/env node
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
+// agent-tools bootstrap（模板 lib/agent_tools/bootstrap.js，lint 规则六校验逐字一致）
+const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
+// probe 返回 'hit' | 'miss' | <异常码>：与 locate.py 同序先看 install.py（缺失即 miss），再看 skills/；用会抛错的 statSync，不用对一切错误都返回 false 的 existsSync
+const probe = (d) => { if (!d) return 'miss'; try { const i = fs.statSync(path.join(d, 'install.py'), { throwIfNoEntry: false }); if (!i || !i.isFile()) return 'miss'; const s = fs.statSync(path.join(d, 'skills'), { throwIfNoEntry: false }); return s && s.isDirectory() ? 'hit' : 'miss'; } catch (e) { return e.code || 'error'; } };
+const tried = []; let root = '', r = 'miss';
+try { let d = fs.realpathSync(__dirname); tried.push(`上溯起点 ${d}`); while ((r = probe(d)) === 'miss' && path.dirname(d) !== d) d = path.dirname(d); if (r === 'hit') root = d; else tried[0] += r === 'miss' ? ' 未命中有效根（install.py 文件 + skills/ 目录）' : ` ${r}（放弃上溯）`; }
+catch (e) { tried.push(`上溯起点 ${__dirname} ${e.code || e.message}`); }
+if (!root) { const v = process.env.AGENT_TOOLS_ROOT || ''; r = probe(v); tried.push(`AGENT_TOOLS_ROOT=${v || '<unset>'}${r === 'hit' || r === 'miss' ? '' : ' ' + r}`); if (r === 'hit') root = v; }
+if (!root) { const p = path.join(os.homedir(), '.config/agent-tools/root'); try { const v = fs.readFileSync(p, 'utf8').trim(); r = probe(v); tried.push(`${p} = ${v}${r === 'hit' || r === 'miss' ? '' : ' ' + r}`); if (r === 'hit') root = v; } catch (e) { tried.push(`${p} ${e.code === 'ENOENT' ? '<absent>' : e.code}`); } }
+if (!root) { console.error(['agent-tools: 未找到仓库根', ...tried, '请在仓库目录运行 python3 install.py'].join('\n')); process.exit(2); }
+// agent-tools bootstrap end
 const { createRequire } = require('module');
 const { spawnSync } = require('child_process');
-const { launchLockedContext } = require('../../get-browser-session/scripts/browser_session');
+const { skillDir, browserRuntime } = require(path.join(root, 'lib/agent_tools/locate.js'));
+const SESSION_SCRIPTS = skillDir('get-browser-session', 'scripts');
+const { launchLockedContext } = require(path.join(SESSION_SCRIPTS, 'browser_session'));
 
 const BASE_URL = 'https://healthy.lexincloud.com';
 const DEFAULT_BOARD = '11147';
 const DEFAULT_URL = 'https://healthy.lexincloud.com/show/dashboard/11147';
-const DEFAULT_PROFILE = '/home/joney/.local/state/agent-tools/browser-profiles/healthy';
-const DEFAULT_TOOL_DIR = '/home/joney/tools/lexiao-browser';
-const READ_SCRIPT = '/home/joney/projects/ai/agent-tools/skills/lexin/healthy-dashboard-config/scripts/healthy_dashboard_config.js';
-const BROWSER_SCRIPT = '/home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js';
+const DEFAULT_PROFILE = path.join(os.homedir(), '.local/state/agent-tools/browser-profiles/healthy');
+const READ_SCRIPT = skillDir('healthy-dashboard-config', 'scripts', 'healthy_dashboard_config.js');
+const BROWSER_SCRIPT = path.join(SESSION_SCRIPTS, 'browser_session.js');
 
 function parseArgs(argv) {
   const args = {};
@@ -156,13 +165,15 @@ function loadPlaywright(toolDir) {
 }
 
 async function openContext(profile, toolDir) {
-  const chromium = loadPlaywright(toolDir);
+  if (toolDir) process.env.BROWSER_SESSION_TOOL_DIR = toolDir;
+  const runtime = browserRuntime();
+  const chromium = loadPlaywright(runtime.toolDir);
   return launchLockedContext(chromium, profile, {
-    executablePath: path.join(toolDir, 'browsers/chrome-linux64/chrome'),
+    executablePath: runtime.executablePath,
     headless: true,
     env: {
       ...process.env,
-      LD_LIBRARY_PATH: [path.join(toolDir, 'runtime-libs/usr/lib/x86_64-linux-gnu'), process.env.LD_LIBRARY_PATH]
+      LD_LIBRARY_PATH: [runtime.runtimeLibDir, process.env.LD_LIBRARY_PATH]
         .filter(Boolean)
         .join(':'),
     },
@@ -400,7 +411,7 @@ async function main() {
   const board = String(args.board || DEFAULT_BOARD);
   const url = args.url || (board === DEFAULT_BOARD ? DEFAULT_URL : `https://healthy.lexincloud.com/dashboards/${board}`);
   const profile = expandHome(args.profile || DEFAULT_PROFILE);
-  const toolDir = expandHome(args['tool-dir'] || DEFAULT_TOOL_DIR);
+  const toolDir = expandHome(args['tool-dir']);
   const boardPath = expandHome(args.from || readBoard(board, profile));
   const summary = summarizeBoard(boardPath);
   if (!args['no-page']) {

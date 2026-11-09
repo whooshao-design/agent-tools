@@ -2,7 +2,7 @@
 name: dev-build-change
 description: Use when 需求边界与实现路径已基本明确，需要根据技术方案、测试清单或完成标准生成/拆分 DEV-* 开发执行清单（包括只生成清单、暂不编码），或准备基于现有代码模式实施最小必要改动。
 metadata:
-  version: 1.18.0
+  version: 1.18.1
 ---
 
 # dev-build-change
@@ -14,11 +14,11 @@ metadata:
 它是开发阶段的主入口：既支持只把稳定目标拆成轻量 `DEV-*` 开发执行清单，也支持继续按清单实施最小安全改动；
 不新增独立审批门禁；技术栈特有做法放在 references 中按写集加载。用户只要求清单时不得默认修改业务代码。
 
-开发执行清单统一遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/dev-build-change/references/development-checklist.md`。
+开发执行清单统一遵循 `references/development-checklist.md`。
 
 ## 默认产物目录
 
-代码改动默认直接落在当前工作区源码中；如需额外落盘开发摘要，默认放到 `/home/joney/docs/requirements-development/<requirement-name>/code-implementation/`，建议文件名使用 `change-summary.md`。
+代码改动默认直接落在当前工作区源码中；如需额外落盘开发摘要，默认放到 `~/docs/requirements-development/<requirement-name>/code-implementation/`，建议文件名使用 `change-summary.md`。
 
 - `<requirement-name>` 使用简短、稳定、可读的需求名目录标识
 - 用户明确指定路径时优先使用用户路径；只有代码改动且无需额外摘要时可不创建该文件
@@ -64,7 +64,7 @@ metadata:
 如果目标、完成标准或范围存在会改变实现路径的重大歧义，先回到 `dev-clarify-task` 或 `dev-design-solution`，不直接凭猜测改代码。仅缺少预先构造的 `G/D`，但用户请求稳定、边界清晰且可从仓库确认实现上下文时，不属于该阻塞。
 
 清单模式先固定用户明确提供的 `R/S/C/B` 引用及其已知状态；缺少交付 `G` 不阻塞生成带限制说明的清单草案，但
-不能声称清单已获编码准入。构建模式开始编码前，按 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/artifact-identity.md`
+不能声称清单已获编码准入。构建模式开始编码前，按 `$AGENT_TOOLS_ROOT/skills/dev-workflow/references/artifact-identity.md`
 固定且只选择一种 `gate_context G`：
 
 - `approved`：核对 `approvals.solution-review` 精确绑定 `(R,S,B)`、`approvals.test-design-review` 精确绑定 `(R,S,C,B)`，两个不可变 `approval-record-v1`、`T` 与当前产物完全匹配，且 `B` 未因外部合并、变基或非本任务改动变化；必须消费全部范围内检查项
@@ -167,7 +167,7 @@ metadata:
 
 ## 输出物
 
-表达遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/writing-principles.md`，名称与准确性按其 2.1 节逐条自检。
+表达遵循 `$AGENT_TOOLS_ROOT/skills/dev-workflow/references/writing-principles.md`，名称与准确性按其 2.1 节逐条自检。
 
 默认输出一份轻量开发结果，至少包括：
 - 前提状态：当前 `gate_context G`、对应审批/direct/waiver 记录、`change_revision`

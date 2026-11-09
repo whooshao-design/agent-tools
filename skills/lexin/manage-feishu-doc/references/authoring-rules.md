@@ -1,6 +1,6 @@
 # 飞书文档的写作与排版
 
-`S=/home/joney/projects/ai/agent-tools/skills/lexin/manage-feishu-doc/scripts/feishu_doc.mjs`
+`S=scripts/feishu_doc.mjs`
 
 适用于发布到飞书的三类文档：技术方案、操作/指导手册、资料与参考文档。技术方案的结构按 dev-design-solution 的模板，本文不重复规定，只补飞书侧的排版。规则来源见 `~/docs/requirements-development/feishu-doc-skill-optimization/research/04-content-authoring.md`（官方帮助中心、larksuite/cli 写作指引、社区规范）。
 

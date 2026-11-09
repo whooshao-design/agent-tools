@@ -2,7 +2,7 @@
 name: verify-java-coverage
 description: Use when Java/Maven 改动需要满足任务、仓库或乐效流水线的覆盖率门禁（乐效单测红线：增量代码行覆盖率 ≥90%），或需要用 JaCoCo 分析改动行、跨模块聚合、报告可信度和补测缺口，或乐效增量覆盖率报告偏低要查原因时。
 metadata:
-  version: 1.2.0
+  version: 1.2.1
 ---
 
 # verify-java-coverage
@@ -52,7 +52,7 @@ metadata:
      -DargLine="-javaagent:$AG=destfile=<临时目录>/cov.exec,append=true,includes=<基础包>.*"
    java -jar ~/.m2/repository/org/jacoco/org.jacoco.cli/0.8.11/org.jacoco.cli-0.8.11-nodeps.jar report <临时目录>/cov.exec \
      --classfiles <每个模块>/target/classes ... --sourcefiles <每个模块>/src/main/java ... --xml <临时目录>/cov.xml
-   python3 /home/joney/projects/ai/agent-tools/skills/dev-quality/verify-java-coverage/scripts/diff_coverage.py \
+   python3 scripts/diff_coverage.py \
      --base master --report <临时目录>/cov.xml --threshold 90
    ```
 

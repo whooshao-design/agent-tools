@@ -73,7 +73,7 @@
    "review_score": "10-10/11",
    "gen_tier": "strong",
    "readonly_capable": true,
-   "readonly_requires": "评审必须经 /home/joney/bin/codex-reviewer 派发（模板已用；spawn_model_agent.py --readonly 自动改走它）；裸 codex exec -s read-only 会被自动批准提权写入。",
+   "readonly_requires": "评审必须经 $AGENT_TOOLS_ROOT/bin/codex-reviewer 派发（模板已用；spawn_model_agent.py --readonly 自动改走它）；裸 codex exec -s read-only 会被自动批准提权写入。",
    "review_test_model": "gpt-6.1-sol",
    "history": {
     "2026-09-14": {
@@ -376,7 +376,7 @@
   "claude_generate": "{backend} -p --strict-mcp-config -- \"<prompt>\" </dev/null",
   "claude_review": "cd -- {material} && {backend} -p --strict-mcp-config --tools \"Read,Grep,Glob\" --permission-prompts none --no-session-persistence -- \"<prompt>\" </dev/null",
   "codex_generate": "codex-vps exec --skip-git-repo-check \"<prompt>\" </dev/null",
-  "codex_review": "cd -- {material} && /home/joney/bin/codex-reviewer \"<prompt>\" </dev/null",
+  "codex_review": "cd -- {material} && $AGENT_TOOLS_ROOT/bin/codex-reviewer \"<prompt>\" </dev/null",
   "verify_execute": "使用 generate 模板，在 prompt 中限定命令与允许写集。",
   "warn_strict_mcp": "--tools 限定内置工具集合，--strict-mcp-config 去掉用户级 MCP；--allowedTools 只控制免确认，不限制工具集合。",
   "template_only": "输出是待填模板，不直接 eval；真实 prompt 用独立 argv 或输入文件传。",

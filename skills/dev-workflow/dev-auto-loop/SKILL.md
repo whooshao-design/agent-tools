@@ -2,7 +2,7 @@
 name: dev-auto-loop
 description: Use when 任务目标和边界已明确，需要按审批基线自动串联设计评审、测试清单与开发交付，并在完成、预算耗尽、无进展或外部阻塞时停止。
 metadata:
-  version: 3.2.1
+  version: 3.2.2
 ---
 
 # dev-auto-loop
@@ -20,13 +20,13 @@ metadata:
 
 运行身份、producer 结果、不可变 checkpoint、终态分类与恢复规则见 `references/run-state-and-resume.md`。
 
-`R/S/C/B`、`change_revision`、`gate_context` 和风险授权统一遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/artifact-identity.md`；所有正式评审委派遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/delegation-contract.md`。
+`R/S/C/B`、`change_revision`、`gate_context` 和风险授权统一遵循 `$AGENT_TOOLS_ROOT/skills/dev-workflow/references/artifact-identity.md`；所有正式评审委派遵循 `$AGENT_TOOLS_ROOT/skills/dev-workflow/references/delegation-contract.md`。
 
 本自动编排只接受路径选择 `governance_path=approved`。它可以在方案尚未生成或两项正式门禁尚未完成时启动；此时还不存在交付 `G.mode=approved`。普通 direct 和 waived 交付由各阶段 skill 独立推进，不得进入本状态机。
 
 ## 默认产物目录
 
-默认在 `/home/joney/docs/requirements-development/<requirement-name>/auto-loop/` 保存运行状态：`runs/<run-id>/run.json` 固定初始身份与预算，`runs/<run-id>/checkpoints/step-<N>.json` 追加不可变转移事实，`status.md` 只展示并指向最新 checkpoint。完整格式见 `references/run-state-and-resume.md`；用户指定根目录时优先使用。
+默认在 `~/docs/requirements-development/<requirement-name>/auto-loop/` 保存运行状态：`runs/<run-id>/run.json` 固定初始身份与预算，`runs/<run-id>/checkpoints/step-<N>.json` 追加不可变转移事实，`status.md` 只展示并指向最新 checkpoint。完整格式见 `references/run-state-and-resume.md`；用户指定根目录时优先使用。
 
 ## 进入条件
 
@@ -92,7 +92,7 @@ metadata:
 
 生成和评审必须使用不同的运行时 agent 实例。编排器在每个门禁前冻结输入及 `producer_agent_refs[]`，分别派发 `agent-tools-solution-reviewer`、`agent-tools-test-design-reviewer`、`agent-tools-change-reviewer`。reviewer 只接收原始需求、冻结产物、必要证据和上一轮待复核 findings，不接收 producer 的推理过程或预期结论，也不得继续委派。reviewer 模型按委派契约 §3.1 的无人值守规则确定：沿用该需求已有的用户选择，否则用推荐项，不中途提问。
 
-身份、只读、写入、工具面和结果结构的准入只以 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/delegation-contract.md` 为准。编排器必须记录真实 `reviewer_agent_ref`，校验它与全部 producer 不相交，并以平台运行事件或前后快照证明 `checks.write_set_empty=true`；`changed_files=[]` 只是一项结果 schema 条件，不能作为未写入证明。校验成功后形成新的不可变 `approval-record-v1`；SubagentStop hook 仍只拦截缺失或畸形的结果信封。
+身份、只读、写入、工具面和结果结构的准入只以 `$AGENT_TOOLS_ROOT/skills/dev-workflow/references/delegation-contract.md` 为准。编排器必须记录真实 `reviewer_agent_ref`，校验它与全部 producer 不相交，并以平台运行事件或前后快照证明 `checks.write_set_empty=true`；`changed_files=[]` 只是一项结果 schema 条件，不能作为未写入证明。校验成功后形成新的不可变 `approval-record-v1`；SubagentStop hook 仍只拦截缺失或畸形的结果信封。
 
 正式派发前先按委派契约检查证明能力。平台无法提供可信 runtime 身份、有效能力面或覆盖完整的写入证明时，直接停止为 `blocked_infrastructure`，原因记为 `formal_reviewer_unavailable`，不得创建或重试 reviewer。只有偶发派发失败、超时、畸形结果，或原因已消除且冻结输入指纹未变的实例级配置/快照问题，才允许换一个新 reviewer 重试一次；输入指纹变化时创建新任务而不是占用原任务重试，再次执行失败时进入同一终态。有效 reviewer 的否决或 findings 是正常评审结果，必须按阶段路由修订，不能更换 reviewer 刷取通过。
 

@@ -21,7 +21,7 @@ stable/测试表示部署环境，不等于测试执行。当前只查询该环�
 
 不要因为环境名称含“测试”就选择带 `test` 的表。`t_strategy_node_decision_test_water` 和 `t_rule_decision_test_water` 属于测试执行流水，当前不查。
 
-接口调用和响应判定见 `/home/joney/projects/ai/agent-tools/skills/lexin/query-clickhouse-water/references/stable-http.md`。
+接口调用和响应判定见 `references/stable-http.md`。
 
 ## 使用原则
 

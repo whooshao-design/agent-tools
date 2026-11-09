@@ -4,10 +4,24 @@
 # 只有会话成功、已有周报未被改动时，脚本才自己调用 write --confirm（只存草稿，不发布）。
 set -uo pipefail
 
-SKILL_DIR=/home/joney/projects/ai/agent-tools/skills/lexin/okr-weekly-progress
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+SKILL_DIR="$(cd "$SCRIPT_DIR/.." && pwd -P)"
+# 仓库根三来源（与 lib/agent_tools 同口径）：链接模式上三层即仓库；复制模式（~/.claude/skills/<skill>/scripts）上三层是 $HOME，
+# 改用 systemd 单元写入的 AGENT_TOOLS_ROOT，再退到指针文件
+valid_root() { [ -n "$1" ] && [ -f "$1/install.py" ] && [ -d "$1/skills" ]; }
+ROOT="$(cd "$SKILL_DIR/../../.." 2>/dev/null && pwd -P)"
+valid_root "$ROOT" || ROOT="${AGENT_TOOLS_ROOT:-}"
+valid_root "$ROOT" || ROOT="$(cat "$HOME/.config/agent-tools/root" 2>/dev/null)"
+valid_root "$ROOT" || { echo "agent-tools: 未找到仓库根（上三层 $SKILL_DIR/../../..、AGENT_TOOLS_ROOT=${AGENT_TOOLS_ROOT:-<unset>}、$HOME/.config/agent-tools/root 都不含 install.py + skills/）；请在仓库目录运行 python3 install.py" >&2; exit 2; }
+# 定时会话没有交互 shell 的环境：从 env/credentials.env 取 OKR_WEEKLY_AUTHOR 等键（空值不覆盖；文件缺失只提示不中断）
+# shellcheck source=/dev/null
+source "$ROOT/bin/_load_env.sh" && load_agent_tools_env "$ROOT"
 CLI="$SKILL_DIR/scripts/okr_weekly.mjs"
 STATE="$HOME/.local/state/agent-tools/okr-weekly"
-OUT="$HOME/docs/weekly-reports"
+DOCS="${AGENT_TOOLS_DOCS_ROOT:-$HOME/docs}"
+OUT="$DOCS/weekly-reports"
+# macOS 没有 sha256sum，用 shasum -a 256（输出格式相同）
+SUM256="$(command -v sha256sum || echo 'shasum -a 256')"
 CLAUDE_BIN="${OKR_WEEKLY_CLAUDE:-claude}"
 
 mkdir -p "$STATE/runs" "$OUT"
@@ -17,7 +31,7 @@ export OKR_WEEKLY_READONLY=1
 umask 077
 
 # 定时会话可以写 weekly-reports，但不许改已有周报：运行前后比对已有文件的哈希
-existing_sums() { find "$OUT" -maxdepth 1 -type f -name '*.md' -print0 2>/dev/null | sort -z | xargs -0 -r sha256sum; }
+existing_sums() { find "$OUT" -maxdepth 1 -type f -name '*.md' -print0 2>/dev/null | sort -z | xargs -0 -r $SUM256; }
 
 ts="$(date +%Y%m%dT%H%M%S)"
 log="$STATE/runs/$ts.log"
@@ -31,14 +45,14 @@ cd "$OUT" || exit 1
 # 文件写入只认 Edit(path) 规则；绝对路径要以 // 开头，"/$OUT" 展开后即 //home/...
 timeout 22m "$CLAUDE_BIN" -p "$prompt" \
   --permission-mode dontAsk --strict-mcp-config --no-session-persistence \
-  --add-dir "$STATE" --add-dir "$SKILL_DIR" --add-dir "$HOME/docs/requirements-development" \
+  --add-dir "$STATE" --add-dir "$SKILL_DIR" --add-dir "$DOCS/requirements-development" \
   --allowedTools "Bash(node $CLI collect:*)" "Read" "Edit(/$OUT/**)" \
   --disallowedTools "WebFetch" "WebSearch" "Bash(node $CLI write:*)" "Bash(node $CLI restore:*)" \
   >"$log" 2>&1
 rc=$?
 
 produced="$(find "$OUT" -maxdepth 1 -type f -name '*.md' -newer "$mark" | head -1)"
-after_sums="$(printf '%s\n' "$before_sums" | awk '{print $2}' | xargs -r sha256sum 2>/dev/null)"
+after_sums="$(printf '%s\n' "$before_sums" | awk '{print $2}' | xargs -r $SUM256 2>/dev/null)"
 rm -f "$mark"
 if [ "$before_sums" != "$after_sums" ]; then
   rc=3

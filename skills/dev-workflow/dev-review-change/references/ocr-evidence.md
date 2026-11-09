@@ -19,7 +19,7 @@
 ocr review --format json --audience agent \
   --from <base> --to <head> \
   -B <背景文件.md> \
-  --rule /home/joney/projects/ai/agent-tools/skills/dev-workflow/dev-review-change/references/ocr-rules.json \
+  --rule references/ocr-rules.json \
   --output <目录>/ocr.json
 ```
 

@@ -1,6 +1,6 @@
 # 在飞书文档上做局部修改
 
-`S=/home/joney/projects/ai/agent-tools/skills/lexin/manage-feishu-doc/scripts/feishu_doc.mjs`
+`S=scripts/feishu_doc.mjs`
 
 `edit` 直接改飞书上的文档：插入、替换、删除一段或一节，或替换一处文字。用于以飞书为准的文档（定稿移交后的 `feishu-master`、别人的文档）。以本地为准的文档应改本地 md 后 `publish`；对它用 `edit` 会带 `warning`，因为下次增量发布会因飞书上的改动停下。写入对他人可见，必须用户明确要求；试写只落 `FEISHU_TEST_FOLDER`。
 

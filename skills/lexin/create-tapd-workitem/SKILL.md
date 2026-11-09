@@ -2,7 +2,7 @@
 name: create-tapd-workitem
 description: 在 TAPD（www.tapd.cn）新建工作项，目前只支持缺陷：按项目的缺陷模板列出字段与必填项，按 JSON 填表并先 dry-run，确认后点“创建”并回读标题与处理人，复用 get-browser-session 浏览器登录态。Use when 用户要求建 TAPD 缺陷单、把整理好的缺陷描述提交到 TAPD、查看某个 TAPD 项目的缺陷模板和必填字段；需求单创建尚未支持，只读需求原文用 fetch-tapd-story。
 metadata:
-  version: 1.0.0
+  version: 1.0.1
 ---
 
 # create-tapd-workitem
@@ -17,7 +17,7 @@ metadata:
 ## 脚本
 
 ```bash
-S=/home/joney/projects/ai/agent-tools/skills/lexin/create-tapd-workitem/scripts/tapd_workitem.js
+S=scripts/tapd_workitem.js
 node $S login  --workspace=<项目ID>                       # 打开有界面浏览器，用户登录后自动关闭（最多等 8 分钟）
 node $S fields --workspace=<项目ID> [--template=<模板ID>]  # 只读：列模板 ID、字段名、类型、必填、可选值
 node $S create-bug --file=<bug.json> [--dry-run]           # 填表；不带 --dry-run 才点“创建”
@@ -33,7 +33,7 @@ node $S create-bug --file=<bug.json> [--dry-run]           # 填表；不带 --d
 
 ## bug.json
 
-示例：`/home/joney/projects/ai/agent-tools/skills/lexin/create-tapd-workitem/references/bug.example.json`（项目 20061171 风控业务，“分期乐缺陷创建模板”）。
+示例：`references/bug.example.json`（项目 20061171 风控业务，“分期乐缺陷创建模板”）。
 
 | 字段 | 必填 | 说明 |
 |---|---|---|

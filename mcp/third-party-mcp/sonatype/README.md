@@ -28,7 +28,7 @@ export SONATYPE_GUIDE_MCP_TOKEN=...
 对只支持 stdio MCP 的客户端，可以使用本目录 wrapper：
 
 ```bash
-/home/joney/projects/ai/agent-tools/mcp/third-party-mcp/sonatype/bin/sonatype-mcp
+$AGENT_TOOLS_ROOT/mcp/third-party-mcp/sonatype/bin/sonatype-mcp
 ```
 
 wrapper 使用 `mcp-remote@0.1.38` 连接 Sonatype 远程 MCP。注意：stdio fallback 会把 bearer header 传给

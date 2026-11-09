@@ -1,0 +1,9 @@
+<!--
+agent-tools 本地 overlay 模板（CHG-002）：复制为 env/AGENTS.local.md 后，
+python3 install.py --with-global 会把它追加到 ~/.claude/CLAUDE.md 与 ~/.codex/AGENTS.md 的渲染副本末尾。
+只放机器专属规则；<Windows 用户名> 这类占位符改成你的实际值。env/ 目录已 gitignore，本文件不入库。
+-->
+
+## 本机专属规则
+
+- When the user needs to look at a screenshot or other local image (for example before confirming a dry-run form), open it in JPEGView instead of only printing its path: `(cd /mnt/c && /mnt/c/Users/<Windows 用户名>/AppData/Local/Programs/JPEGView/JPEGView.exe "$(wslpath -w <file>)" >/dev/null 2>&1 &)`. Do not use `explorer.exe` or the default `.png` association: it opens the image viewer bundled with the office suite, which held about 500 MB, while JPEGView held 79 MB working set on the same 1440x900 PNG. Also give the `\\wsl.localhost\...` path from `wslpath -w` in case no window appears. If the exe is missing, say so instead of falling back to another viewer.

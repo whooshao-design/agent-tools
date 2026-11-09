@@ -28,7 +28,8 @@ load_agent_tools_env() {
     fi
 
     local perm
-    perm="$(stat -c '%a' "$env_file" 2>/dev/null || echo '')"
+    # GNU stat 用 -c；BSD/macOS stat 不支持 -c，改试 -f '%Lp'；都失败就跳过权限提示
+    perm="$(stat -c '%a' "$env_file" 2>/dev/null || stat -f '%Lp' "$env_file" 2>/dev/null || echo '')"
     if [[ -n "$perm" && "$perm" != "600" && "$perm" != "400" ]]; then
         echo "提示：$env_file 权限为 $perm，建议 chmod 600" >&2
     fi

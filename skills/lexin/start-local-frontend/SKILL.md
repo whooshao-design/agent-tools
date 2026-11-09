@@ -2,14 +2,14 @@
 name: start-local-frontend
 description: 米霍克 OA 前端(web_mihawk_oa)本地开发会话管理：启动前资源门禁、安全启动本地 webpack(127.0.0.1:8116)、把当前 whistle 联调分组里的米霍克网关行切到预发布或项目环境（项目环境网关 IP 由用户指定并探活，不硬编码）、用真实域名打开本地页面，并给出“后端部署项目环境 + 前端本地启动”的联调串联步骤。Use when 用户要求本地启动米霍克前端、npm run dev:index、检查 webpack 启动条件、把 rc_oa_gateway 切到预发布/项目环境、修改 whistle 网关规则、验证本地页面访问链路，或要做前后端项目环境联调。
 metadata:
-  version: 1.3.0
+  version: 1.3.1
 ---
 
 # start-local-frontend
 
 ## 定位
 
-管理 `web_mihawk_oa`（米霍克 OA 前端，`/home/joney/projects/frontend/web_mihawk_oa`）的本地开发会话：
+管理 `web_mihawk_oa`（米霍克 OA 前端，`~/projects/frontend/web_mihawk_oa`）的本地开发会话：
 启动前门禁 -> 启动本地 webpack -> 把后端网关切到预发布(pre)或项目环境(prj) -> 用真实域名访问本地页面。
 项目环境网关机随每次部署新建、IP 会变，脚本不硬编码，由用户给出 IP 后探活。
 
@@ -21,14 +21,14 @@ metadata:
 - whistle 只改联调分组里的米霍克网关行，不增删其他规则（见下方“whistle 分组模型”）。
 - **纯看已部署整站**（不需要本地前端改动）时，hosts 直接指项目环境 IP 就够了，不需要本 skill。
 
-知识来源：`/home/joney/projects/frontend/web_mihawk_oa/AGENTS.md`（本地开发环境搭建一节，已实测跑通）。
+知识来源：`~/projects/frontend/web_mihawk_oa/AGENTS.md`（本地开发环境搭建一节，已实测跑通）。
 
 ## 快速使用
 
-脚本：`/home/joney/projects/ai/agent-tools/skills/lexin/start-local-frontend/scripts/frontend_env.js`（Node，无第三方依赖）。
+脚本：`scripts/frontend_env.js`（Node，无第三方依赖）。
 
 ```bash
-SCRIPT=/home/joney/projects/ai/agent-tools/skills/lexin/start-local-frontend/scripts/frontend_env.js
+SCRIPT=scripts/frontend_env.js
 
 node $SCRIPT doctor                 # 1. 启动前置门禁（只读）
 node $SCRIPT start                  # 2. 门禁全绿后启动 npm run dev:index（长驻进程，建议后台运行）
@@ -60,7 +60,7 @@ node $SCRIPT open                   # 4. 打印访问地址，检查页面规则
 - 8116 已有本项目健康实例（cwd 属于本项目且 HTTPS 有响应）时**复用不重启**。
 - 冷启动命令（与 AGENTS.md 完全一致，用精确 Node 版本覆盖整个进程树）：
   `env PATH="$HOME/.nvm/versions/node/v16.16.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" npm run dev:index`，
-  工作目录 `/home/joney/projects/frontend/web_mihawk_oa`。
+  工作目录 `~/projects/frontend/web_mihawk_oa`。
 - 长驻进程：由 agent 执行时放后台运行。端口开始监听不代表编译完成，等 webpack 明确输出编译完成再访问。
 
 ### connect --env pre|prj [--ip <ip>] [--group <分组名>] [--apply]
@@ -129,8 +129,8 @@ WSL 自动化浏览器 profile 的 `oa_session` 来自线上 passport，项目�
 示例 `references/ui-check/package-copy-confirm.json` 打开乐包列表，通过 Vue 实例调用 `appEditor` 的 `show(..., 'copy')` 和 `confirmRealTimeQueryCopy(...)` 弹出“乐包复制提醒”，测量 `.copy-confirm-modal`（2026-10-23 实测：通过；注入原先泄漏的 `.modal-body { padding: 4px 0 0 0 !important }` 后两个按钮报 `cramped` 0px）。新页面照它写场景：给页面依赖的接口补 `mocks`，用 `steps` 点开或调用组件方法打开要检查的界面。
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/dev-quality/verify-browser-qa/scripts/ui_check.js \
-  --scenario=/home/joney/projects/ai/agent-tools/skills/lexin/start-local-frontend/references/ui-check/package-copy-confirm.json
+node $AGENT_TOOLS_ROOT/skills/dev-quality/verify-browser-qa/scripts/ui_check.js \
+  --scenario=references/ui-check/package-copy-confirm.json
 ```
 
 模拟数据只证明布局和样式；接口真实返回、权限和后端行为仍按原来的方式交用户在环境里验收。

@@ -2,7 +2,7 @@
 name: manage-oa-gateway-rule
 description: 在 OA 网关控制台（gateway.oa.fenqile.com）按一条已有规则做模板，为新的前端 URL 新增路由规则（url → FSOF 接口方法），支持线上与项目环境（项目环境把控制台域名映射到本地配置的内网地址），先 dry-run 再写入，写后回读并对运行时网关探活。Use when 新增了米霍克等 OA 页面要调用的 Dubbo/FSOF 网关接口，需要在线上或项目环境网关加路由规则、确认规则是否已生效，或页面请求返回“url 未配置路由规则”（16051005）；只查规则映射和代码链路用 query-oa-gateway-interface。
 metadata:
-  version: 1.0.1
+  version: 1.0.2
 ---
 
 # manage-oa-gateway-rule
@@ -21,13 +21,13 @@ metadata:
 
 ## 用法
 
-脚本：`/home/joney/projects/ai/agent-tools/skills/lexin/manage-oa-gateway-rule/scripts/oa_gateway_rule.js`（复用 `get-browser-session` 的 main profile，请求在已登录的控制台页面内发出，Cookie 不导出）。
+脚本：`scripts/oa_gateway_rule.js`（复用 `get-browser-session` 的 main profile，请求在已登录的控制台页面内发出，Cookie 不导出）。
 
 ```bash
-S=/home/joney/projects/ai/agent-tools/skills/lexin/manage-oa-gateway-rule/scripts/oa_gateway_rule.js
+S=scripts/oa_gateway_rule.js
 
 # 1. 查：按 url（精确匹配）或接口 + 方法
-/home/joney/projects/ai/agent-tools/bin/with-env node $S query --env prj --url hawk_decision/manage/diff/diff_strategy_rule_text.json
+$AGENT_TOOLS_ROOT/bin/with-env node $S query --env prj --url hawk_decision/manage/diff/diff_strategy_rule_text.json
 node $S query --env prod --interface com.fenqile.rc_comm.hawk.decision.manage.service.gateway.diff.EditionDiffGatewayService
 
 # 2. 新增：默认 dry-run，只打印模板和将提交的 payload
@@ -60,7 +60,7 @@ node $S probe --env prj --probe-ip <项目环境网关机IP> --url hawk_decision
 - 控制台新增接口是 `url_interface_rule/add_with_approval.json`（JSON 体）。返回 `result_rows` 为空或 `need_approval=false` 即已保存；`need_approval=true` 时什么都没保存，控制台会再带 `apply_reason`、`out_net_reason` 调用同一接口提交审批，脚本照此实现。
 - 项目环境控制台的查询免登录，写入要登录；main profile 的 OA 登录态打开控制台首页后即可写入。
 - WSL 里的 `ALL_PROXY` 会让到项目环境控制台地址的 TLS 握手失败（curl exit 35）；脚本经 `get-browser-session` 的网络层去掉全部代理变量。
-- 控制台登录 Cookie `rog_session` 约每天过期，脚本每次先打开控制台首页让 SSO 续期；仍报 `LOGIN_REQUIRED` 时执行 `node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js --ensure --url=https://gateway.oa.fenqile.com/ --success-text=none`。
+- 控制台登录 Cookie `rog_session` 约每天过期，脚本每次先打开控制台首页让 SSO 续期；仍报 `LOGIN_REQUIRED` 时执行 `node $AGENT_TOOLS_ROOT/skills/lexin/get-browser-session/scripts/browser_session.js --ensure --url=https://gateway.oa.fenqile.com/ --success-text=none`。
 - profile 被占用（`profile is busy`）时等其他浏览器脚本结束，不并行运行。
 
 ## 输出

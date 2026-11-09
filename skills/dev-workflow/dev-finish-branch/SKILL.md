@@ -2,7 +2,7 @@
 name: dev-finish-branch
 description: Use when 改动范围已基本稳定，且已有当前模式所需的验证结果及评审状态，准备在提交或交付前做最终收口。
 metadata:
-  version: 1.8.0
+  version: 1.8.1
 ---
 
 # dev-finish-branch
@@ -15,7 +15,7 @@ metadata:
 
 ## 默认产物目录
 
-如需把交付摘要落盘，默认放到 `/home/joney/docs/requirements-development/<requirement-name>/delivery-handoff/`，建议文件名使用 `handoff.md`。
+如需把交付摘要落盘，默认放到 `~/docs/requirements-development/<requirement-name>/delivery-handoff/`，建议文件名使用 `handoff.md`。
 
 - `<requirement-name>` 使用简短、稳定、可读的需求名目录标识
 - 用户明确指定路径时，优先使用用户路径
@@ -38,7 +38,7 @@ metadata:
 
 ### 1. 收口当前 diff
 先看本次准备交付的改动是否清晰：
-- 按 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/artifact-identity.md` 检查 `gate_context G`、相关记录、已验证/已评审的 `change_revision` 是否与待交付工作区精确匹配（含暂存区指纹）；`D/W` 必须重读不可变记录并复算外部 fingerprint
+- 按 `$AGENT_TOOLS_ROOT/skills/dev-workflow/references/artifact-identity.md` 检查 `gate_context G`、相关记录、已验证/已评审的 `change_revision` 是否与待交付工作区精确匹配（含暂存区指纹）；`D/W` 必须重读不可变记录并复算外部 fingerprint
 - 只交接工作区时，快照身份（已含暂存区指纹）与已验证的 `change_revision` 匹配即可，不要求先暂存；用户要求提交、或交付对象是暂存内容时，待提交内容（`git diff --cached`）必须就是已验证的那份：暂存区与工作区不一致（部分暂存、暂存的是修复前版本）就重新暂存到已验证版本，或把交付范围明确绑定到暂存内容并按它重新验证
 - 改了什么
 - 为什么改
@@ -82,7 +82,7 @@ metadata:
 
 ### 5. 整理交付摘要
 
-表达遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/writing-principles.md`，名称与准确性按其 2.1 节逐条自检。commit 与 MR 说明写出改了哪些类或方法、行为从什么变成什么、怎么验证的，不写"优化逻辑""修复问题"这类概括。
+表达遵循 `$AGENT_TOOLS_ROOT/skills/dev-workflow/references/writing-principles.md`，名称与准确性按其 2.1 节逐条自检。commit 与 MR 说明写出改了哪些类或方法、行为从什么变成什么、怎么验证的，不写"优化逻辑""修复问题"这类概括。
 把当前分支收敛成可交付信息：
 - 变更摘要
 - 验证摘要

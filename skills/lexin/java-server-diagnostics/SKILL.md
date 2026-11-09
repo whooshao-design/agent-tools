@@ -2,7 +2,7 @@
 name: java-server-diagnostics
 description: "通过 java_app_diag MCP 对 Java 应用所在服务器做只读排查。Use when 用户要求排查某台服务器上 Java 应用的报错、进程、端口、JVM、线程或 GC；默认先只看 error.log 判断有没有问题，只有 error.log 暴露线索后才递进排查 info/debug/启动日志与运行时状态。"
 metadata:
-  version: 1.4.5
+  version: 1.4.6
 ---
 
 # java-server-diagnostics
@@ -95,7 +95,7 @@ metadata:
 
 容器 Pod 日志的快检/取证（`container_log_check.js`、`webshell_log_check.js`）和日志平台 `log.oa.fenqile.com` 的检索统一由 `query-app-logs` 承接：
 目标是容器、日志已轮转或超出服务器保存期、需要跨机器按 traceId 汇总时，按该 skill 的路由规则执行，本 skill 不再重复其步骤。
-两个容器脚本仍位于 `/home/joney/projects/ai/agent-tools/skills/lexin/java-server-diagnostics/scripts/`，路径不变。
+两个容器脚本仍位于 `scripts/`，路径不变。
 
 ### 3. 基于 error.log 递进定位
 
@@ -132,7 +132,7 @@ metadata:
 ## 汇总结论
 
 默认先给限定范围的结论，再给关键证据和最小下一步；日志快检、进程/端口检查、单项 GC/线程诊断按实际结果简短回复，不加载完整报告指南。
-仅当用户要求故障复盘/完整根因报告，或深入诊断需要综合多类证据解释故障机制、业务影响与处置取舍时，读取 [复杂故障分析报告指南](/home/joney/projects/ai/agent-tools/skills/common/debug-systematic/references/diagnostic-output.md)，按需选用其中模块。作为告警等主流程的取证步骤时只返回证据与限制，由主流程汇总。
+仅当用户要求故障复盘/完整根因报告，或深入诊断需要综合多类证据解释故障机制、业务影响与处置取舍时，读取 [复杂故障分析报告指南]($AGENT_TOOLS_ROOT/skills/common/debug-systematic/references/diagnostic-output.md)，按需选用其中模块。作为告警等主流程的取证步骤时只返回证据与限制，由主流程汇总。
 不为填报告扩大诊断范围。以下信息按实际查询范围保留：
 
 - 查询的 IP、应用、日志文件和时间范围。
@@ -162,7 +162,7 @@ metadata:
    `PROFILE_NOT_FOUND`，那是路径问题而非登录问题，错误信息里会列出当前可用的 profile。
 2. **换一个 profile 试**：不同站点的登录态分布在不同 profile，常见的是
    `~/.local/state/agent-tools/browser-profiles/main`（乐效、Hippo、lxcloud、WebShell）和
-   `/home/joney/.local/state/agent-tools/browser-profiles/healthy`（Healthy）。用
+   `~/.local/state/agent-tools/browser-profiles/healthy`（Healthy）。用
    `browser_session.js --check --profile=<abs> --url=<目标站点>` 逐个确认，
    `sessionState=READY` 即可用。
 3. **确认目标 host**：返回 `passport.lexincloud.com` 或 `trust.oa.fenqile.com`

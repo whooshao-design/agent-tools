@@ -2,7 +2,7 @@
 name: get-browser-session
 description: 获取、检查、续期和复用 WSL Playwright/Chromium 浏览器登录态与网页 session（底层会话层，供其他 skill 复用）。Use when 需要访问要求登录的内网页面、检查或定时续期浏览器 profile 登录态、打开浏览器让用户完成 SSO/OTP 登录、复用已保存 profile 做页面自动化，或按默认脱敏方式查看 session Cookie/localStorage token。
 metadata:
-  version: 1.11.0
+  version: 1.11.1
 ---
 
 # Get Browser Session
@@ -16,10 +16,10 @@ metadata:
 Prefer the bundled script over rewriting browser setup code:
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js --status --url=<url>
+node scripts/browser_session.js --status --url=<url>
 ```
 
-Use the existing WSL browser tool at `~/tools/lexiao-browser` by default. Override with `--tool-dir`, `--chrome`, `--runtime-lib-dir`, or `--profile` only when the local setup differs.
+Browser runtime paths come from `lib/agent_tools` `browserRuntime()`: the tool directory is `BROWSER_SESSION_TOOL_DIR`, else `~/.local/share/agent-tools/browser-tool`, else the legacy WSL directory `~/tools/lexiao-browser` when only that one is valid. Install it with `scripts/setup_browser_tool.sh` (locked Playwright version plus the platform Chromium; Linux/WSL prints the `install-deps` to-do when system libraries are missing). Override with `--tool-dir`, `--chrome`, `--runtime-lib-dir`, or `--profile` only when the local setup differs.
 
 When another skill needs a logged-in browser session, use this skill as the session layer. The calling skill should pass only the target `url`, the intended `profile`, and an optional `success-text`; do not duplicate login instructions in the calling skill.
 
@@ -30,7 +30,7 @@ MCP 优先：能用 `browser_session` MCP 时，优先使用 `check_session` / `
 Run a headless status check first:
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js \
+node scripts/browser_session.js \
   --url=https://lexiao.oa.fenqile.com/#/app-publish/51303 \
   --success-text=当前环境
 ```
@@ -42,7 +42,7 @@ For non-Lexiao pages, always pass a page-specific `--url` and `--profile`. If th
 For environment diagnostics:
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js --doctor
+node scripts/browser_session.js --doctor
 ```
 
 Inspect `wslgHealth` in the result before interactive login. `copyMode: true` means WSLg failed to allocate its shared-memory transport; save current WSL work, run `wsl.exe --shutdown` from Windows PowerShell, then reopen WSL before retrying.
@@ -52,9 +52,9 @@ Inspect `wslgHealth` in the result before interactive login. `copyMode: true` me
 For WebShell pages such as `https://webshell.oa.fenqile.com/?arg=...`, use this skill only to confirm the browser session and login state:
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js \
+node scripts/browser_session.js \
   --status \
-  --profile=/home/joney/.local/state/agent-tools/browser-profiles/healthy \
+  --profile=~/.local/state/agent-tools/browser-profiles/healthy \
   --url=<login_pod_addr> \
   --success-text=none
 ```
@@ -67,7 +67,7 @@ WebShell uses stricter readiness semantics than a generic OA page:
 - `乐空间传送门`、`ATrust`、登录页和 403 markers override transient Gotty titles and terminal elements.
 - `snippet` may be empty because xterm uses canvas; use `sessionState/terminalReady/stableReadyPolls` instead of body text alone.
 
-Do not use this skill to execute server commands or read logs; container log reads belong to `query-app-logs`, which uses `/home/joney/projects/ai/agent-tools/skills/lexin/java-server-diagnostics/scripts/webshell_log_check.js` when a Gotty WebSocket or terminal interaction is needed.
+Do not use this skill to execute server commands or read logs; container log reads belong to `query-app-logs`, which uses `$AGENT_TOOLS_ROOT/skills/lexin/java-server-diagnostics/scripts/webshell_log_check.js` when a Gotty WebSocket or terminal interaction is needed.
 
 ## Network Policy
 
@@ -86,7 +86,7 @@ Only the Chromium child process is affected; the shell's own proxy settings are 
 If the session is missing, use `--ensure`. It first checks the target URL headlessly and returns immediately when the saved session is already usable. If login is required, it opens a headed browser and lets the user complete login in the browser window. In WSL, the script auto-fills WSLg display variables when the Codex process did not inherit `DISPLAY`.
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js \
+node scripts/browser_session.js \
   --ensure \
   --url=https://lexiao.oa.fenqile.com/#/app-publish/51303 \
   --success-text=当前环境
@@ -121,7 +121,7 @@ Scripts that only need cookies use `scripts/session_cache.js` so most calls skip
 Use `renew_session` for an explicit one-shot renewal. The equivalent script command is headless even if `--headed` is also passed, visits the target page in the shared persistent profile, and saves response `Set-Cookie` changes without returning page text, Cookie values, or storage values:
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js \
+node scripts/browser_session.js \
   --renew \
   --url=https://lexiao.oa.fenqile.com/ \
   --success-text=当前环境
@@ -138,7 +138,7 @@ Only `https://passport.lexincloud.com/` re-signs the fixed-lifetime tickets (`oa
 To install the default Lexiao renewal as a systemd user timer, run:
 
 ```bash
-python /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/install_session_renewal.py
+python scripts/install_session_renewal.py
 ```
 
 The installer performs one renewal immediately, then schedules the same headless sweep daily at 11:00 (`OnCalendar=*-*-* 11:00:00`, up to 5 minutes of randomized delay). Pass `--schedule` for a different `OnCalendar` expression. It renews four targets in order, each as its own skippable `ExecStart` so one failure never aborts the rest:
@@ -157,7 +157,7 @@ At a daily cadence the 10-day tickets still have 10x margin, but `oa_token_id` �
 `export_session` visits the target page and writes that profile's Cookies plus localStorage to a JSON file with mode `0600`:
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js \
+node scripts/browser_session.js \
   --export-session=~/.local/state/agent-tools/session-snapshots/main.json \
   --url=https://lxcloud.oa.fenqile.com/ \
   --success-text=none
@@ -176,7 +176,7 @@ Every page or authenticated-request result includes `sessionHealth` with Cookie 
 After `sessionReady: true`, use the same profile for page actions. The script supports normalized text clicks:
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js \
+node scripts/browser_session.js \
   --url=https://lexiao.oa.fenqile.com/#/app-publish/51303 \
   --click-text=分支集成 \
   --click-button=批量集成分支
@@ -189,7 +189,7 @@ The script will not force-click disabled buttons. It recollects the page state a
 Use cookies or browser storage only when the user explicitly asks for session details or a downstream tool genuinely requires them:
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js \
+node scripts/browser_session.js \
   --cookies \
   --domain=lexiao.oa.fenqile.com \
   --url=https://lexiao.oa.fenqile.com/#/app-publish/51303
@@ -202,7 +202,7 @@ A Cookie the user pasted into the conversation, or one that a tool printed in it
 For applications that store auth in localStorage rather than cookies, read only the needed key:
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js \
+node scripts/browser_session.js \
   --storage \
   --storage-type=local \
   --storage-key=token \
@@ -220,7 +220,7 @@ Use `--show-secrets` only for a downstream local process that consumes the value
    `PROFILE_NOT_FOUND`，那是路径问题而非登录问题，错误信息里会列出当前可用的 profile。
 2. **换一个 profile 试**：不同站点的登录态分布在不同 profile，常见的是
    `~/.local/state/agent-tools/browser-profiles/main`（乐效、Hippo、lxcloud、WebShell）和
-   `/home/joney/.local/state/agent-tools/browser-profiles/healthy`（Healthy）。用
+   `~/.local/state/agent-tools/browser-profiles/healthy`（Healthy）。用
    `browser_session.js --check --profile=<abs> --url=<目标站点>` 逐个确认，
    `sessionState=READY` 即可用。
 3. **确认实际状态**：综合 `sessionState`、登录表单/标记、重定向 host 与 HTTP 状态。

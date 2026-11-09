@@ -256,6 +256,9 @@ class ReviewRoundTest(unittest.TestCase):
         run(*self.base, "envelope", "--task-id", "t1", "--scope", "full review")
         run(*self.base, "task")
         task = (self.rd / "evidence/external-task-primary.md").read_text()
+        self.assertTrue(task.startswith(f"AGENT_TOOLS_ROOT={rr.TOOLS_ROOT}\n"), task[:120])
+        self.assertIn(f"{rr.TOOLS_ROOT}/skills/dev-workflow/references/delegation-contract.md", task)
+        self.assertNotIn("{{", task)  # agents 源文件的占位符已渲染
         self.assertIn("dev-review-solution/SKILL.md", task)
         self.assertIn(str(self.rd / "delegation-envelope.json"), task)
         env = json.loads((self.rd / "delegation-envelope.json").read_text())

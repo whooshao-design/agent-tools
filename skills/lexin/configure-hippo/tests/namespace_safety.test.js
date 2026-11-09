@@ -38,6 +38,7 @@ function mockPage(options = {}) {
       })) });
       if (request.endsWith('/findNamespaceGroupsByAppId')) return ok([]);
       if (request.endsWith('/permissions/createNamespace') || request.endsWith('/permissions/AssignRole')) return ok({ hasPermission: true });
+      if (request.includes('/permissions/ModifyNamespace') || request.includes('/permissions/ReleaseNamespace')) return ok({ hasPermission: false });
       if (request === '/page-settings') return ok({ canAppAdminCreatePrivateNamespace: true });
       if (request === '/user') return ok({ userId: 'owner' });
       if (request.endsWith('/role_users')) return ok(roles);
@@ -82,7 +83,8 @@ for (const site of ['stable', 'mx', 'id']) {
   test(`grant command preserves ${site}, environment and custom cluster`, async () => {
     const runtime = resolveRuntime({ ...args, 'hippo-site': site, env: site === 'stable' ? 'fql_pre' : 'prod', cluster: "team'alpha", key: 'key' }, 'plan');
     const details = await namespacePermissionDetails(mockPage().page, runtime.target, { roleNamespace: 'sample' });
-    const commandArgs = parseArgs(details.grantArgv.slice(2));
+    assert.ok(details.grantArgv[0].endsWith('/bin/with-env'), 'grant command must load env/credentials.env');
+    const commandArgs = parseArgs(details.grantArgv.slice(3));
     const restored = resolveRuntime(commandArgs, 'namespace-grant');
     assert.equal(restored.site, runtime.site);
     assert.equal(restored.env, runtime.env);
@@ -122,13 +124,49 @@ for (const [label, options, code] of [
   });
 }
 
-test('verified creation keeps the existing default grant policy and both environments', async () => {
-  const mock = await createWith();
-  const result = await mock.run();
-  assert.equal(result.created, true);
-  assert.deepEqual(result.createdEnvs, ['fql_pre', 'fql_prod']);
-  assert.deepEqual(result.fieldMismatches, []);
-  assert.equal(result.hasActiveRelease, false);
-  assert.equal(result.autoGrant.nonTargetRoleUsersUnchanged, true);
-  assert.deepEqual(mock.counts, { create: 1, grants: 2 });
+test('verified creation grants HIPPO_DEFAULT_GRANT_USERS modify+release and creates both environments', async () => {
+  const saved = process.env.HIPPO_DEFAULT_GRANT_USERS;
+  process.env.HIPPO_DEFAULT_GRANT_USERS = 'alice';
+  try {
+    const mock = await createWith();
+    const result = await mock.run();
+    assert.equal(result.created, true);
+    assert.deepEqual(result.createdEnvs, ['fql_pre', 'fql_prod']);
+    assert.deepEqual(result.fieldMismatches, []);
+    assert.equal(result.hasActiveRelease, false);
+    assert.equal(result.autoGrant.nonTargetRoleUsersUnchanged, true);
+    assert.deepEqual(mock.counts, { create: 1, grants: 2 });
+  } finally {
+    if (saved === undefined) delete process.env.HIPPO_DEFAULT_GRANT_USERS; else process.env.HIPPO_DEFAULT_GRANT_USERS = saved;
+  }
+});
+
+test('namespace-grant without HIPPO_DEFAULT_GRANT_USERS fails and names the credentials key', async () => {
+  const saved = process.env.HIPPO_DEFAULT_GRANT_USERS;
+  delete process.env.HIPPO_DEFAULT_GRANT_USERS;
+  try {
+    const mock = await createWith({}, { 'no-auto-grant': true });
+    await mock.run();
+    const runtime = resolveRuntime(args, 'namespace-grant');
+    await assert.rejects(runNamespaceCommand('namespace-grant', runtime, args, mock.page),
+      (error) => error.code === 'GRANT_USERS_REQUIRED' && /HIPPO_DEFAULT_GRANT_USERS/.test(error.message) && /with-env/.test(error.message));
+    assert.deepEqual(mock.counts, { create: 1, grants: 0 });
+  } finally {
+    if (saved === undefined) delete process.env.HIPPO_DEFAULT_GRANT_USERS; else process.env.HIPPO_DEFAULT_GRANT_USERS = saved;
+  }
+});
+
+test('without HIPPO_DEFAULT_GRANT_USERS the namespace is created but nobody is auto granted, and the result says why', async () => {
+  const saved = process.env.HIPPO_DEFAULT_GRANT_USERS;
+  delete process.env.HIPPO_DEFAULT_GRANT_USERS;
+  try {
+    const mock = await createWith();
+    const result = await mock.run();
+    assert.equal(result.created, true);
+    assert.equal(result.autoGrant.skipped, true);
+    assert.match(result.autoGrant.reason, /HIPPO_DEFAULT_GRANT_USERS/);
+    assert.deepEqual(mock.counts, { create: 1, grants: 0 });
+  } finally {
+    if (saved === undefined) delete process.env.HIPPO_DEFAULT_GRANT_USERS; else process.env.HIPPO_DEFAULT_GRANT_USERS = saved;
+  }
 });

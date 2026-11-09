@@ -2,7 +2,7 @@
 name: okr-weekly-progress
 description: 汇总本周工作（飞书「周工作汇报」、本机 Claude/Codex 会话、本人 git 提交），按乐空间 OKR 的 KR 归类生成周报汇总，并只以草稿形式写入各 KR 进展（定时任务生成后自动写，交互会话按用户指令写）。Use when 用户要写或生成本周 OKR 进展/周报、把周报填进乐空间 leco.oa.fenqile.com 的 KR、说「写入 OKR」「看周报」、处理周报汇总上的 mdview 评论，或安装/调整每周五自动生成周报的定时任务。
 metadata:
-  version: 1.3.0
+  version: 1.3.1
 ---
 
 # okr-weekly-progress
@@ -11,7 +11,7 @@ metadata:
 
 治理本人乐空间 OKR（默认 `goal/49548`）的每周进展：汇总、归类、本地归档、草稿写入。不发布进展，不改进展状态和进度，不改 O/KR，不写他人 OKR，不改飞书文档。飞书读取依赖 `manage-feishu-doc`，会话读取依赖 `recall-agent-sessions`，评审用 mdview 评论（`mdview comments <文件>`）。
 
-脚本：`S=/home/joney/projects/ai/agent-tools/skills/lexin/okr-weekly-progress/scripts/okr_weekly.mjs`
+脚本：`S=scripts/okr_weekly.mjs`。`collect` 统计 git 提交要知道作者：读 `env/credentials.env` 的 `OKR_WEEKLY_AUTHOR`（交互会话经 `$AGENT_TOOLS_ROOT/bin/with-env` 运行，定时段由 `run_scheduled.sh` 加载），或传 `--author=<git 作者>`；两者都没有时 `collect` 报错 `AUTHOR_REQUIRED`。
 
 流程分两段：定时段生成周报汇总；写入段把它存成乐空间草稿。定时任务跑完定时段后由 `run_scheduled.sh` 自动执行写入段（`--confirm`），用户在乐空间页面核对草稿后自己发布；交互会话里只有用户明确说「写入 OKR」才执行写入段。
 
@@ -19,7 +19,7 @@ metadata:
 
 `okr-weekly.timer` 每周五 13:40 运行；交互会话里用户说「生成本周 OKR 周报」时也走这一段。
 
-1. `node $S collect`：取本周一 00:00 至今（北京时间）的飞书周报、会话、提交、本周有改动的需求文档阶段日期（`~/docs/requirements-development`）和 OKR，输出素材 JSON 路径与 `archive.path`。任一来源 `status` 不是 `ok` 时照常继续，并在周报汇总里写明。
+1. `"$AGENT_TOOLS_ROOT/bin/with-env" node $S collect`：取本周一 00:00 至今（北京时间）的飞书周报、会话、提交、本周有改动的需求文档阶段日期（`~/docs/requirements-development`）和 OKR，输出素材 JSON 路径与 `archive.path`。任一来源 `status` 不是 `ok` 时照常继续，并在周报汇总里写明。
 2. 读素材 JSON，按下面的规则整理后，按 `references/archive-format.md` 写到 `archive.path`。路径是 `<日期>.new.md`（或 `.new-2.md` 等）说明同名文件已存在：照写新文件，提示用户比较差异，不覆盖旧文件。
 3. 交互会话里用 `node $S open <文件>` 在 mdview 中打开；定时任务由 `run_scheduled.sh` 写入草稿后再打开。
 
@@ -60,9 +60,9 @@ node $S write --file=<周报汇总.md> --confirm    # 用户核对 dry-run、关
 ## 定时任务
 
 ```bash
-python3 /home/joney/projects/ai/agent-tools/skills/lexin/okr-weekly-progress/scripts/install_timer.py --dry-run   # 看单元内容
-python3 /home/joney/projects/ai/agent-tools/skills/lexin/okr-weekly-progress/scripts/install_timer.py             # 安装并启用（默认周五 13:40）
-python3 /home/joney/projects/ai/agent-tools/skills/lexin/okr-weekly-progress/scripts/install_timer.py --uninstall
+python3 scripts/install_timer.py --dry-run   # 看单元内容
+python3 scripts/install_timer.py             # 安装并启用（默认周五 13:40）
+python3 scripts/install_timer.py --uninstall
 systemctl --user start okr-weekly.service      # 手动跑一次
 ```
 

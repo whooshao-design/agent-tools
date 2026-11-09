@@ -1,6 +1,6 @@
 # 技术方案可读性与写作规则
 
-通用表达规则（第一屏、段落、列表与表格、标识与引用、标题与篇幅）在 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/writing-principles.md`，本文件只写技术方案专属的部分。
+通用表达规则（第一屏、段落、列表与表格、标识与引用、标题与篇幅）在 `$AGENT_TOOLS_ROOT/skills/dev-workflow/references/writing-principles.md`，本文件只写技术方案专属的部分。
 
 ## 1. 三层阅读入口
 

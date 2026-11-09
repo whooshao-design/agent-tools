@@ -6,9 +6,13 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { spawn, execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import { addComment, deleteComment, loadComments, runCli, setStatus, withLines } from './lib/comments.mjs';
+import { cmdExe, codeCli, powershellExe } from './lib/platform.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+// 平台判定与打开外部目标走仓库共用库（tools/ 是仓库级目录，直接按相对位置加载）
+const locate = createRequire(import.meta.url)(path.join(HERE, '../../lib/agent_tools/locate.js'));
 const VENDOR = path.join(HERE, 'vendor');
 const SHELL = () => fs.readFileSync(path.join(HERE, 'shell.html'));  // 每次读取，改完刷新页面即可生效
 const SKIP = new Set(['node_modules', '.git', 'target', 'dist', 'build', '.idea', '.venv', '__pycache__']);
@@ -97,13 +101,13 @@ function toWinPath(p) {
 function psRun(script) {
   const b64 = Buffer.from(script, 'utf16le').toString('base64');
   return new Promise((res) => execFile(
-    '/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe',
+    powershellExe(),
     ['-NoProfile', '-NonInteractive', '-EncodedCommand', b64], { timeout: 20000 },
     (err, so, se) => res({ err, so: String(so || ''), se: String(se || '') })));
 }
 async function winProfile() {
   if (WIN.profile) return WIN.profile;
-  const out = await new Promise((res) => execFile('/mnt/c/Windows/System32/cmd.exe',
+  const out = await new Promise((res) => execFile(cmdExe(),
     ['/c', 'echo %USERPROFILE%'], (e, so) => res(String(so || ''))));
   WIN.profile = out.trim().replace(/\r/g, '');
   return WIN.profile;
@@ -180,6 +184,7 @@ const server = http.createServer(async (req, res) => {
     // 导出文件到 Windows 并放进剪贴板
     if (url.pathname === '/api/winexport') {
       if (!sameSite(req)) return send(403, 'text/plain', 'forbidden');
+      if (locate.platform() !== 'wsl') return json({ error: 'wsl only' });
       const p = safe(url.searchParams.get('p'), root);
       if (!p) return send(403, 'text/plain', 'forbidden');
       const profile = await winProfile();
@@ -245,25 +250,36 @@ function listen(p, tries = 20) {
   });
 }
 
-// 用 PowerShell Start-Process 打开默认浏览器：explorer.exe 遇到带查询参数的地址（复用实例时的 /?root=…）会直接失败，
-// 浏览器根本不打开（2026-10-16 在 systemd 与交互 shell 下实测）。地址经 -EncodedCommand 传入，& ? # 不会被 shell 解析
+// wsl 用 PowerShell Start-Process 打开默认浏览器：explorer.exe 遇到带查询参数的地址（复用实例时的 /?root=…）会直接失败，
+// 浏览器根本不打开（2026-10-16 在 systemd 与交互 shell 下实测）。地址经 -EncodedCommand 传入，& ? # 不会被 shell 解析。
+// darwin / linux，以及用户显式设置了 AGENT_TOOLS_OPEN_CMD 时，经 lib/agent_tools 的 openExternal()（open / xdg-open / 自定义模板）。
+// 打开失败是可降级动作：打印地址，服务继续运行。
 async function browse(u) {
-  const r = await psRun(`Start-Process '${u.replace(/'/g, "''")}'`);
-  if (!r.err) return true;
-  console.error(`打开浏览器失败（${String(r.se || r.err.message).trim().slice(0, 200)}），请手动打开：${u}`);
+  if (locate.platform() === 'wsl' && !process.env.AGENT_TOOLS_OPEN_CMD) {
+    const r = await psRun(`Start-Process '${u.replace(/'/g, "''")}'`);
+    if (!r.err) return true;
+    console.error(`打开浏览器失败（${String(r.se || r.err.message).trim().slice(0, 200)}），请手动打开：${u}`);
+    return false;
+  }
+  if (locate.openExternal(u)) return true;
+  console.error(`打开浏览器失败，请手动打开：${u}`);
   return false;
 }
 
-// —— 用 VS Code（Remote-WSL）打开文件编辑 ——
-// systemd 拉起的进程没有 WSL_DISTRO_NAME，code 启动脚本会因此走不到 Remote-WSL 分支；用 wslpath 反推发行版名补上
-const CODE_CLI = '/mnt/d/Programs/Microsoft VS Code/bin/code';
+// —— 用 VS Code 打开文件编辑：命令行取 MDVIEW_CODE_CLI 或 PATH 里的 code（见 lib/platform.mjs）——
+// wsl：systemd 拉起的进程没有 WSL_DISTRO_NAME，code 启动脚本会因此走不到 Remote-WSL 分支；用 wslpath 反推发行版名补上
 async function openInCode(p) {
-  if (!fs.existsSync(CODE_CLI)) return { error: `找不到 VS Code: ${CODE_CLI}` };
-  const distro = process.env.WSL_DISTRO_NAME
-    || ((await toWinPath('/')).match(/^\\\\wsl(?:\.localhost|\$)\\([^\\]+)/) || [])[1] || '';
-  const env = { ...process.env, WSL_DISTRO_NAME: distro };
+  const cli = codeCli();
+  if (!cli) return { error: '找不到 VS Code 命令行：PATH 里没有 code，也没有设置 MDVIEW_CODE_CLI' };
+  const env = { ...process.env };
+  let distro = '';
+  if (locate.platform() === 'wsl') {
+    distro = process.env.WSL_DISTRO_NAME
+      || ((await toWinPath('/')).match(/^\\\\wsl(?:\.localhost|\$)\\([^\\]+)/) || [])[1] || '';
+    env.WSL_DISTRO_NAME = distro;
+  }
   return new Promise((res) => {
-    const c = spawn(CODE_CLI, [p], { detached: true, stdio: 'ignore', env });
+    const c = spawn(cli, [p], { detached: true, stdio: 'ignore', env });
     const timer = setTimeout(() => res({ ok: true, distro, pending: true }), 8000);
     c.on('error', (e) => { clearTimeout(timer); res({ error: e.message }); });
     c.on('exit', (code) => { clearTimeout(timer); res(code === 0 ? { ok: true, distro } : { error: `code 退出码 ${code}` }); });

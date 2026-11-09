@@ -1,6 +1,6 @@
 # 飞书文档权限与登录
 
-本 skill 经 lark-cli 以用户身份调用开放平台。wrapper：`/home/joney/projects/ai/agent-tools/mcp/third-party-mcp/lark/bin/lark-cli`（固定 `@larksuite/cli@1.0.96`，默认直连不走本机代理）。凭据是 lark-cli 自己的加密文件（`~/.local/share/lark-cli`），不经 gnome-keyring。
+本 skill 经 lark-cli 以用户身份调用开放平台。wrapper：`$AGENT_TOOLS_ROOT/mcp/third-party-mcp/lark/bin/lark-cli`（固定 `@larksuite/cli@1.0.96`，默认直连不走本机代理）。凭据是 lark-cli 自己的加密文件（`~/.local/share/lark-cli`），不经 gnome-keyring。
 
 ## 操作与 scope
 
@@ -46,4 +46,4 @@
 
 ## 常驻 lark MCP（历史通道）
 
-会话里的 `mcp__lark__*` 仍由 `mcp/third-party-mcp/lark/bin/lark-mcp`（lark-mcp 0.5.1）提供，只适合读和搜索。它的 token 存在 gnome-keyring 加密的本地存储里，钥匙串锁定时会卡住：让用户在**自己的终端**运行 `/usr/bin/python3 /home/joney/projects/ai/agent-tools/skills/lexin/manage-feishu-doc/scripts/unlock_keyring.py`（getpass 读密码，绝不在聊天里要密码），解锁后再 `lark-mcp login`。本 skill 的脚本不再依赖这条通道。
+会话里的 `mcp__lark__*` 仍由 `mcp/third-party-mcp/lark/bin/lark-mcp`（lark-mcp 0.5.1）提供，只适合读和搜索。它的 token 存在 gnome-keyring 加密的本地存储里，钥匙串锁定时会卡住：让用户在**自己的终端**运行 `/usr/bin/python3 scripts/unlock_keyring.py`（getpass 读密码，绝不在聊天里要密码），解锁后再 `lark-mcp login`。本 skill 的脚本不再依赖这条通道。

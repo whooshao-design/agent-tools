@@ -2,7 +2,7 @@
 name: requirements-review
 description: "评审已有产品或技术需求文档（PRD/需求单/接口需求），独立检查边界、异常、验收标准、风险和依赖是否完整。Use when 用户要求评审需求文档、PRD 评审、规格评审，或主流程需要在方案设计前形成稳定的需求身份 R。"
 metadata:
-  version: 1.9.0
+  version: 1.9.1
 ---
 
 # requirements-review
@@ -15,7 +15,7 @@ metadata:
 
 ## 默认产物目录
 
-正式评审每轮写入 `/home/joney/docs/requirements-development/<requirement-name>/requirements-review/rounds/round-<N>/`，`report.md` 使用 `references/report-template.md`；轮次文件、不可覆盖、`review.md` 只是指针与 `approval-record-v1` 生成规则见委派契约 §5。只需对话结论时不创建文件，但仍须形成可引用、可计算指纹的等价消息记录。
+正式评审每轮写入 `~/docs/requirements-development/<requirement-name>/requirements-review/rounds/round-<N>/`，`report.md` 使用 `references/report-template.md`；轮次文件、不可覆盖、`review.md` 只是指针与 `approval-record-v1` 生成规则见委派契约 §5。只需对话结论时不创建文件，但仍须形成可引用、可计算指纹的等价消息记录。
 
 ## When to Use
 
@@ -33,9 +33,9 @@ metadata:
 - 上一轮未关闭 findings 与风险授权（复审时）
 - 需求内容的全部 `producer_agent_refs[]`
 
-需求身份、内容指纹和风险授权遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/artifact-identity.md`。无法稳定标识评审对象，或关键业务规则缺失到无法判断时，结论为 `材料不足`，不得自行补造规则。
+需求身份、内容指纹和风险授权遵循 `$AGENT_TOOLS_ROOT/skills/dev-workflow/references/artifact-identity.md`。无法稳定标识评审对象，或关键业务规则缺失到无法判断时，结论为 `材料不足`，不得自行补造规则。
 
-正式评审必须由 `agent-tools-requirements-reviewer` 或满足同一契约的独立 agent 执行，并遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/delegation-contract.md`。身份、只读、写入、工具面和结果结构的准入只以该契约为准；任何一项无法由运行时事实证明时，不得形成正式结论。派发前按委派契约 §3.1 让用户选择 reviewer 模型（外部模型、同模型子 agent 或双评审），同一需求已选过时沿用；经 `spawn-model-agent` 以 `--readonly --tools Read,Grep,Glob` 运行的外部模型进程同样满足本契约。纯用户或外部原始需求的 producer 列表可以为空；根 agent 直接产出时使用可稳定标识的会话级 ref 并记录其强度限制，不构成审批阻塞（见 `delegation-contract.md` §1）。
+正式评审必须由 `agent-tools-requirements-reviewer` 或满足同一契约的独立 agent 执行，并遵循 `$AGENT_TOOLS_ROOT/skills/dev-workflow/references/delegation-contract.md`。身份、只读、写入、工具面和结果结构的准入只以该契约为准；任何一项无法由运行时事实证明时，不得形成正式结论。派发前按委派契约 §3.1 让用户选择 reviewer 模型（外部模型、同模型子 agent 或双评审），同一需求已选过时沿用；经 `spawn-model-agent` 以 `--readonly --tools Read,Grep,Glob` 运行的外部模型进程同样满足本契约。纯用户或外部原始需求的 producer 列表可以为空；根 agent 直接产出时使用可稳定标识的会话级 ref 并记录其强度限制，不构成审批阻塞（见 `delegation-contract.md` §1）。
 
 ## Workflow
 
@@ -73,7 +73,7 @@ metadata:
 
 ## 输出要求
 
-表达遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/writing-principles.md`，名称与准确性按其 2.1 节逐条自检。评审时把需求里一词多义、未定义的自造名词、没有对象或结果的动作记为 finding。
+表达遵循 `$AGENT_TOOLS_ROOT/skills/dev-workflow/references/writing-principles.md`，名称与准确性按其 2.1 节逐条自检。评审时把需求里一词多义、未定义的自造名词、没有对象或结果的动作记为 finding。
 
 默认按“输入绑定 → 结论 → findings → 非规范性验收标准建议 → 风险与依赖 → 后续动作”输出。建议仅用于指出如何消除歧义，不会修改 `R`，也不能被当作新增需求或验收标准。若需求方采纳建议，应由需求方或可追踪 producer 写成新 `R`，再派发新的独立 reviewer。编排器按委派契约 §5 落盘并生成 `approval-record-v1`；handoff 只引用其 ref 与 fingerprint。向用户汇报本轮结果时，原样粘贴 `rounds/round-<N>/scorecard.md`（`persist` 写入），不改写、不删行。
 

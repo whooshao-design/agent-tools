@@ -1,9 +1,18 @@
 #!/usr/bin/env node
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
+// agent-tools bootstrap（模板 lib/agent_tools/bootstrap.js，lint 规则六校验逐字一致）
+const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
+// probe 返回 'hit' | 'miss' | <异常码>：与 locate.py 同序先看 install.py（缺失即 miss），再看 skills/；用会抛错的 statSync，不用对一切错误都返回 false 的 existsSync
+const probe = (d) => { if (!d) return 'miss'; try { const i = fs.statSync(path.join(d, 'install.py'), { throwIfNoEntry: false }); if (!i || !i.isFile()) return 'miss'; const s = fs.statSync(path.join(d, 'skills'), { throwIfNoEntry: false }); return s && s.isDirectory() ? 'hit' : 'miss'; } catch (e) { return e.code || 'error'; } };
+const tried = []; let root = '', r = 'miss';
+try { let d = fs.realpathSync(__dirname); tried.push(`上溯起点 ${d}`); while ((r = probe(d)) === 'miss' && path.dirname(d) !== d) d = path.dirname(d); if (r === 'hit') root = d; else tried[0] += r === 'miss' ? ' 未命中有效根（install.py 文件 + skills/ 目录）' : ` ${r}（放弃上溯）`; }
+catch (e) { tried.push(`上溯起点 ${__dirname} ${e.code || e.message}`); }
+if (!root) { const v = process.env.AGENT_TOOLS_ROOT || ''; r = probe(v); tried.push(`AGENT_TOOLS_ROOT=${v || '<unset>'}${r === 'hit' || r === 'miss' ? '' : ' ' + r}`); if (r === 'hit') root = v; }
+if (!root) { const p = path.join(os.homedir(), '.config/agent-tools/root'); try { const v = fs.readFileSync(p, 'utf8').trim(); r = probe(v); tried.push(`${p} = ${v}${r === 'hit' || r === 'miss' ? '' : ' ' + r}`); if (r === 'hit') root = v; } catch (e) { tried.push(`${p} ${e.code === 'ENOENT' ? '<absent>' : e.code}`); } }
+if (!root) { console.error(['agent-tools: 未找到仓库根', ...tried, '请在仓库目录运行 python3 install.py'].join('\n')); process.exit(2); }
+// agent-tools bootstrap end
 const { createRequire } = require('module');
-const { launchLockedContext } = require('../../get-browser-session/scripts/browser_session');
+const { skillDir, workspaceRoot, browserRuntime } = require(path.join(root, 'lib/agent_tools/locate.js'));
+const { launchLockedContext } = require(path.join(skillDir('get-browser-session', 'scripts'), 'browser_session'));
 
 const BASE_URLS = {
   stable: 'https://stable-eye.oa.fenqile.com',
@@ -14,17 +23,16 @@ const BASE_URLS = {
 
 const DEFAULT_CLUSTER = 'Default';
 const DEFAULT_LANGUAGE = 'zh';
-const DEFAULT_PROFILE = '/home/joney/.local/state/agent-tools/browser-profiles/healthy';
-const DEFAULT_TOOL_DIR = '~/tools/lexiao-browser';
+const DEFAULT_PROFILE = path.join(os.homedir(), '.local/state/agent-tools/browser-profiles/healthy');
 const DEFAULT_WINDOW = '30m';
 const DEFAULT_STEP = '60s';
-const DEFAULT_CODE_ROOT = '/home/joney/projects';
+const DEFAULT_CODE_ROOT = workspaceRoot();
 const DEFAULT_BASELINE = '24h';
 const DEFAULT_BASELINE_STEP = '300s';
 // Alert timestamps are UTC; the app servers write logs in UTC+8, so every
 // log-query time window has to be shifted before it is handed to a log tool.
 const LOG_TZ_OFFSET_HOURS = 8;
-const WEBSHELL_PROFILE = '/home/joney/.local/state/agent-tools/browser-profiles/main';
+const WEBSHELL_PROFILE = path.join(os.homedir(), '.local/state/agent-tools/browser-profiles/main');
 // Every browser launch costs 30-40s. The token is already stored in the browser
 // profile, so caching it in a 0600 file next to it adds no new exposure and
 // removes that cost from every follow-up query in the same investigation.
@@ -80,7 +88,7 @@ Options:
   --baseline-step    Step for the baseline pass, default 300s
   --log-pad          Padding around the alert for the suggested log window, default 10m
   --step             query_range step, default 60s
-  --code-root        Root dir scanned for candidate repos, default /home/joney/projects
+  --code-root        Root dir scanned for candidate repos, default ~/projects (or AGENT_TOOLS_WORKSPACE_ROOT)
   --no-code-hint     Skip the metric-to-code hint section
   --code-hint-only   Print code hints from a locally supplied metric, no network
   --metric           Metric name, only used with --code-hint-only
@@ -89,7 +97,7 @@ Options:
   --token            Bearer token. Also supports env HEALTHY_METRIC_TOKEN
   --no-token-cache   Do not read or write ~/.cache/healthy-alert-token.json
   --profile          Browser profile with Healthy login state
-  --tool-dir         Local Playwright tool dir, defaults to ~/tools/lexiao-browser
+  --tool-dir         Local Playwright tool dir, defaults to BROWSER_SESSION_TOOL_DIR or the dir set up by setup_browser_tool.sh
 `);
 }
 
@@ -174,12 +182,14 @@ const SEVERITY_TEXT = { 1: '1-紧急', 2: '2-严重', 3: '3-普通' };
 /* ---------- auth ---------- */
 
 function resolvePaths(args) {
-  const toolDir = expandHome(args['tool-dir'] || DEFAULT_TOOL_DIR);
+  if (args['tool-dir']) process.env.BROWSER_SESSION_TOOL_DIR = expandHome(args['tool-dir']);
+  const runtime = browserRuntime();
+  const toolDir = runtime.toolDir;
   return {
     toolDir,
     profileDir: expandHome(args.profile || DEFAULT_PROFILE),
-    chromePath: expandHome(args.chrome || path.join(toolDir, 'browsers/chrome-linux64/chrome')),
-    runtimeLibDir: expandHome(args['runtime-lib-dir'] || path.join(toolDir, 'runtime-libs/usr/lib/x86_64-linux-gnu')),
+    chromePath: expandHome(args.chrome || runtime.executablePath),
+    runtimeLibDir: args['runtime-lib-dir'] ? expandHome(args['runtime-lib-dir']) : runtime.runtimeLibDir,
     playwrightPackage: path.join(toolDir, 'package.json'),
   };
 }
@@ -536,7 +546,7 @@ function buildAccessHint(event, args) {
   const container = origins === 'k8s' || origins === 'k8s-pod' || origins === 'container';
   const command = container
     ? [
-      'node /home/joney/projects/ai/agent-tools/skills/lexin/java-server-diagnostics/scripts/container_log_check.js \\',
+      `node ${skillDir('java-server-diagnostics', 'scripts', 'container_log_check.js')} \\`,
       `  --app=${app} --env=${event.env || 'prod'} --ip=${ip} \\`,
       `  --profile=${WEBSHELL_PROFILE} \\`,
       '  --log-mode=forensics --keyword="<from L3>" \\',

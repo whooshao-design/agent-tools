@@ -1,11 +1,20 @@
 #!/usr/bin/env node
 'use strict';
+// agent-tools bootstrap（模板 lib/agent_tools/bootstrap.js，lint 规则六校验逐字一致）
+const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
+// probe 返回 'hit' | 'miss' | <异常码>：与 locate.py 同序先看 install.py（缺失即 miss），再看 skills/；用会抛错的 statSync，不用对一切错误都返回 false 的 existsSync
+const probe = (d) => { if (!d) return 'miss'; try { const i = fs.statSync(path.join(d, 'install.py'), { throwIfNoEntry: false }); if (!i || !i.isFile()) return 'miss'; const s = fs.statSync(path.join(d, 'skills'), { throwIfNoEntry: false }); return s && s.isDirectory() ? 'hit' : 'miss'; } catch (e) { return e.code || 'error'; } };
+const tried = []; let root = '', r = 'miss';
+try { let d = fs.realpathSync(__dirname); tried.push(`上溯起点 ${d}`); while ((r = probe(d)) === 'miss' && path.dirname(d) !== d) d = path.dirname(d); if (r === 'hit') root = d; else tried[0] += r === 'miss' ? ' 未命中有效根（install.py 文件 + skills/ 目录）' : ` ${r}（放弃上溯）`; }
+catch (e) { tried.push(`上溯起点 ${__dirname} ${e.code || e.message}`); }
+if (!root) { const v = process.env.AGENT_TOOLS_ROOT || ''; r = probe(v); tried.push(`AGENT_TOOLS_ROOT=${v || '<unset>'}${r === 'hit' || r === 'miss' ? '' : ' ' + r}`); if (r === 'hit') root = v; }
+if (!root) { const p = path.join(os.homedir(), '.config/agent-tools/root'); try { const v = fs.readFileSync(p, 'utf8').trim(); r = probe(v); tried.push(`${p} = ${v}${r === 'hit' || r === 'miss' ? '' : ' ' + r}`); if (r === 'hit') root = v; } catch (e) { tried.push(`${p} ${e.code === 'ENOENT' ? '<absent>' : e.code}`); } }
+if (!root) { console.error(['agent-tools: 未找到仓库根', ...tried, '请在仓库目录运行 python3 install.py'].join('\n')); process.exit(2); }
+// agent-tools bootstrap end
 
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
 const { execFile } = require('child_process');
-const { withHealthyClient } = require('../../healthy-dashboard-config/scripts/healthy_client');
+const { skillDir, docsRoot } = require(path.join(root, 'lib/agent_tools/locate.js'));
+const { withHealthyClient } = require(path.join(skillDir('healthy-dashboard-config', 'scripts'), 'healthy_client'));
 
 // 只验证过线上。stable/test 域名沿用 inspect-healthy-metrics 的映射，但未实跑，
 // 指定时会打印未验证提示。
@@ -21,7 +30,7 @@ const DEFAULT_SITE = 'prod';
 // 默认不限制环境：gray/oa/pre/prod 全看，需要单看某个环境时才传 --env。
 const DEFAULT_ENV = 'all';
 const DEFAULT_RANGE = '1d';
-const DEFAULT_OUT_DIR = '/home/joney/docs/service-relationships';
+const DEFAULT_OUT_DIR = path.join(docsRoot(), 'service-relationships');
 const DEFAULT_SLOW_MS = 500;
 const DEFAULT_CONCURRENCY = 6;
 const DEFAULT_HTTP_TIMEOUT_MS = 30000;
@@ -68,7 +77,7 @@ Options:
   --baseline        与多久之前的同长窗口对比，如 1d / 7d；不给则不做对比
   --slow-ms         平均耗时告警阈值（毫秒），默认 500，可传 0
   --max-drilldown   异常下钻的链路数上限，默认 0 关闭；显式传正整数开启（如 8）
-  --out-dir         HTML 输出目录，默认 /home/joney/docs/service-relationships
+  --out-dir         HTML 输出目录，默认 ~/docs/service-relationships
   --out             直接指定 HTML 输出路径，覆盖 --out-dir；多应用须含 {app}
   --json            额外把完整结果写到该 JSON 路径；多应用须含 {app}
   --no-html         只打印终端摘要，不写 HTML
@@ -304,7 +313,7 @@ async function resolveServiceOwners(ctx, services) {
 // 指标只覆盖窗口内有流量的 provider，零流量或未接指标的服务查不到归属。
 // 这类服务兜底问 Dubbo/FSOF 注册中心（query-dubbo-registry skill），拿不到就保持"未知应用"，
 // 绝不让整个报告因为兜底失败而中断。
-const REGISTRY_SCRIPT = '/home/joney/projects/ai/agent-tools/skills/lexin/query-dubbo-registry/scripts/query_dubbo_registry.js';
+const REGISTRY_SCRIPT = skillDir('query-dubbo-registry', 'scripts', 'query_dubbo_registry.js');
 
 function runRegistry(services, site, timeoutMs) {
   return new Promise((resolve) => {

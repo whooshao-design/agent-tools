@@ -48,10 +48,10 @@
 示例（后端为示意，第一条不写历史）：
 
 ```bash
-python3 /home/joney/projects/ai/agent-tools/skills/common/build-codeagent/scripts/pick_agent.py solution-design --task routing-demo --json
+python3 scripts/pick_agent.py solution-design --task routing-demo --json
 # 主会话实际派发；有实质产出后再登记
-python3 /home/joney/projects/ai/agent-tools/skills/common/build-codeagent/scripts/pick_agent.py solution-design --task routing-demo --record claude-vps --actual-model claude-opus-5
-python3 /home/joney/projects/ai/agent-tools/skills/common/build-codeagent/scripts/pick_agent.py solution-review --task routing-demo --material '/tmp/review materials' --json
+python3 scripts/pick_agent.py solution-design --task routing-demo --record claude-vps --actual-model claude-opus-5
+python3 scripts/pick_agent.py solution-review --task routing-demo --material '/tmp/review materials' --json
 ```
 
 同 task 的选择、调用、登记串行。修订沿用 task，另一份同类产物另建 task。记录文件有损坏行时脚本停止并报行号，保留原件核实，不要清空。

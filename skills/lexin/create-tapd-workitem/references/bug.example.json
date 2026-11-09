@@ -2,7 +2,7 @@
   "workspace": "20061171",
   "template": "1120061171001000570",
   "title": "【米霍克】策略节点版本比对“查看对比详情”报 JSONException，节点比对弹窗打不开",
-  "owner": "joneyshao",
+  "owner": "zhangsan",
   "description_file": "bug.example.description.html",
   "fields": {
     "priority": "中",

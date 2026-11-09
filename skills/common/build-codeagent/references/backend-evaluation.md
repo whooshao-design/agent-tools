@@ -46,7 +46,7 @@
 ## 4. 执行
 
 ```bash
-S=/home/joney/projects/ai/agent-tools/skills/common/build-codeagent
+S=$AGENT_TOOLS_ROOT/skills/common/build-codeagent
 E=~/.local/state/agent-routing/evals/$(date +%F)
 for b in claude-qwen codex-qwen; do            # 同一模型两条通道成对跑
   m=$E/material/$b-r1; mkdir -p $m && cp $S/evals/review-seeded/seeded-solution.md $m/

@@ -1,0 +1,57 @@
+{
+  "allowed_prefixes": [
+    "/home/product",
+    "/home/publish_product",
+    "/home/test"
+  ],
+  "allowed_literals": [
+    {
+      "file": "tools/mdview/server.mjs",
+      "literal": "/home/..."
+    },
+    {
+      "file": "tools/mdview/server.mjs",
+      "literal": "/mnt/c/..."
+    },
+    {
+      "file": "tools/mdview/lib/platform.mjs",
+      "literal": "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+    },
+    {
+      "file": "tools/mdview/lib/platform.mjs",
+      "literal": "/mnt/c/Windows/System32/cmd.exe"
+    },
+    {
+      "file": "skills/lexin/okr-weekly-progress/scripts/run_scheduled.sh",
+      "literal": "/home/..."
+    },
+    {
+      "file": "env/AGENTS.local.md.example",
+      "literal": "/mnt/c/Users/"
+    },
+    {
+      "file": "skills/lexin/configure-hippo/SKILL.md",
+      "literal": "joneyshao"
+    },
+    {
+      "file": "skills/lexin/create-tapd-workitem/SKILL.md",
+      "literal": "joneyshao"
+    },
+    {
+      "file": "skills/lexin/manage-oa-gateway-rule/SKILL.md",
+      "literal": "joneyshao"
+    },
+    {
+      "file": "skills/lexin/manage-publish-plan/references/backend-plan-doc.md",
+      "literal": "joneyshao"
+    },
+    {
+      "file": "skills/lexin/query-app-logs/references/log-platform-http.md",
+      "literal": "joneyshao"
+    },
+    {
+      "file": "skills/lexin/query-mysql-data/SKILL.md",
+      "literal": "joneyshao"
+    }
+  ]
+}

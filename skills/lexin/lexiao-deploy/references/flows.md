@@ -5,17 +5,17 @@
 Prefer the fixed project-environment script over ad hoc Playwright snippets:
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/lexiao-deploy/scripts/lexiao_project_env.js \
+node scripts/lexiao_project_env.js \
   --action=status \
   --url=<lexiao-related-demand-url> \
   --app=<app-name> \
-  --profile=/home/joney/.local/state/agent-tools/browser-profiles/main
+  --profile=~/.local/state/agent-tools/browser-profiles/main
 
-node /home/joney/projects/ai/agent-tools/skills/lexin/lexiao-deploy/scripts/lexiao_project_env.js \
+node scripts/lexiao_project_env.js \
   --action=deploy \
   --url=<lexiao-related-demand-url> \
   --app=<app-name> \
-  --profile=/home/joney/.local/state/agent-tools/browser-profiles/main \
+  --profile=~/.local/state/agent-tools/browser-profiles/main \
   --build-timeout=1200000 \
   --deploy-timeout=1200000
 ```

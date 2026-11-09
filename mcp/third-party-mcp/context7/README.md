@@ -10,7 +10,7 @@
 ## 启动
 
 ```bash
-/home/joney/projects/ai/agent-tools/mcp/third-party-mcp/context7/bin/context7-mcp
+$AGENT_TOOLS_ROOT/mcp/third-party-mcp/context7/bin/context7-mcp
 ```
 
 launcher 固定安装并调用 `@upstash/context7-mcp@3.1.0`，默认使用 stdio transport。

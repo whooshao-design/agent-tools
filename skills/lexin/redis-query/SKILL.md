@@ -2,7 +2,7 @@
 name: redis-query
 description: "通过 bianque 服务模拟器调用 DevService.queryRedis 进行 Redis 只读查询。Use when 用户要求查询 Redis key 是否存在、类型、TTL、数量、STRING/SET/HASH/LIST/ZSET 值、Hash 指定 field，或批量排查 Redis key 来源和值。"
 metadata:
-  version: 1.2.3
+  version: 1.2.4
 ---
 
 # redis-query
@@ -29,7 +29,7 @@ metadata:
 | `test` / `测试` / `offline` / `线下` / `stable` | stable | `https://stable-bianque.lexinfintech.com` | `prj` | 从 `targets.json` 的 `stable` 读取，或用户输入 |
 | `pre` / `预发布` / `gray` / `灰度` / `prod` / `online` / `线上` / `生产` | pre | `https://bianque.lexinfintech.com` | `pre` | 从 `targets.json` 的 `pre` 读取，或用户输入 |
 
-用户没有明确环境时，先从 Redis key 的右侧环境 token 推断线路，例如 `hawk:offline-package:prod` 推断为 pre 线；不要被 key 中间的业务词如 `offline-package` 误导。如果 key 中没有可判断的环境 token，再询问用户。默认 IP:Port 来自 `/home/joney/projects/ai/agent-tools/skills/lexin/test-dubbo-api/targets.json` 中用户指定的应用条目。不要把某个业务应用作为通用默认；如果用户给了新的 IP/Port，以用户指定为准。
+用户没有明确环境时，先从 Redis key 的右侧环境 token 推断线路，例如 `hawk:offline-package:prod` 推断为 pre 线；不要被 key 中间的业务词如 `offline-package` 误导。如果 key 中没有可判断的环境 token，再询问用户。默认 IP:Port 来自 `$AGENT_TOOLS_ROOT/skills/lexin/test-dubbo-api/targets.json` 中用户指定的应用条目。不要把某个业务应用作为通用默认；如果用户给了新的 IP/Port，以用户指定为准。
 
 ## Dubbo 接口
 
@@ -60,7 +60,7 @@ metadata:
 > 仅适用于 hawk 项目上下文；其他项目按上文规则从上下文确认。
 
 - `interface`: `com.fenqile.rc_comm.hawk.decision.manage.service.DevService`
-- 目标应用：`server_hawk_decision_manage`（IP:Port 复用 `/home/joney/projects/ai/agent-tools/skills/lexin/test-dubbo-api/targets.json`）
+- 目标应用：`server_hawk_decision_manage`（IP:Port 复用 `$AGENT_TOOLS_ROOT/skills/lexin/test-dubbo-api/targets.json`）
 - 默认 IP:Port：读取本地未入库的 `targets.json`，不要在 skill 正文维护真实地址清单。
 
 | 实例名 | 用途 |
@@ -86,7 +86,7 @@ metadata:
 优先复用 `test-dubbo-api` 的固定脚本：
 
 ```bash
-python3 /home/joney/projects/ai/agent-tools/skills/lexin/test-dubbo-api/scripts/dubbo_request.py \
+python3 $AGENT_TOOLS_ROOT/skills/lexin/test-dubbo-api/scripts/dubbo_request.py \
   --env <stable|pre> \
   --service '<DEV_SERVICE>' \
   --method queryRedis \

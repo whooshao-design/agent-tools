@@ -10,20 +10,29 @@
  *   open     打印真实域名访问地址，并探测本地实例与网关当前指向
  *
  * 只使用 Node 内置模块，无第三方依赖。
- * 知识来源：/home/joney/projects/frontend/web_mihawk_oa/AGENTS.md（本地开发环境搭建、启动前资源门禁）。
+ * 知识来源：<AGENT_TOOLS_WORKSPACE_ROOT>/frontend/web_mihawk_oa/AGENTS.md（本地开发环境搭建、启动前资源门禁）。
  * 说明：Node 内置 http/https 不读取 http_proxy/https_proxy 环境变量，
  * 因此脚本内所有探测请求天然直连；换成 curl 调试时需 --noproxy '*'。
  */
-const fs = require('fs');
-const os = require('os');
+// agent-tools bootstrap（模板 lib/agent_tools/bootstrap.js，lint 规则六校验逐字一致）
+const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
+// probe 返回 'hit' | 'miss' | <异常码>：与 locate.py 同序先看 install.py（缺失即 miss），再看 skills/；用会抛错的 statSync，不用对一切错误都返回 false 的 existsSync
+const probe = (d) => { if (!d) return 'miss'; try { const i = fs.statSync(path.join(d, 'install.py'), { throwIfNoEntry: false }); if (!i || !i.isFile()) return 'miss'; const s = fs.statSync(path.join(d, 'skills'), { throwIfNoEntry: false }); return s && s.isDirectory() ? 'hit' : 'miss'; } catch (e) { return e.code || 'error'; } };
+const tried = []; let root = '', r = 'miss';
+try { let d = fs.realpathSync(__dirname); tried.push(`上溯起点 ${d}`); while ((r = probe(d)) === 'miss' && path.dirname(d) !== d) d = path.dirname(d); if (r === 'hit') root = d; else tried[0] += r === 'miss' ? ' 未命中有效根（install.py 文件 + skills/ 目录）' : ` ${r}（放弃上溯）`; }
+catch (e) { tried.push(`上溯起点 ${__dirname} ${e.code || e.message}`); }
+if (!root) { const v = process.env.AGENT_TOOLS_ROOT || ''; r = probe(v); tried.push(`AGENT_TOOLS_ROOT=${v || '<unset>'}${r === 'hit' || r === 'miss' ? '' : ' ' + r}`); if (r === 'hit') root = v; }
+if (!root) { const p = path.join(os.homedir(), '.config/agent-tools/root'); try { const v = fs.readFileSync(p, 'utf8').trim(); r = probe(v); tried.push(`${p} = ${v}${r === 'hit' || r === 'miss' ? '' : ' ' + r}`); if (r === 'hit') root = v; } catch (e) { tried.push(`${p} ${e.code === 'ENOENT' ? '<absent>' : e.code}`); } }
+if (!root) { console.error(['agent-tools: 未找到仓库根', ...tried, '请在仓库目录运行 python3 install.py'].join('\n')); process.exit(2); }
+// agent-tools bootstrap end
+const { skillDir, workspaceRoot, platform } = require(path.join(root, 'lib/agent_tools/locate.js'));
 const net = require('net');
-const path = require('path');
 const http = require('http');
 const https = require('https');
 const querystring = require('querystring');
 const { spawn, spawnSync } = require('child_process');
 
-const PROJECT_DIR = '/home/joney/projects/frontend/web_mihawk_oa';
+const PROJECT_DIR = path.join(workspaceRoot(), 'frontend/web_mihawk_oa');
 const DEV_PORT = 8116;
 const DOMAIN = 'mihawk.oa.fenqile.com';
 const GATEWAY_PATH = '/rc_oa_gateway';
@@ -35,7 +44,7 @@ const WHISTLE_PORT = 8899;
 const NODE16_BIN = path.join(os.homedir(), '.nvm/versions/node/v16.16.0/bin');
 // 与 web_mihawk_oa/AGENTS.md 一致：用精确 Node 版本覆盖整个进程树
 const START_PATH = `${NODE16_BIN}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`;
-const QUERY_APP_SCRIPT = '/home/joney/projects/ai/agent-tools/skills/lexin/query-app-instances/scripts/query_app_instances.js';
+const QUERY_APP_SCRIPT = skillDir('query-app-instances', 'scripts', 'query_app_instances.js');
 // 项目环境的 /rc_oa_gateway 由独立网关机承接（每个项目环境一台 server_rc_oa_gateway_java VM），
 // 不是业务应用（如 manage Pod）的 IP；prj 网关有上百台且不按需求打标，无法安全自动选择
 const PRJ_GATEWAY_APP = 'server_rc_oa_gateway_java';
@@ -83,8 +92,35 @@ function parseArgs(argv) {
 
 // ---------- 基础探测 ----------
 
-function readMeminfo() {
-    const text = fs.readFileSync('/proc/meminfo', 'utf8');
+// darwin：vm_stat 的 free + inactive + speculative + purgeable 页 × 页大小，对齐 Linux MemAvailable 口径（os.freemem() 只含 free 页，不用）
+function parseVmStat(text) {
+    const pageSize = Number((text.match(/page size of (\d+) bytes/) || [])[1]) || 4096;
+    const pages = (name) => Number((text.match(new RegExp('^' + name + ':\\s+(\\d+)', 'm')) || [])[1]);
+    const counts = ['Pages free', 'Pages inactive', 'Pages speculative', 'Pages purgeable'].map(pages);
+    if (counts.some(Number.isNaN)) return NaN;
+    return counts.reduce((a, b) => a + b, 0) * pageSize / 1024 / 1024 / 1024;
+}
+
+// darwin：sysctl -n vm.swapusage → "total = 2048.00M  used = 1024.00M  free = 1024.00M  (encrypted)"，取 free
+function parseSwapUsage(text) {
+    const m = text.match(/free\s*=\s*([0-9.]+)([KMGT])/);
+    if (!m) return NaN;
+    return Number(m[1]) * { K: 1 / 1024 / 1024, M: 1 / 1024, G: 1, T: 1024 }[m[2]];
+}
+
+// 取不到数值时返回 NaN，由 doctor 判为“无法判断、拒绝启动”（退出码 2）
+function readMeminfo(plat = platform()) {
+    if (plat === 'darwin') {
+        const vm = spawnSync('vm_stat', [], { encoding: 'utf8' });
+        const swap = spawnSync('sysctl', ['-n', 'vm.swapusage'], { encoding: 'utf8' });
+        return {
+            memAvailableGiB: !vm.error && vm.status === 0 ? parseVmStat(vm.stdout || '') : NaN,
+            swapFreeGiB: !swap.error && swap.status === 0 ? parseSwapUsage(swap.stdout || '') : NaN,
+            source: 'vm_stat + sysctl -n vm.swapusage',
+        };
+    }
+    let text = '';
+    try { text = fs.readFileSync('/proc/meminfo', 'utf8'); } catch (_) { return { memAvailableGiB: NaN, swapFreeGiB: NaN, source: '/proc/meminfo' }; }
     const pick = (key) => {
         const m = text.match(new RegExp('^' + key + ':\\s+(\\d+) kB', 'm'));
         return m ? Number(m[1]) : NaN;
@@ -92,10 +128,12 @@ function readMeminfo() {
     return {
         memAvailableGiB: pick('MemAvailable') / 1024 / 1024,
         swapFreeGiB: pick('SwapFree') / 1024 / 1024,
+        source: '/proc/meminfo',
     };
 }
 
 function readPsiFullAvg10(kind) {
+    if (platform() === 'darwin') return null; // macOS 没有 PSI
     try {
         const text = fs.readFileSync('/proc/pressure/' + kind, 'utf8');
         const m = text.match(/full avg10=([0-9.]+)/);
@@ -108,6 +146,15 @@ function readPsiFullAvg10(kind) {
 function describePid(pid) {
     let cwd = '';
     let cmd = '';
+    if (platform() === 'darwin') {
+        // 没有 /proc：lsof 取 cwd，ps 取命令行；取不到时字段为空并写明原因
+        const lsof = spawnSync('lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn'], { encoding: 'utf8' });
+        cwd = ((lsof.stdout || '').split('\n').find((l) => l.startsWith('n')) || '').slice(1);
+        const ps = spawnSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' });
+        cmd = (ps.stdout || '').trim();
+        if (!cwd && !cmd) cmd = '(lsof/ps 取不到：lsof 缺失、权限不足或进程已退出)';
+        return { pid, cwd, cmd };
+    }
     try { cwd = fs.readlinkSync('/proc/' + pid + '/cwd'); } catch (_) {}
     try { cmd = fs.readFileSync('/proc/' + pid + '/cmdline').toString('utf8').replace(/\0+/g, ' ').trim(); } catch (_) {}
     return { pid, cwd, cmd };
@@ -128,6 +175,17 @@ function portListeningProcFallback(port) {
 }
 
 function listListeners(port) {
+    if (platform() === 'darwin') {
+        // 没有 ss 与 /proc/net/tcp：lsof 列监听进程；lsof 缺失时端口状态无法判断
+        const res = spawnSync('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-Fp'], { encoding: 'utf8' });
+        if (res.error) return { listening: false, pids: [], source: 'lsof-missing', unavailable: true };
+        const pids = [];
+        for (const line of (res.stdout || '').split('\n')) {
+            const pid = line.startsWith('p') ? Number(line.slice(1)) : 0;
+            if (pid && !pids.some((p) => p.pid === pid)) pids.push(describePid(pid));
+        }
+        return { listening: pids.length > 0, pids, source: 'lsof' };
+    }
     const res = spawnSync('ss', ['-ltnpH', `( sport = :${port} )`], { encoding: 'utf8' });
     if (res.error || res.status !== 0) {
         return { listening: portListeningProcFallback(port), pids: [], source: 'proc-fallback' };
@@ -241,11 +299,13 @@ async function probeGateway(ip) {
 
 // ---------- whistle ----------
 
-function resolveWhistle(args) {
+function resolveWhistle(args, plat = platform()) {
     if (args.whistle) {
         const parts = String(args.whistle).split(':');
         return { host: parts[0], port: Number(parts[1] || WHISTLE_PORT) };
     }
+    // darwin / 普通 linux：whistle 跑在本机
+    if (plat !== 'wsl') return { host: '127.0.0.1', port: WHISTLE_PORT };
     // WSL2 NAT 模式下默认路由网关即 Windows 宿主机；宿主机 IP 会变，必须动态发现
     const res = spawnSync('ip', ['route', 'show', 'default'], { encoding: 'utf8' });
     const m = (res.stdout || '').match(/default\s+via\s+([0-9.]+)/);
@@ -382,7 +442,11 @@ async function runDoctor() {
     // 4 项之一：8116 端口（先查端口，供内存门禁判断是否为“复用”场景）
     const listeners = listListeners(DEV_PORT);
     let reuse = false;
-    if (!listeners.listening) {
+    let unreadable = false; // 功能入口的数值取不到：拒绝启动并退出码 2
+    if (listeners.unavailable) {
+        unreadable = true;
+        add('FAIL', 'port', `无法检查 ${DEV_PORT} 端口（来源:${listeners.source}，lsof 缺失），拒绝启动`);
+    } else if (!listeners.listening) {
         add('PASS', 'port', `${DEV_PORT} 空闲`);
     } else {
         const own = listeners.pids.find((p) => isProjectCwd(p.cwd));
@@ -419,7 +483,10 @@ async function runDoctor() {
     const mem = readMeminfo();
     const memText = `MemAvailable=${mem.memAvailableGiB.toFixed(2)} GiB, SwapFree=${mem.swapFreeGiB.toFixed(2)} GiB`
         + `（门禁: >= ${MIN_MEM_AVAILABLE_GIB} GiB / >= ${MIN_SWAP_FREE_GIB} GiB）`;
-    if (mem.memAvailableGiB >= MIN_MEM_AVAILABLE_GIB && mem.swapFreeGiB >= MIN_SWAP_FREE_GIB) {
+    if (Number.isNaN(mem.memAvailableGiB) || Number.isNaN(mem.swapFreeGiB)) {
+        unreadable = true;
+        add('FAIL', 'mem', `无法读取内存指标（来源 ${mem.source}），拒绝启动：取不到 MemAvailable/SwapFree 就无法判断冷启动是否安全`);
+    } else if (mem.memAvailableGiB >= MIN_MEM_AVAILABLE_GIB && mem.swapFreeGiB >= MIN_SWAP_FREE_GIB) {
         add('PASS', 'mem', memText);
     } else if (reuse) {
         add('WARN', 'mem', `${memText}。低于冷启动门禁，但本次将复用已有实例、不新增编译负载；请勿再并行启动 Maven/生产构建`);
@@ -431,7 +498,7 @@ async function runDoctor() {
     // PSI：memory/io 的 full avg10 > 5% 时警告
     for (const kind of ['memory', 'io']) {
         const avg10 = readPsiFullAvg10(kind);
-        if (avg10 === null) add('WARN', 'psi', `/proc/pressure/${kind} 不可读，跳过压力检查`);
+        if (avg10 === null) add('WARN', 'psi', platform() === 'darwin' ? `macOS 没有 PSI 指标（${kind}），跳过压力检查` : `/proc/pressure/${kind} 不可读，跳过压力检查`);
         else if (avg10 > MAX_PSI_FULL_AVG10) add('WARN', 'psi', `${kind} full avg10=${avg10}% 高于 ${MAX_PSI_FULL_AVG10}%，建议等压力回落，不与 Maven/生产构建并行`);
         else add('PASS', 'psi', `${kind} full avg10=${avg10}%`);
     }
@@ -450,14 +517,15 @@ async function runDoctor() {
     for (const row of rows) console.log(`  [${row.level}] ${row.name}: ${row.msg}`);
     const failed = rows.some((row) => row.level === 'FAIL');
     console.log(failed ? '结论: 存在 FAIL，禁止冷启动。' : (reuse ? '结论: 全绿（已有健康实例，start 将复用）。' : '结论: 全绿，可以启动。'));
-    return { failed, reuse, rows };
+    return { failed, reuse, rows, unreadable };
 }
 
 // ---------- 子命令 ----------
 
 async function cmdDoctor() {
     const result = await runDoctor();
-    if (result.failed) process.exitCode = 1;
+    if (result.unreadable) process.exitCode = 2;
+    else if (result.failed) process.exitCode = 1;
 }
 
 async function cmdStart() {
@@ -659,6 +727,8 @@ if (require.main === module) {
 
 module.exports = {
     parseArgs,
+    parseSwapUsage,
+    parseVmStat,
     pickTargetGroup,
     probeGateway,
     resolveWhistle,

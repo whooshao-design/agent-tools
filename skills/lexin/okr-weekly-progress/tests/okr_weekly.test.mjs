@@ -6,7 +6,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { archivePlan, cnDate, collectRequirementDocs, gitRepos, overlaps, pickWeeklyReport, weekWindow } from '../scripts/lib/collect.mjs';
+import { AUTHOR_ENV, archivePlan, cnDate, collectRequirementDocs, gitRepos, overlaps, pickWeeklyReport, resolveAuthor, weekWindow } from '../scripts/lib/collect.mjs';
+import { spawnSync } from 'node:child_process';
 import { buildRequest, changedSince, normalizeDetail, parseLecoTime, restoreRequest, verifyAfterWrite } from '../scripts/lib/payload.mjs';
 
 const ARCHIVE = `# 周工作汇总 2026-10-12 ~ 10-16
@@ -209,4 +210,27 @@ test('collectRequirementDocs lists stage dates only for requirements touched thi
     ]);
     assert.equal(collectRequirementDocs(path.join(root, 'missing'), window).status, 'error');
   } finally { fs.rmSync(root, { recursive: true, force: true }) }
+});
+
+test('resolveAuthor: --author, then OKR_WEEKLY_AUTHOR, otherwise AUTHOR_REQUIRED', () => {
+  assert.equal(resolveAuthor({ author: 'alice' }, {}), 'alice');
+  assert.equal(resolveAuthor({}, { [AUTHOR_ENV]: ' bob ' }), 'bob');
+  assert.throws(() => resolveAuthor({}, {}), (e) => e.code === 'AUTHOR_REQUIRED' && /with-env/.test(e.message));
+  assert.throws(() => resolveAuthor({}, { [AUTHOR_ENV]: '' }), (e) => e.code === 'AUTHOR_REQUIRED');
+});
+
+test('bin/with-env loads OKR_WEEKLY_AUTHOR from the credentials file', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'okr-with-env-'));
+  try {
+    const envFile = path.join(dir, 'credentials.env');
+    fs.writeFileSync(envFile, `${AUTHOR_ENV}=alice\n`, { mode: 0o600 });
+    const repo = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../../..');
+    const run = spawnSync(path.join(repo, 'bin/with-env'), ['node', '-e', `console.log(process.env.${AUTHOR_ENV} || '')`], {
+      encoding: 'utf8', env: { ...process.env, AGENT_TOOLS_ENV_FILE: envFile, [AUTHOR_ENV]: '' },
+    });
+    assert.equal(run.status, 0, run.stderr);
+    assert.equal(run.stdout.trim(), 'alice');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

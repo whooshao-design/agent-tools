@@ -1,25 +1,36 @@
 #!/usr/bin/env node
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
+// agent-tools bootstrap（模板 lib/agent_tools/bootstrap.js，lint 规则六校验逐字一致）
+const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
+// probe 返回 'hit' | 'miss' | <异常码>：与 locate.py 同序先看 install.py（缺失即 miss），再看 skills/；用会抛错的 statSync，不用对一切错误都返回 false 的 existsSync
+const probe = (d) => { if (!d) return 'miss'; try { const i = fs.statSync(path.join(d, 'install.py'), { throwIfNoEntry: false }); if (!i || !i.isFile()) return 'miss'; const s = fs.statSync(path.join(d, 'skills'), { throwIfNoEntry: false }); return s && s.isDirectory() ? 'hit' : 'miss'; } catch (e) { return e.code || 'error'; } };
+const tried = []; let root = '', r = 'miss';
+try { let d = fs.realpathSync(__dirname); tried.push(`上溯起点 ${d}`); while ((r = probe(d)) === 'miss' && path.dirname(d) !== d) d = path.dirname(d); if (r === 'hit') root = d; else tried[0] += r === 'miss' ? ' 未命中有效根（install.py 文件 + skills/ 目录）' : ` ${r}（放弃上溯）`; }
+catch (e) { tried.push(`上溯起点 ${__dirname} ${e.code || e.message}`); }
+if (!root) { const v = process.env.AGENT_TOOLS_ROOT || ''; r = probe(v); tried.push(`AGENT_TOOLS_ROOT=${v || '<unset>'}${r === 'hit' || r === 'miss' ? '' : ' ' + r}`); if (r === 'hit') root = v; }
+if (!root) { const p = path.join(os.homedir(), '.config/agent-tools/root'); try { const v = fs.readFileSync(p, 'utf8').trim(); r = probe(v); tried.push(`${p} = ${v}${r === 'hit' || r === 'miss' ? '' : ' ' + r}`); if (r === 'hit') root = v; } catch (e) { tried.push(`${p} ${e.code === 'ENOENT' ? '<absent>' : e.code}`); } }
+if (!root) { console.error(['agent-tools: 未找到仓库根', ...tried, '请在仓库目录运行 python3 install.py'].join('\n')); process.exit(2); }
+// agent-tools bootstrap end
 const { createRequire } = require('module');
+const { skillDir, browserRuntime } = require(path.join(root, 'lib/agent_tools/locate.js'));
+const SESSION_SCRIPTS = skillDir('get-browser-session', 'scripts');
 const {
   buildBrowserEnv,
   chromiumArgsFor,
   validateWebShellUrl,
-} = require('../../get-browser-session/scripts/browser_network');
-const { launchLockedContext, launchReadOnlyContext } = require('../../get-browser-session/scripts/browser_session');
-const sessionCache = require('../../get-browser-session/scripts/session_cache');
+} = require(path.join(SESSION_SCRIPTS, 'browser_network'));
+const { launchLockedContext, launchReadOnlyContext } = require(path.join(SESSION_SCRIPTS, 'browser_session'));
+const sessionCache = require(path.join(SESSION_SCRIPTS, 'session_cache'));
 
-const TOOL_DIR = path.join(os.homedir(), 'tools/lexiao-browser');
-const CHROME_PATH = path.join(TOOL_DIR, 'browsers/chrome-linux64/chrome');
-const RUNTIME_LIB_DIR = path.join(TOOL_DIR, 'runtime-libs/usr/lib/x86_64-linux-gnu');
-const chromium = createRequire(path.join(TOOL_DIR, 'package.json'))('playwright').chromium;
+let RUNTIME;
+try { RUNTIME = browserRuntime(); } catch (error) { console.error(error.message); process.exit(2); }
+const CHROME_PATH = RUNTIME.executablePath;
+const RUNTIME_LIB_DIR = RUNTIME.runtimeLibDir;
+const chromium = createRequire(path.join(RUNTIME.toolDir, 'package.json'))('playwright').chromium;
 
 const LEXIAO_URL = 'https://lexiao.oa.fenqile.com/#/new-workbench';
 const API_BASE = 'https://lexiao-api.oa.fenqile.com';
 const DEFAULT_PROFILES = [
-  '/home/joney/.local/state/agent-tools/browser-profiles/healthy',
+  path.join(os.homedir(), '.local/state/agent-tools/browser-profiles/healthy'),
   path.join(os.homedir(), '.local/state/agent-tools/browser-profiles/main'),
 ];
 const DEFAULT_ENV = 'pre';
@@ -52,7 +63,7 @@ Defaults:
   --app       omitted -> infer application.name from current directory
   --env       omitted -> pre
   --type      omitted -> all
-  --profile   omitted -> try /home/joney/.local/state/agent-tools/browser-profiles/healthy, then ~/.local/state/agent-tools/browser-profiles/main
+  --profile   omitted -> try ~/.local/state/agent-tools/browser-profiles/healthy, then ~/.local/state/agent-tools/browser-profiles/main
 
 Options:
   --app          Lexiao app name, app_name, or project_name

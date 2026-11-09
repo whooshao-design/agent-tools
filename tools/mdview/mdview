@@ -1,3 +1,5 @@
 #!/usr/bin/env bash
-# mdview 启动入口；~/.local/bin/mdview 是指向本文件的符号链接
-exec node "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/server.mjs" "$@"
+# mdview 启动入口；~/.local/bin/mdview 是指向本文件的符号链接。
+# 用 node 求真实路径：macOS 12.3 之前的 readlink 不支持 -f。
+SELF="$(node -p 'require("fs").realpathSync(process.argv[1])' "${BASH_SOURCE[0]}")"
+exec node "$(dirname "$SELF")/server.mjs" "$@"

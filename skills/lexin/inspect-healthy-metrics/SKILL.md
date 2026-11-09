@@ -2,7 +2,7 @@
 name: inspect-healthy-metrics
 description: 只读查看 Healthy/雷神/Nightingale 指标上报状态。Use when 用户要求确认指标是否有数据、最近是否正常上报、批量检查 stable 或线上指标、按 metric 列表或 app+suffix 展开查询 Prometheus 样本、区分未注册/无数据/已过期/正常上报。
 metadata:
-  version: 1.1.3
+  version: 1.1.4
 ---
 
 # inspect-healthy-metrics
@@ -18,7 +18,7 @@ metadata:
 - `healthy-dashboard-config`：用于大盘配置，不用于单指标上报排查。
 
 MCP 优先、脚本兜底：批量 PromQL 使用 `healthy_query_metrics`，指标注册状态和新鲜度分类用下文正式脚本。旧 MCP 进程需重启才能加载新增入口，期间直接调用正式脚本；不要复制临时 Node/Python/curl 客户端。
-登录态失效时复用 `get-browser-session` 刷新同一 profile；默认使用持久的 `/home/joney/.local/state/agent-tools/browser-profiles/healthy`，不要每次新建 profile。
+登录态失效时复用 `get-browser-session` 刷新同一 profile；默认使用持久的 `~/.local/state/agent-tools/browser-profiles/healthy`，不要每次新建 profile。
 
 ## 环境
 
@@ -50,13 +50,13 @@ GET  /api/n9e/metric-manage?query=<metric>&exporter_type=&p=1&limit=15
 脚本路径：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/inspect-healthy-metrics/scripts/inspect_metrics.js
+node scripts/inspect_metrics.js
 ```
 
 离线展开指标，不访问接口：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/inspect-healthy-metrics/scripts/inspect_metrics.js \
+node scripts/inspect_metrics.js \
   --env stable \
   --apps server_hawk_decision_dispatcher,server_hawk_decision_dispatcher_ec \
   --suffixes dubbo_active_count,dubbo_pool_size \
@@ -66,43 +66,43 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/inspect-healthy-metrics/sc
 检查指定指标：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/inspect-healthy-metrics/scripts/inspect_metrics.js \
+node scripts/inspect_metrics.js \
   --env stable \
   --metrics fql_fk_server_hawk_decision_dispatcher_dubbo_active_count \
   --range 30m \
   --lookback 2h \
   --freshness 10m \
-  --profile /home/joney/.local/state/agent-tools/browser-profiles/healthy \
+  --profile ~/.local/state/agent-tools/browser-profiles/healthy \
   --check-registry
 ```
 
 按应用和 suffix 批量展开：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/inspect-healthy-metrics/scripts/inspect_metrics.js \
+node scripts/inspect_metrics.js \
   --env stable \
   --apps server_hawk_decision_dispatcher,server_hawk_decision_dispatcher_ec,server_hawk_decision_dispatcher_batch,server_hawk_decision_dispatcher_simulate \
   --suffixes dubbo_active_count,dubbo_pool_size,dubbo_queue_size,dubbo_queue_remaining_capacity \
   --range 30m \
   --lookback 2h \
   --freshness 10m \
-  --profile /home/joney/.local/state/agent-tools/browser-profiles/healthy \
+  --profile ~/.local/state/agent-tools/browser-profiles/healthy \
   --check-registry
 ```
 
 直接执行 PromQL：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/inspect-healthy-metrics/scripts/inspect_metrics.js \
+node scripts/inspect_metrics.js \
   --env prod \
-  --profile /home/joney/.local/state/agent-tools/browser-profiles/healthy \
+  --profile ~/.local/state/agent-tools/browser-profiles/healthy \
   --promql 'count(up)'
 ```
 
 批量查询（`env` 是站点，预发布使用 prod；`expr` 内的标签筛选才是数据环境）：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/inspect-healthy-metrics/scripts/inspect_metrics.js \
+node scripts/inspect_metrics.js \
   --env=prod --queries-json='[{"name":"预发布实例数","expr":"count(up{env=\"pre\"})"}]' \
   --query-type=range --range=30m --step=60s --output=/tmp/healthy-query-results.json
 ```

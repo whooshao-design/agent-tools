@@ -1,0 +1,23 @@
+{
+  "_doc": "bastion_dba MCP 注册所用的 DBA 堡垒机配置模板（CHG-014）：cp config.dba.json.example config.dba.json 后填写。字段同 config.json.example，install.py --with-mcp 把 BASTION_CONFIG=<仓库根>/mcp/bastion-mcp/config.dba.json 写进 bastion_dba 的注册项。本文件已 gitignore，真实凭证不会入库。",
+  "bastion_host": "dba.ssh.jumpserver.fenqile.cn",
+  "bastion_port": 39000,
+  "username": "your_username",
+  "password": "",
+  "pem_path": "/path/to/your_dba_key.pem",
+  "keepalive_ip": "10.xx.xx.xx",
+  "keepalive_interval": 30,
+  "idle_cmd_interval": 60,
+  "shell_timeout": 10,
+  "connect_timeout": 15,
+  "allowed_sudo_users": [],
+  "clickhouse": {
+    "tool_ip": "10.xx.xx.xx",
+    "client": "/usr/bin/clickhouse-client",
+    "host": "10.xx.xx.xx",
+    "port": 10000,
+    "user": "readonly_user",
+    "password": "",
+    "database": "default"
+  }
+}

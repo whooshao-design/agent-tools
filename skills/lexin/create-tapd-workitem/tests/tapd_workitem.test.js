@@ -25,8 +25,8 @@ test('validateBugSpec rejects missing or malformed keys', () => {
 });
 
 test('keepAccountTokens drops prefix matches added by the user chooser', () => {
-  assert.equal(keepAccountTokens('jojoduan段艳会;joneyshao邵鹏;', 'joneyshao'), 'joneyshao邵鹏;');
-  assert.equal(keepAccountTokens('', 'joneyshao'), '');
+  assert.equal(keepAccountTokens('lisi李四;zhangsan张三;', 'zhangsan'), 'zhangsan张三;');
+  assert.equal(keepAccountTokens('', 'zhangsan'), '');
 });
 
 test('matchOption accepts option value or visible text, nothing else', () => {

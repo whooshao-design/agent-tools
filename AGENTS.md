@@ -26,10 +26,11 @@ agent-tools/
 │   └── third-party-mcp/ # 第三方通用 MCP wrapper/remote 配置（Context7、GitHub、Lark、MarkItDown、Sonatype）
 ├── tools/mdview/        # 本地 Markdown/HTML 查看器（含文档评论，`mdview comments` 供 agent 读写），见其 README
 ├── bin/                 # with-env、toolchain_audit.py（双端只读盘点）、skill_routing_eval.py / skill_behavior_eval.py（skill 评测）
-├── env/                 # 公共凭证 credentials.env（gitignore）与模板 credentials.env.example
+├── env/                 # 公共凭证 credentials.env、本机配置 local.env、全局指令 overlay AGENTS.local.md（都 gitignore）与各自的 *.example 模板
 ├── evals/               # skill 评测：cases/<skill>.json 触发/路由用例与行为压力用例（README 说明三层）
-├── tests/               # 仓库级测试：install.py、toolchain_audit、dev-workflow 契约一致性、skill 结构 lint 与路由评测
-├── AGENTS.global.md     # 全局用户级指令源文件，--with-global 链接为 ~/.codex/AGENTS.md 与 ~/.claude/CLAUDE.md
+├── lib/agent_tools/     # 仓库根 / skill 目录 / 本机配置变量 / 平台 / 浏览器运行时定位库（locate.js、locate.py）与三份引导代码模板 bootstrap.{js,mjs,py}
+├── tests/               # 仓库级测试：install.py、toolchain_audit、dev-workflow 契约一致性、skill 结构 lint（含六条可移植规则）与路由评测
+├── AGENTS.global.md     # 全局用户级指令源文件，--with-global 渲染（填占位符、追加 env/AGENTS.local.md）为 ~/.codex/AGENTS.md 与 ~/.claude/CLAUDE.md
 ├── docs/                # 维护用长文（含 skill-gaps.md 缺口清单）：design-basis 三份评估与旧模板；reviews/ 外部仓库评估、试点与 codex 全量 skill 评审记录。不随 skill 链接到客户端
 ├── install.py           # 符号链接安装脚本（claude + codex 双目标）
 └── AGENTS.md            # 本文件（主文档）
@@ -42,7 +43,8 @@ python3 install.py            # 符号链接安装到 ~/.claude/skills 和 ~/.co
 python3 install.py --copy     # 复制模式兜底（符号链接不可用时）
 python3 install.py --with-subagents  # 额外安装 reviewer agents 与结果守卫 hook
 python3 install.py --with-subagents --dry-run
-python3 install.py --with-global    # 额外把 AGENTS.global.md 链接为双端全局指令
+python3 install.py --with-global    # 额外把 AGENTS.global.md 渲染（替换 {{AGENT_TOOLS_ROOT}} 等占位符、追加 env/AGENTS.local.md）为双端全局指令副本
+python3 install.py --with-mcp       # 额外在两端注册 devtools / bastion / bastion_dba MCP（PYTHONPATH、BASTION_CONFIG 指向本仓库）
 python3 install.py --with-session-cleanup  # 额外给 Claude 加 SessionEnd hook，会话结束删除自己的 /tmp/claude-<uid>/*/<session-id>/
 python3 install.py --list     # 查看分类与技能
 python3 install.py --with-subagents --uninstall
@@ -51,7 +53,8 @@ python3 install.py --with-subagents --uninstall
 - 符号链接已实测可用：Claude Code（2026-06 验证）与 Codex 都能发现 skill 目录下的符号链接。
   早期"符号链接不可靠"的结论已过时。
 - 本仓库使用符号链接分发；不要手动修改 `~/.claude/plugins/local/` 或插件缓存来注册插件。需要插件打包时按当前客户端官方 CLI 与 manifest 约定另行实施，不沿用历史手工注册方式。
-- 全局指令只改仓库里的 `AGENTS.global.md`，不要直接改 `~/.codex/AGENTS.md` 或 `~/.claude/CLAUDE.md`；目标已存在且不归安装器所有时会跳过，先备份移走再装。
+- 全局指令只改仓库里的 `AGENTS.global.md`（本机专属段落放 `env/AGENTS.local.md`），不要直接改 `~/.codex/AGENTS.md` 或 `~/.claude/CLAUDE.md`：它们是渲染副本，改源文件后重跑 `--with-global`；目标已存在且不归安装器所有时记未收敛、退出码 1，`--force` 才替换。
+- 每次安装都把仓库根与 `env/local.env` 的四个本机配置键写进 `~/.claude/settings.json` 的 `env`、`~/.codex/config.toml` 的 `[shell_environment_policy.set]` 标记块和指针文件 `~/.config/agent-tools/root`；脚本经 `lib/agent_tools` 按“上溯 → `AGENT_TOOLS_ROOT` → 指针文件”找仓库根。新机器步骤见 `docs/setup-new-machine.md`。
 - `--with-subagents` 只合并 owner 为 `agent-tools-subagent-result-v1` 的 `SubagentStop` handler，
   不覆盖其他 settings/hooks；Codex 的 hook 信任由用户在 `/hooks` 中审查，安装器不代替确认。
 - settings/hooks JSON 本身是符号链接时安装器会拒绝写入，避免破坏 dotfiles 管理关系。
@@ -65,7 +68,7 @@ python3 install.py --with-subagents --uninstall
 测试只用标准库 `unittest` 和 Node 内置 `node:test`；不依赖 pytest（当前 Python 环境也未安装），仓库没有统一的 lint 配置。
 
 ```bash
-python3 -m unittest discover -s tests                    # 仓库级：install.py、bin/toolchain_audit.py、dev-workflow 契约一致性、skill 结构 lint（description 含 Use when、引用与绝对路径存在、改内容必 bump version）、skill 路由评测
+python3 -m unittest discover -s tests                    # 仓库级：install.py、bin/toolchain_audit.py、dev-workflow 契约一致性、skill 结构 lint（description 含 Use when、改内容必 bump version、六条可移植规则：本机路径与标识符、`$AGENT_TOOLS_ROOT` 引用存在、`scripts/` `references/` 相对引用存在、脚本跨 skill 经 `skillDir()`、浏览器路径字面量、引导代码与模板一致；未设 `AGENT_TOOLS_LINT_ENFORCE=1` 时只打印命中）、skill 路由评测
 python3 bin/skill_routing_eval.py [--probe "一句话"]        # skill 触发/路由评测报告；行为评测见 evals/README.md（花 token，不进单测）
 python3 -m unittest discover -s hooks/tests              # SubagentStop 结果守卫
 python3 -m unittest discover -s mcp/devtools-mcp/tests   # devtools_mcp（测试自行把包目录加入 sys.path）
@@ -81,7 +84,7 @@ python3 -m unittest discover -s skills/lexin/get-browser-session/tests -p 'test_
 - `skills/common/convert-epub-to-markdown/scripts/test_convert_epub.py` 依赖 `markdownify` 等第三方包，系统 Python 未安装；
   按该 SKILL.md 建 venv 安装 `requirements.txt` 后，在 `scripts/` 目录内运行。
 - 新建或修改 skill 后用系统校验器检查 frontmatter：
-  `python3 /home/joney/.codex/skills/.system/skill-creator/scripts/quick_validate.py <skill-dir>`。
+  `python3 ~/.codex/skills/.system/skill-creator/scripts/quick_validate.py <skill-dir>`。
 - `python3 bin/toolchain_audit.py`（`--json` 输出脱敏明细）只读盘点双端 skill 链接、MCP 注册和缺失环境变量，不联网。
 
 ## 独立评审约定
@@ -131,15 +134,16 @@ metadata:
 
 - `agents/openai.yaml` 是 Codex 附加配置，Claude 忽略它，随 skill 目录一起维护。
 - 不再使用顶层 `version` 字段；系统自带 `quick_validate.py` 不接受该字段。
-- SKILL.md 中引用脚本一律使用仓库绝对路径
-  （如 `/home/joney/projects/ai/agent-tools/skills/lexin/test-dubbo-api/scripts/dubbo_request.py`），
-  不要写 `~/.claude/skills` 或 `~/.codex/skills`——两端符号链接共用同一份文件。
+- 引用分三层：skill 内文件写相对引用（`scripts/dubbo_request.py`、`references/x.md`）；跨 skill 与仓库级文件写
+  `$AGENT_TOOLS_ROOT/skills/<分类>/<skill>/...`、`$AGENT_TOOLS_ROOT/bin/...`；脚本代码不拼路径，复制 `lib/agent_tools/bootstrap.{js,mjs,py}`
+  的引导代码块后用 `skillDir()` / `repoRoot()`。不写本机绝对路径、`~/.claude/skills` 或 `~/.codex/skills`（lint 规则一～四、六拦截）。
 - skill 与 MCP 同能力双轨时，正文需注明"MCP 优先、脚本兜底"。
 
 ## MCP 注册
 
-两端注册分别在 `~/.claude.json`（`claude mcp add --scope user`）和 `~/.codex/config.toml`，
-PYTHONPATH 都指向本仓库内对应 MCP 目录。新增 MCP 服务器后需要在两处各加一条注册。
+`python3 install.py --with-mcp` 在两端注册 `devtools`、`bastion`、`bastion_dba`（Claude 经 `claude mcp add --scope user` 写 `~/.claude.json`，
+Codex 经 `codex mcp add` 写 `~/.codex/config.toml`），`PYTHONPATH` 与 `BASTION_CONFIG` 指向本仓库；已有不同身份的同名注册记未收敛，`--force` 替换并备份，
+`--uninstall` 恢复。新增 MCP 服务器后在 `install.py` 的 `_mcp_targets()` 加一条。
 
 模块调用形式：`python3 -m devtools_mcp.aggregate_server`、`python3 -m bastion_mcp.server`。
 `devtools_mcp` 的 16 个 server 合并注册为一个 `devtools` MCP：每个 CLI 会话原本要起 16 个 Python 进程，

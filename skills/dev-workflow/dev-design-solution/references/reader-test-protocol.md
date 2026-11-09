@@ -33,7 +33,7 @@
 
 ## 4. agent 读者
 
-- 新会话，与设计方不同的模型。模型对自己写的文本有系统性偏好，同模型读自己的方案会高估可读性。优先选实测能发现结构问题的后端，选模用 `python3 /home/joney/projects/ai/agent-tools/skills/common/build-codeagent/scripts/pick_agent.py quick-check --task <task_id>` 预览（只预览，不登记参与历史）。
+- 新会话，与设计方不同的模型。模型对自己写的文本有系统性偏好，同模型读自己的方案会高估可读性。优先选实测能发现结构问题的后端，选模用 `python3 $AGENT_TOOLS_ROOT/skills/common/build-codeagent/scripts/pick_agent.py quick-check --task <task_id>` 预览（只预览，不登记参与历史）。
 - 工具面只有 Read，工作目录只含 `solution.md` 副本，不联网、不写文件、不委派。
 - 提示词固定为本文件第 6 节的模板；每问回答不超过两句，附一句逐字引用和所在标题，找不到就写"找不到"。
 - 输出只有一个 JSON 代码块；原始输出原样保存为 `reader-test/agent-v<N>.raw.json`，逐行 JSON 的输出（Claude 侧 `stream-json`、Codex 侧 `--json`）用 `.raw.jsonl`。

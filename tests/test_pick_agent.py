@@ -282,7 +282,7 @@ class PickAgentTest(unittest.TestCase):
         self.routing["invocation"]["claude_review"] = "review {backend} at {material}"
         self.assertEqual(self.call(material="some path")["command"], "review claude-vps at 'some path'")
         result = self.call(exclude="claude-vps,claude-qwen", material="/tmp/mat")
-        self.assertIn("/home/joney/bin/codex-reviewer", result["command"])
+        self.assertIn("$AGENT_TOOLS_ROOT/bin/codex-reviewer", result["command"])
 
     def test_bad_exclusion_backend_and_replacement_reason_are_rejected(self):
         for kwargs in ({"exclude": "unknown"}, {"record": "unknown"},

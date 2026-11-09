@@ -8,8 +8,9 @@
 mdview [文件或目录] [-p 端口] [--no-open] [--new] [--idle 分钟]
 ```
 
-- `~/.local/bin/mdview` 是指向 `tools/mdview/mdview` 的符号链接。
-- 常驻方式：`systemd/mdview.socket` 监听 `127.0.0.1:8321`，访问时按需拉起 `systemd/mdview.service`（根目录 `~/docs`，空闲 30 分钟退出）。修改单元后复制到 `~/.config/systemd/user/`，再 `systemctl --user daemon-reload && systemctl --user stop mdview.service`，下次访问即用新代码。
+- 安装：`bash tools/mdview/install.sh`。它把 `~/.local/bin/mdview` 链到 `tools/mdview/mdview`；Linux/WSL 另按模板 `systemd/mdview.service.in` 生成 `~/.config/systemd/user/mdview.service`（填入 `command -v node`、仓库根、`lib/agent_tools` 的 `docsRoot()`，即 `AGENT_TOOLS_DOCS_ROOT` 或 `~/docs`）并启用 `mdview.socket`；macOS 没有 systemd，只装链接，`mdview <文件>` 前台运行。
+- 常驻方式（Linux/WSL）：`mdview.socket` 监听 `127.0.0.1:8321`，访问时按需拉起 `mdview.service`（空闲 30 分钟退出）。改了单元模板或代码后重跑 `install.sh`，下次访问即用新代码。
+- 平台分支：打开浏览器在 wsl 走 `powershell.exe Start-Process`（PATH 查不到时用 Windows 系统目录下的绝对路径兜底），darwin / linux 经 `lib/agent_tools` 的 `openExternal()`（`open` / `xdg-open`，可用 `AGENT_TOOLS_OPEN_CMD` 覆盖）；「用 VS Code 打开」取 `MDVIEW_CODE_CLI` 或 PATH 里的 `code`；「导出到 Windows 剪贴板」只在 wsl 可用，其他平台返回 `{error: 'wsl only'}`。
 - `vendor/` 是离线依赖：marked 15.0.12、highlight.js 11.12.0、mermaid 11.17.0。
 
 ## 评论

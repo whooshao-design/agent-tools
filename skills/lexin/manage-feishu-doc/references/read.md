@@ -1,6 +1,6 @@
 # 读取飞书文档
 
-`S=/home/joney/projects/ai/agent-tools/skills/lexin/manage-feishu-doc/scripts/feishu_doc.mjs`
+`S=scripts/feishu_doc.mjs`
 
 ## 选哪个命令
 

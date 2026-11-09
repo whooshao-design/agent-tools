@@ -2,7 +2,7 @@
 name: dev-derive-test-cases
 description: Use when 技术方案已评审通过，需要基于原始需求、验收标准、方案审批结论和代码基线编写可追踪、可独立复核的测试清单，作为编码与验证的共同依据。
 metadata:
-  version: 1.9.0
+  version: 1.9.1
 ---
 
 # dev-derive-test-cases
@@ -15,7 +15,7 @@ metadata:
 
 ## 默认产物目录
 
-正式测试清单默认放到 `/home/joney/docs/requirements-development/<requirement-name>/test-cases/test-cases.md`。
+正式测试清单默认放到 `~/docs/requirements-development/<requirement-name>/test-cases/test-cases.md`。
 
 - `<requirement-name>` 与方案使用同一需求目录；用户指定路径时优先使用
 - 仅需对话输出时不创建文件；落盘时使用 `references/test-cases-template.md`
@@ -30,7 +30,7 @@ metadata:
 
 ## 输入契约
 
-开始编写前按 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/artifact-identity.md` 固定以下输入；关键项缺失时列为材料缺口，不用猜测补齐：
+开始编写前按 `$AGENT_TOOLS_ROOT/skills/dev-workflow/references/artifact-identity.md` 固定以下输入；关键项缺失时列为材料缺口，不用猜测补齐：
 
 - 完整需求身份 `R`，以及稳定的需求/验收标准 ID
 - 完整方案身份 `S`，以及绑定 `(R,S,B)` 的明确评审结论；方案未通过时先转 `dev-review-solution`
@@ -74,7 +74,7 @@ metadata:
 
 ## 输出要求
 
-表达遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/writing-principles.md`，名称与准确性按其 2.1 节逐条自检。检查项写出操作的对象、输入和预期结果，不用"正确处理""行为一致"这类无法判定的说法。
+表达遵循 `$AGENT_TOOLS_ROOT/skills/dev-workflow/references/writing-principles.md`，名称与准确性按其 2.1 节逐条自检。检查项写出操作的对象、输入和预期结果，不用"正确处理""行为一致"这类无法判定的说法。
 
 默认输出输入绑定、三向追踪矩阵、测试清单、覆盖汇总和缺口清单。合格产物应满足：
 

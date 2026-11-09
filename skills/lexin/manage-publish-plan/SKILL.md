@@ -2,7 +2,7 @@
 name: manage-publish-plan
 description: 在乐信发布系统 publish3（publish3.oa.fenqile.com）为乐效流程需求新建“普通应用发布”前端发布计划，或修改尚未提交审批（待审批、列表有“修改”按钮）的计划的版本描述与通知方式；先用历史计划取默认值并经用户确认，按前端发布指南模板写版本描述并检查是否混入后端事项，先 dry-run 预览再保存，写后回读校验，复用 get-browser-session 浏览器登录态。另按 references/backend-plan-doc.md 撰写 TQM 发布计划评审“发布方案（后台）”飞书文档的后端发布内容。Use when 用户要求在 publish3 建发布计划、给需求建前端发布计划、建计划前给前端工程建乐效 Phabricator CR 或查 CR 状态、修改发布计划的版本描述、查看自己的历史发布计划或某个计划详情、查看业务名对应的审批人选项、编写后端发布方案（应用/配置发布顺序、回退、灰度）；不负责 publish3 后端计划（后续补充）、发布申请、删除计划、发布单、打包推送，也不负责乐效集成部署或 Hippo 配置。
 metadata:
-  version: 1.3.2
+  version: 1.3.3
 ---
 
 # manage-publish-plan
@@ -34,14 +34,14 @@ metadata:
 ## 脚本
 
 ```bash
-S=/home/joney/projects/ai/agent-tools/skills/lexin/manage-publish-plan/scripts/publish_plan.js
+S=scripts/publish_plan.js
 node $S history [--creator=<OA用户名>] [--limit=N]      # 默认当前登录用户、最近 10 条
 node $S options [--biz=<业务名>]                         # 不传 --biz 列出全部业务名
 node $S show    --id=<计划ID>
 node $S create  --file=<plan.json> [--dry-run] [--allow-backend-terms] [--screenshot-dir=<dir>]
 node $S modify  --id=<计划ID> --file=<patch.json> [--dry-run] [--allow-backend-terms] [--screenshot-dir=<dir>]
 
-CR=/home/joney/projects/ai/agent-tools/skills/lexin/manage-publish-plan/scripts/lexiao_cr.js
+CR=scripts/lexiao_cr.js
 node $CR list   [--demand=<TAPD ID>] [--project=<工程名>] [--limit=N]
 node $CR create --repo=<本地仓库> --demand=<TAPD ID> --group=<GitLab组> --project=<工程名> \
                 --branch=<评审分支> --compare=<对比分支> --reviewers=<a,b> [--cc=<a,b>] [--dry-run]
@@ -65,7 +65,7 @@ node $CR create --repo=<本地仓库> --demand=<TAPD ID> --group=<GitLab组> --p
 
 ## 工作流
 
-1. 读发布指南模板。前端发布指南在飞书 wiki `https://lexin.feishu.cn/wiki/DrOFwKwq0iiKqvk1603cKrCmnHk`，第 7.1 节“新建审批单”给出版本描述模板。用 `manage-feishu-doc` 读取：`node /home/joney/projects/ai/agent-tools/skills/lexin/manage-feishu-doc/scripts/feishu_doc.mjs read --target=<链接> --scope=keyword --keyword='新建审批单' --context-after=40`。读不到时以示例 plan.json 的 7 段结构为准。
+1. 读发布指南模板。前端发布指南在飞书 wiki `https://lexin.feishu.cn/wiki/DrOFwKwq0iiKqvk1603cKrCmnHk`，第 7.1 节“新建审批单”给出版本描述模板。用 `manage-feishu-doc` 读取：`node $AGENT_TOOLS_ROOT/skills/lexin/manage-feishu-doc/scripts/feishu_doc.mjs read --target=<链接> --scope=keyword --keyword='新建审批单' --context-after=40`。读不到时以示例 plan.json 的 7 段结构为准。
 2. 取默认值：跑 `history`，把最近计划的业务名（列表里显示的是 bizLine，例如“风控业务线”；表单要选中心名，例如“风控研发中心”）、approvers、通知方式列给用户确认。拿不准时用 `options --biz=<业务名>` 看可选项。同时询问“是否已发送发布周知”。
 3. 建 CR（必须在需求分支合入 product 之前）：先把 `origin/product` 合入需求分支并推送；`lexiao_cr.js list --demand=<ID> --project=<前端工程>` 看本分支是否已有记录。没有时用 `list --project=<前端工程>` 取最近的评审人、抄送人给用户确认，跑 `create ... --dry-run` 核对表单，用户同意后去掉 `--dry-run` 创建；按 list 结果填“CR情况”。
 4. 区分前端和后端：每份计划只写本端内容。后端事项（Hippo、后端应用、配置、数据库）留给后端计划，前端描述里最多写一句发布先后依赖。
@@ -78,7 +78,7 @@ node $CR create --repo=<本地仓库> --demand=<TAPD ID> --group=<GitLab组> --p
 
 ## plan.json 字段
 
-示例：`/home/joney/projects/ai/agent-tools/skills/lexin/manage-publish-plan/references/plan.frontend.example.json`（需求 1426731 / web_mihawk_oa）。示例的 `onlineDate` 已过期时，换成真实上线日期再用。
+示例：`references/plan.frontend.example.json`（需求 1426731 / web_mihawk_oa）。示例的 `onlineDate` 已过期时，换成真实上线日期再用。
 
 | 字段 | 必填 | 说明 |
 |---|---|---|
@@ -106,7 +106,7 @@ patch.json 只允许 `description`、`notify` 两个字段，写法同上。
 - 上线日期决定发布类型：页面按日期调 `publishWindow/getPublishType`，日期不在正常发布窗口时（2026-10-21 实测，2026-10-23 周五）会切成紧急发布，多出“紧急原因类型”“总监审批”“抄送GM”字段。脚本检测到这种情况就停止，提示换日期或由用户在页面上走紧急发布。
 - 计划有效期是上线当天 00:00 到次日 06:00，过期自动失效。`validity` 只在有效期内为 true，待审批但未到上线日的计划 `validity=false`，所以查重同时看审批状态和上线日期。
 - 只有待审批、尚未提交发布申请的计划，列表行才有“修改 / 删除 / 发布申请”三个按钮。脚本只认“修改”，不点其他两个。
-- 脚本报 `publish3 login required` 或 `non-JSON response` 时，按 `get-browser-session` 的流程处理登录：MCP 优先用 `browser_session.ensure_session`，脚本兜底用 `node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js --ensure --url=https://publish3.oa.fenqile.com/ --success-text=none`。不要在聊天里索取密码、OTP 或 Cookie。
+- 脚本报 `publish3 login required` 或 `non-JSON response` 时，按 `get-browser-session` 的流程处理登录：MCP 优先用 `browser_session.ensure_session`，脚本兜底用 `node $AGENT_TOOLS_ROOT/skills/lexin/get-browser-session/scripts/browser_session.js --ensure --url=https://publish3.oa.fenqile.com/ --success-text=none`。不要在聊天里索取密码、OTP 或 Cookie。
 
 ## 未覆盖
 

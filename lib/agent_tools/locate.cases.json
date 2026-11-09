@@ -1,0 +1,200 @@
+{
+  "_doc": "仓库根三来源的共用用例表，locate.test.js 与 tests/test_locate.py 对库函数与三份引导代码模板各跑一遍。tree 的值：字符串 = 文件内容；对象 = 目录（可带 mode，八进制字符串，建好子项后再设）。start = 上溯起点（相对 tree）。env / pointer / expect 里的 ${TREE} 替换为临时根目录的真实路径。pointer 为 null 表示指针文件不存在。expect.root 是相对 tree 的目录；expect.error 为错误码，tried_contains 的每一项都必须是 tried 文本的子串。",
+  "cases": [
+    {
+      "name": "link-mode-upward-hit",
+      "tree": {
+        "repo/install.py": "",
+        "repo/skills/lexin/x/scripts": {}
+      },
+      "start": "repo/skills/lexin/x/scripts",
+      "env": {},
+      "pointer": null,
+      "expect": {
+        "root": "repo"
+      }
+    },
+    {
+      "name": "copy-mode-env-fallback",
+      "tree": {
+        "repo/install.py": "",
+        "repo/skills": {},
+        "home/.claude/skills/x/scripts": {}
+      },
+      "start": "home/.claude/skills/x/scripts",
+      "env": {
+        "AGENT_TOOLS_ROOT": "${TREE}/repo"
+      },
+      "pointer": null,
+      "expect": {
+        "root": "repo"
+      }
+    },
+    {
+      "name": "copy-mode-pointer-fallback",
+      "tree": {
+        "repo/install.py": "",
+        "repo/skills": {},
+        "home/.claude/skills/x/scripts": {}
+      },
+      "start": "home/.claude/skills/x/scripts",
+      "env": {},
+      "pointer": "${TREE}/repo",
+      "expect": {
+        "root": "repo"
+      }
+    },
+    {
+      "name": "all-sources-missing-ENOENT",
+      "tree": {
+        "home/.claude/skills/x/scripts": {}
+      },
+      "start": "home/.claude/skills/x/scripts",
+      "env": {},
+      "pointer": null,
+      "expect": {
+        "error": "ROOT_NOT_FOUND",
+        "tried_contains": [
+          "未命中有效根（install.py 文件 + skills/ 目录）",
+          "AGENT_TOOLS_ROOT=<unset>",
+          "<absent>"
+        ]
+      }
+    },
+    {
+      "name": "env-candidate-EACCES-falls-to-pointer",
+      "requires_non_root": true,
+      "tree": {
+        "locked/install.py": "",
+        "locked/skills": {},
+        "locked": {
+          "mode": "0"
+        },
+        "repo/install.py": "",
+        "repo/skills": {},
+        "home/.claude/skills/x/scripts": {}
+      },
+      "start": "home/.claude/skills/x/scripts",
+      "env": {
+        "AGENT_TOOLS_ROOT": "${TREE}/locked"
+      },
+      "pointer": "${TREE}/repo",
+      "expect": {
+        "root": "repo",
+        "tried_contains": [
+          "EACCES"
+        ]
+      }
+    },
+    {
+      "name": "env-points-to-regular-file-ENOTDIR",
+      "tree": {
+        "afile": "not a dir",
+        "repo/install.py": "",
+        "repo/skills": {},
+        "home/.claude/skills/x/scripts": {}
+      },
+      "start": "home/.claude/skills/x/scripts",
+      "env": {
+        "AGENT_TOOLS_ROOT": "${TREE}/afile"
+      },
+      "pointer": "${TREE}/repo",
+      "expect": {
+        "root": "repo",
+        "tried_contains": [
+          "AGENT_TOOLS_ROOT=${TREE}/afile\n"
+        ]
+      }
+    },
+    {
+      "name": "invalid-pointer",
+      "tree": {
+        "home/.claude/skills/x/scripts": {}
+      },
+      "start": "home/.claude/skills/x/scripts",
+      "env": {},
+      "pointer": "${TREE}/nowhere",
+      "expect": {
+        "error": "ROOT_NOT_FOUND",
+        "tried_contains": [
+          "${TREE}/nowhere"
+        ]
+      }
+    },
+    {
+      "name": "env-has-only-install-py-continues-to-pointer",
+      "tree": {
+        "fake/install.py": "",
+        "repo/install.py": "",
+        "repo/skills": {},
+        "home/.claude/skills/x/scripts": {}
+      },
+      "start": "home/.claude/skills/x/scripts",
+      "env": {
+        "AGENT_TOOLS_ROOT": "${TREE}/fake"
+      },
+      "pointer": "${TREE}/repo",
+      "expect": {
+        "root": "repo"
+      }
+    },
+    {
+      "name": "upward-passes-home-with-stray-install-py",
+      "tree": {
+        "home/install.py": "",
+        "home/.claude/skills/x/scripts": {},
+        "repo/install.py": "",
+        "repo/skills": {}
+      },
+      "start": "home/.claude/skills/x/scripts",
+      "env": {
+        "AGENT_TOOLS_ROOT": "${TREE}/repo"
+      },
+      "pointer": null,
+      "expect": {
+        "root": "repo",
+        "tried_contains": [
+          "未命中有效根（install.py 文件 + skills/ 目录）"
+        ]
+      }
+    },
+    {
+      "name": "env-install-py-is-directory-continues-to-pointer",
+      "tree": {
+        "fake/install.py": {},
+        "fake/skills": {},
+        "repo/install.py": "",
+        "repo/skills": {},
+        "home/.claude/skills/x/scripts": {}
+      },
+      "start": "home/.claude/skills/x/scripts",
+      "env": {
+        "AGENT_TOOLS_ROOT": "${TREE}/fake"
+      },
+      "pointer": "${TREE}/repo",
+      "expect": {
+        "root": "repo",
+        "tried_contains": [
+          "AGENT_TOOLS_ROOT=${TREE}/fake\n"
+        ]
+      }
+    },
+    {
+      "name": "missing-install-py-with-unreadable-skills-is-miss-and-upward-continues",
+      "requires_non_root": true,
+      "tree": {
+        "repo/install.py": "",
+        "repo/skills/cat/x/scripts": {},
+        "repo/skills/cat/x/skills": {
+          "mode": "0"
+        }
+      },
+      "start": "repo/skills/cat/x/scripts",
+      "env": {},
+      "pointer": null,
+      "expect": {
+        "root": "repo"
+      }
+    }
+  ]
+}

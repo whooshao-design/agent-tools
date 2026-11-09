@@ -2,7 +2,7 @@
 name: dev-clarify-task
 description: Use when 需求模糊、边界未收敛、需要先别写代码并明确范围、非目标、验收标准或关键依赖，把口语化描述或 TAPD 需求单改写成可验收标准并列出开放问题，再决定进入方案设计还是编码；用户直接描述需求或给出 TAPD 需求链接、要求对齐需求并输出需求文档时，都从这里开始。
 metadata:
-  version: 1.9.0
+  version: 1.9.1
 ---
 
 # dev-clarify-task
@@ -15,13 +15,13 @@ metadata:
 
 ## 默认产物目录
 
-如需把需求澄清结果落盘，默认放到 `/home/joney/docs/requirements-development/<requirement-name>/requirements/`，建议文件名使用 `summary.md`。
+如需把需求澄清结果落盘，默认放到 `~/docs/requirements-development/<requirement-name>/requirements/`，建议文件名使用 `summary.md`。
 
 - `<requirement-name>` 使用第 6 步确定的需求名称（小驼峰）；名称确定前的临时目录在确定后整体改名
 - 用户明确指定路径时，优先使用用户路径
 - 只需在对话中给出结果时，可不创建文件
 - 外部原始需求（如 TAPD 原文与图片）放同目录的 `source/` 子目录，原样保存，不在上面改写
-- 正式产物和结构化对话结果都按 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/artifact-identity.md` 生成稳定需求身份 `R`
+- 正式产物和结构化对话结果都按 `$AGENT_TOOLS_ROOT/skills/dev-workflow/references/artifact-identity.md` 生成稳定需求身份 `R`
 - agent 实质编写或改写需求内容时，把实际运行时身份记入 `R.producer_agent_refs[]`；纯用户/外部原始需求可为空列表
 
 ## When to Use
@@ -110,7 +110,7 @@ metadata:
 
 ## 输出物
 
-表达遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/writing-principles.md`：头部一行、相关文档、摘要在前，按内容选表达形式（流程用图、映射和清单用表、前后变化用示例、理由用段落），ID 跟在自然语言名称后。
+表达遵循 `$AGENT_TOOLS_ROOT/skills/dev-workflow/references/writing-principles.md`：头部一行、相关文档、摘要在前，按内容选表达形式（流程用图、映射和清单用表、前后变化用示例、理由用段落），ID 跟在自然语言名称后。
 
 默认输出一份轻量需求澄清结果，建议包含：
 - 需求身份：`R` 的引用、版本/内容指纹、一句话摘要和 `producer_agent_refs[]`；对话模式可使用消息引用

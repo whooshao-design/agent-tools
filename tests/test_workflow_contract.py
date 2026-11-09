@@ -744,10 +744,8 @@ class WorkflowContractTest(unittest.TestCase):
             self.assertNotIn(forbidden, text, skill)
 
     def test_formal_reviews_use_canonical_delegation_contract(self):
-        contract_ref = (
-            "/home/joney/projects/ai/agent-tools/skills/dev-workflow/"
-            "references/delegation-contract.md"
-        )
+        contract_ref = "$AGENT_TOOLS_ROOT/skills/dev-workflow/references/delegation-contract.md"
+        agent_ref = "{{AGENT_TOOLS_ROOT}}/skills/dev-workflow/references/delegation-contract.md"
         canonical_scope = "身份、只读、写入、工具面和结果结构的准入只以该契约为准"
         duplicated_detail = "`reviewer_agent_ref` 不是前置输入，只能在 spawn/stop 后"
 
@@ -756,6 +754,8 @@ class WorkflowContractTest(unittest.TestCase):
             self.assertIn(contract_ref, text, skill)
             self.assertIn(canonical_scope, text, skill)
             self.assertNotIn(duplicated_detail, text, skill)
+        for path in list((REPO / "agents/claude").glob("agent-tools-*.md")) + list((REPO / "agents/codex").glob("agent-tools-*.toml")):
+            self.assertIn(agent_ref, path.read_text(encoding="utf-8"), path)
 
     def test_write_set_empty_requires_attested_evidence(self):
         contract = (WORKFLOW / "references/delegation-contract.md").read_text(

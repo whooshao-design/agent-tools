@@ -22,7 +22,7 @@
 - DTO/VO（含 Lombok `@Data`）每个字段写 JavaDoc：含义、枚举值、为 null 或空集合时的语义、取值来源；只有含义与名称完全一致且无空值语义的 ID 字段可省。常量、内部类及其字段同样要求。
 - 名称就是取值本身的一组常量（如 JSON 键名常量）可以用一段 `/* ... */` 分组注释统一说明，不必逐个写。
 - 交付前用脚本检查本次新增的方法和字段（只检查相对 base 新增的声明，不报已有代码；`@Override` 方法、getter/setter、注入字段、`serialVersionUID` 和名称自明的 ID 字段自动跳过）：
-  `python3 /home/joney/projects/ai/agent-tools/skills/dev-workflow/dev-build-change/scripts/check_javadoc.py --repo <仓库> --base <开发起点提交> [文件...]`
+  `python3 scripts/check_javadoc.py --repo <仓库> --base <开发起点提交> [文件...]`
   退出码 1 时按输出逐条补齐；脚本只检查有没有写，写得对不对仍要人工核对。方法体非空行达到 `--min-body`（默认 12）却没有一行 `//` 注释时也会报出，提示按步骤补方法内注释。
 - Dubbo/网关接口方法写清入参各字段要求、返回 `MihawkCommRetVO` 里实际承载的类型（`{@link}` 到具体 Bean）和业务错误码。
 - 普通注释默认不用 HTML 标签；正式 JavaDoc 仅在多段说明或项目既有风格需要时使用 `<p>`。JavaDoc 里避免裸写 `<ID>` 这类尖括号占位，改用文字描述。
@@ -34,5 +34,5 @@
 
 ## 5. 自检与专项
 
-- 编码后的最小自检优先用仓库文档给出的命令，例如 `mvn -f <service>/pom.xml -pl <module> -am compile`；测试执行与 suite 参数见 `dev-verify-change` 的 `references/test-execution-routing.md`。
+- 编码后的最小自检优先用仓库文档给出的命令，例如 `mvn -f <service>/pom.xml -pl <module> -am compile`；测试执行与 suite 参数见 `$AGENT_TOOLS_ROOT/skills/dev-workflow/dev-verify-change/references/test-execution-routing.md`。
 - 需要对齐幂等、异常处理、事务边界、分层写法时调用 `lang-java-service-patterns`；涉及 SQL/DDL/事务一致性或中间件可靠性时，评审阶段补 `review-db-change`、`review-middleware-reliability`。

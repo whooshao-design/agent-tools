@@ -23,7 +23,7 @@ class SessionTmpCleanupTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.base = Path(self.temp.name) / "claude-1000"
-        for project in ("-tmp", "-home-joney"):
+        for project in ("-tmp", "-home-alice"):
             for session in (SESSION, OTHER):
                 (self.base / project / session / "scratchpad").mkdir(parents=True)
         (self.base / "bash-edit-diff").mkdir()
@@ -35,7 +35,7 @@ class SessionTmpCleanupTest(unittest.TestCase):
         removed = hook.cleanup(self.base, SESSION)
 
         self.assertEqual(2, len(removed))
-        for project in ("-tmp", "-home-joney"):
+        for project in ("-tmp", "-home-alice"):
             self.assertFalse((self.base / project / SESSION).exists())
             self.assertTrue((self.base / project / OTHER / "scratchpad").is_dir())
         self.assertTrue((self.base / "bash-edit-diff").is_dir())

@@ -2,7 +2,7 @@
 name: inspect-app-call-topology
 description: 只读梳理应用的 FSOF/Dubbo 上下游调用关系、流量和接口健康度；异常实例与时间点下钻默认关闭，仅在用户明确要求时开启。Use when 用户要求查某个应用被谁调用、调用了哪些外部服务、某个 service 的客户端应用是谁、应用的接口调用量与错误率耗时、梳理服务依赖拓扑、排查上下游故障影响面、对比发布前后接口变化。
 metadata:
-  version: 1.4.2
+  version: 1.4.3
 ---
 
 # inspect-app-call-topology
@@ -51,14 +51,14 @@ metadata:
 脚本默认生成 HTML、不限制环境（gray/oa/pre/prod 全看）、窗口 1 天、关闭异常下钻：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/inspect-app-call-topology/scripts/inspect_call_topology.js \
+node scripts/inspect_call_topology.js \
   --app=server_strategy_decision_java
 ```
 
 同时梳理多个应用时，直接使用原生批量入口，共用一次登录会话和指标/归属查询，每个应用各生成一份报告：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/inspect-app-call-topology/scripts/inspect_call_topology.js \
+node scripts/inspect_call_topology.js \
   --apps=server_credit_ser_deploy_java,server-rcrule-dataconfig-java
 ```
 
@@ -99,7 +99,7 @@ node .../inspect_call_topology.js --app=xxx --range=6h --baseline=7d
 | `--baseline` | — | 与多久之前的同长窗口对比，如 `1d`/`7d`；不给则不做对比 |
 | `--slow-ms` | `500` | 平均耗时告警阈值（ms），可传 `0` |
 | `--max-drilldown` | `0` | 默认关闭；显式传正整数开启，限制下钻链路数，例如 `8` |
-| `--out-dir` | `/home/joney/docs/service-relationships` | HTML 输出目录 |
+| `--out-dir` | `~/docs/service-relationships` | HTML 输出目录 |
 | `--out` | — | 直接指定 HTML 输出路径；多应用时必须含 `{app}` |
 | `--json` | — | 额外把完整结果写到该 JSON 路径；多应用时必须含 `{app}` |
 | `--no-html` | — | 不生成 HTML；仍打印终端摘要，可配合 `--json` 取数后整理主报告 |
@@ -108,7 +108,7 @@ node .../inspect_call_topology.js --app=xxx --range=6h --baseline=7d
 | `--http-timeout` | `30000` | 单次请求超时毫秒 |
 | `--retries` | `2` | 可重试错误（超时、5xx、429、网络抖动）的重试次数 |
 | `--token` | — | 也可用环境变量 `HEALTHY_METRIC_TOKEN` |
-| `--profile` | `/home/joney/.local/state/agent-tools/browser-profiles/healthy` | 显式指定时优先使用该 profile，否则直接复用现有 Healthy profile；失效用 `get-browser-session` 刷新 |
+| `--profile` | `~/.local/state/agent-tools/browser-profiles/healthy` | 显式指定时优先使用该 profile，否则直接复用现有 Healthy profile；失效用 `get-browser-session` 刷新 |
 
 脚本默认 HTML 文件名为 `<app>-<env>-<时间戳>.html`，自包含单文件、无 CDN 依赖，内网可直接打开。
 
@@ -119,7 +119,7 @@ node .../inspect_call_topology.js --app=xxx --range=6h --baseline=7d
 - 用户要求下钻但未指定数量时使用 `--max-drilldown=8`；传 `0` 关闭。开启后按错误数排序下钻，不因只有平均耗时超过阈值而下钻。
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/inspect-app-call-topology/scripts/inspect_call_topology.js \
+node scripts/inspect_call_topology.js \
   --app=server_strategy_decision_java --max-drilldown=8
 ```
 

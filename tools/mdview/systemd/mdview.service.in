@@ -1,0 +1,10 @@
+[Unit]
+Description=mdview 本地 Markdown/HTML 查看器
+Requires=mdview.socket
+After=mdview.socket
+
+[Service]
+# 由 tools/mdview/install.sh 填入 @NODE@（command -v node）、@ROOT@（仓库根）、@DOCS@（lib/agent_tools docsRoot()）
+ExecStart=@NODE@ @ROOT@/tools/mdview/server.mjs @DOCS@ --no-open --idle 30
+Environment=AGENT_TOOLS_ROOT=@ROOT@
+Restart=no

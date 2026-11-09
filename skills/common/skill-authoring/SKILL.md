@@ -2,14 +2,14 @@
 name: skill-authoring
 description: Use when 需要在 agent-tools 仓库中创建新 skill、修改 skill 分类，或检查现有 skill 是否符合仓库约定（frontmatter、路径、分类、双端安装）。
 metadata:
-  version: 1.2.0
+  version: 1.3.0
 ---
 
 # skill-authoring
 
 ## 定位
 
-按本仓库（`/home/joney/projects/ai/agent-tools`）约定创建和维护 skill 的元技能。
+按本仓库（agent-tools，本机克隆根记作 `$AGENT_TOOLS_ROOT`）约定创建和维护 skill 的元技能。
 仓库是 Claude Code 与 Codex 的单一事实源，所有约定以仓库根 `AGENTS.md` 为准。
 
 ## 创建新 skill 的流程
@@ -49,8 +49,11 @@ metadata:
 
 - 开头一节"定位"说明它治理什么、不治理什么，与相邻 skill 的边界。
 - 正文保持精炼（建议 ≤200 行）；长参数表、案例集、模板放 `references/`，脚本放 `scripts/`。
-- 引用本仓库脚本一律写仓库绝对路径（`/home/joney/projects/ai/agent-tools/skills/...`），
-  不写 `~/.claude/skills` 或 `~/.codex/skills`。
+- 引用分三层：本 skill 内的文件写 `scripts/<文件>`、`references/<文件>`；其他 skill 或仓库级文件写
+  `$AGENT_TOOLS_ROOT/skills/<分类>/<skill>/...`、`$AGENT_TOOLS_ROOT/bin/...`；不写本机绝对路径、`~/.claude/skills` 或 `~/.codex/skills`。
+- 脚本不自己拼仓库路径：按扩展名复制 `lib/agent_tools/bootstrap.js` / `bootstrap.mjs` / `bootstrap.py` 的引导代码块（两条标记之间逐字一致），
+  之后用 `skillDir('<skill>', ...)` 取兄弟 skill 文件、`repoRoot()` 取仓库级文件、`os.homedir()` / `Path.home()` 取家目录；
+  浏览器类脚本经 `browserRuntime()` 取 Playwright 与 Chromium 路径，不写 `chrome-linux64`、`runtime-libs` 字面量。
 - 与某个 MCP server 能力重叠时，开头注明"MCP 优先、脚本兜底"。
 - 不在正文中写入任何凭据、token、真实 IP 清单；此类数据放本地文件并加入 `.gitignore`。
 
@@ -72,13 +75,13 @@ policy:
 先用系统校验器检查新 skill 的基础 frontmatter：
 
 ```bash
-python3 /home/joney/.codex/skills/.system/skill-creator/scripts/quick_validate.py <path/to/skill-folder>
+python3 ~/.codex/skills/.system/skill-creator/scripts/quick_validate.py <path/to/skill-folder>
 ```
 
 再安装到双端：
 
 ```bash
-cd /home/joney/projects/ai/agent-tools && python3 install.py
+cd "$AGENT_TOOLS_ROOT" && python3 install.py
 ```
 
 确认输出中新 skill 在 claude 和 codex 两端均为 `linked`；新会话中确认 skill 出现在可用列表。
@@ -86,7 +89,7 @@ cd /home/joney/projects/ai/agent-tools && python3 install.py
 然后跑仓库测试与评测：
 
 ```bash
-cd /home/joney/projects/ai/agent-tools && python3 -m unittest discover -s tests
+cd "$AGENT_TOOLS_ROOT" && python3 -m unittest discover -s tests   # 含六条可移植 lint 规则，AGENT_TOOLS_LINT_ENFORCE=1 时命中即失败
 python3 bin/skill_routing_eval.py   # 改了 description 时
 ```
 

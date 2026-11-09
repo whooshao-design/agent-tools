@@ -83,15 +83,15 @@ test('read-only SQL validation remains enforced after opening instance selection
 
 test('uses the browser session identity before falling back to the local system user', () => {
   const inferredUserName = inferLxcloudUserName({
-    snippet: 'Lx Cloud 当前环境： 刷新 版本说明 joneyshao(邵鹏) 【公告】',
+    snippet: 'Lx Cloud 当前环境： 刷新 版本说明 zhangsan(张三) 【公告】',
   }, 'opaque-token');
   const payload = buildLxcloudPayload({
     'db-type': 'ProcessmanageDB',
     query: "SHOW TABLE STATUS FROM process_engine_db LIKE 't_process'",
   }, inferredUserName);
 
-  assert.equal(inferredUserName, 'joneyshao');
-  assert.equal(payload.user_name, 'joneyshao');
+  assert.equal(inferredUserName, 'zhangsan');
+  assert.equal(payload.user_name, 'zhangsan');
 });
 
 test('prefers an explicit user name over the browser session identity', () => {

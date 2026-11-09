@@ -2,7 +2,7 @@
 name: manage-publish-order
 description: 在乐信发布系统 publish3（publish3.oa.fenqile.com）为乐效需求准备前端发布单：先把需求分支合并到前端发布分支（默认 product）并推送，再在“应用版本发布”新建前端发布单（线上、版本/补丁、预发布+灰度+线上）并打包；不推送、不发布、不回滚、不结单。Use when 用户要求合并前端代码到 product 后建发布单、新建前端发布单、给发布单打包、查看自己的发布单；后端发布单后续补充；不负责发布计划（用 manage-publish-plan）、乐效部署或推送上线。
 metadata:
-  version: 1.2.0
+  version: 1.2.1
 ---
 
 # manage-publish-order
@@ -16,7 +16,7 @@ metadata:
 ## 脚本
 
 ```bash
-S=/home/joney/projects/ai/agent-tools/skills/lexin/manage-publish-order/scripts/publish_order.js
+S=scripts/publish_order.js
 node $S merge  --repo=<前端仓库> [--branch=<需求分支>] [--target=product] [--dry-run]
 node $S list   [--app=<应用名>] [--creator=<OA用户名>]
 node $S create --app=<应用名> --desc='<发布版本描述>' [--pub-type=version|patch] [--envs=pre,gray,prod] \

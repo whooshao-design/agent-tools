@@ -1,6 +1,6 @@
 # 设计闭环判定细则
 
-供 `dev-auto-loop` 编排 `dev-design-solution` ⇄ `dev-review-solution` 时使用。本文件只规定自动编排如何解释评审结论、消费预算和停止；产物身份遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/artifact-identity.md`。
+供 `dev-auto-loop` 编排 `dev-design-solution` ⇄ `dev-review-solution` 时使用。本文件只规定自动编排如何解释评审结论、消费预算和停止；产物身份遵循 `$AGENT_TOOLS_ROOT/skills/dev-workflow/references/artifact-identity.md`。
 
 ## 进入与退出约束
 

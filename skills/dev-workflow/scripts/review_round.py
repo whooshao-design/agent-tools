@@ -45,8 +45,10 @@ PASSING = {"通过", "有条件通过", "可继续推进", "带风险接受"}
 ALLOWED_TOOLS = {"Read", "Grep", "Glob", "SubagentHandback"}
 EXTERNAL_TOOLS = {"Read", "Grep", "Glob"}
 CODEX_TOOLS = {"shell"}  # codex-vps reviewer: read-only shell under codex-reviewer
-CODEX_REVIEWER = str(Path("~/bin/codex-reviewer").expanduser())
 TOOLS_ROOT = Path(__file__).resolve().parents[3]
+CODEX_REVIEWER = str(TOOLS_ROOT / "bin" / "codex-reviewer")
+sys.path.insert(0, str(TOOLS_ROOT / "lib"))
+from agent_tools.locate import render_placeholders  # noqa: E402
 CLASSES = {"成立需修", "接受取舍", "契约误读", "噪音"}
 VALID_CLASSES = {"成立需修", "接受取舍"}
 LEDGER = Path(os.environ.get("AGENT_TOOLS_REVIEWER_LEDGER", "~/.local/state/agent-tools/reviewer-ledger.jsonl")).expanduser()
@@ -693,9 +695,12 @@ def cmd_task(args) -> None:
     rd = round_dir(args)
     env = json.loads((rd / "delegation-envelope.json").read_text())
     role = env["role"]
-    body = (TOOLS_ROOT / "agents/claude" / f"{role}.md").read_text().split("---", 2)[2].strip()
+    source = (TOOLS_ROOT / "agents/claude" / f"{role}.md").read_text().split("---", 2)[2].strip()
+    body = render_placeholders(source, {"AGENT_TOOLS_ROOT": str(TOOLS_ROOT)})  # 与 install.py _render() 同一替换
     skill = TOOLS_ROOT / "skills/dev-workflow" / ROLE_SKILL[role]
-    text = f"""{body}
+    text = f"""AGENT_TOOLS_ROOT={TOOLS_ROOT}
+
+{body}
 
 ## 外部评审进程补充
 
@@ -717,7 +722,7 @@ def cmd_task(args) -> None:
 
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--req-dir", required=True, help="requirement product dir, e.g. /home/joney/docs/requirements-development/<name>")
+    ap.add_argument("--req-dir", required=True, help="requirement product dir, e.g. <AGENT_TOOLS_DOCS_ROOT>/requirements-development/<name>")
     ap.add_argument("--stage", default="solution-review", help="review directory name under req-dir")
     ap.add_argument("--round", type=int, required=True)
     sub = ap.add_subparsers(dest="cmd", required=True)

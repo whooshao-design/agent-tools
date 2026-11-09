@@ -116,26 +116,37 @@ class InstallTest(unittest.TestCase):
         )
         self.assertFalse((self.home / ".claude/agents").exists())
         self.assertFalse((self.home / ".claude/hooks").exists())
-        self.assertFalse((self.home / ".claude/settings.json").exists())
         self.assertFalse((self.home / ".claude/CLAUDE.md").exists())
+        settings = json.loads((self.home / ".claude/settings.json").read_text(encoding="utf-8"))
+        self.assertEqual({"env": {"AGENT_TOOLS_ROOT": str(REPO)}}, settings)
+        pointer = self.home / ".config/agent-tools/root"
+        self.assertEqual(str(REPO) + "\n", pointer.read_text(encoding="utf-8"))
+        self.assertEqual(str(pointer), manifest["pointer_file"])
+        self.assertEqual({"AGENT_TOOLS_ROOT": installer._value_fingerprint(str(REPO))}, manifest["env_entries"])
 
     def test_with_global_links_client_instructions_and_uninstalls(self):
         existing = self.home / ".codex/AGENTS.md"
         existing.parent.mkdir(parents=True)
         existing.write_text("user rules\n", encoding="utf-8")
 
-        result = self.run_install("--with-global", "--skills", "skill-authoring")
+        result = self.run_install("--with-global", "--skills", "skill-authoring", check=False)
 
-        source = (REPO / "AGENTS.global.md").resolve()
+        self.assertEqual(1, result.returncode, result.stdout)
         claude = self.home / ".claude/CLAUDE.md"
-        self.assertTrue(claude.is_symlink())
-        self.assertEqual(source, claude.resolve())
+        self.assertTrue(claude.is_file() and not claude.is_symlink())
+        rendered = claude.read_text(encoding="utf-8")
+        self.assertNotIn("{{AGENT_TOOLS_ROOT}}", rendered)
+        self.assertIn(str(REPO), rendered)
         self.assertIn("[global] AGENTS.md: skip (exists, use --force)", result.stdout)
+        self.assertIn("unconverged: 1 item(s)", result.stdout)
         self.assertEqual("user rules\n", existing.read_text(encoding="utf-8"))
 
         existing.unlink()
         self.run_install("--with-global", "--skills", "skill-authoring")
-        self.assertEqual(source, existing.resolve())
+        self.assertTrue(existing.is_file() and not existing.is_symlink())
+        self.assertEqual(rendered, existing.read_text(encoding="utf-8"))
+        manifest = json.loads((self.home / ".codex/.agent-tools-install.json").read_text(encoding="utf-8"))
+        self.assertTrue(manifest["copies"][str(existing)]["rendered"])
 
         self.run_install(
             "--with-global", "--skills", "skill-authoring", "--uninstall"
@@ -224,7 +235,8 @@ class InstallTest(unittest.TestCase):
 
             for name in AGENT_NAMES:
                 agent = self.home / f".{client}/agents/{name}{suffix}"
-                self.assertTrue(agent.is_symlink(), agent)
+                self.assertTrue(agent.is_file() and not agent.is_symlink(), agent)
+                self.assertNotIn("{{AGENT_TOOLS_ROOT}}", agent.read_text(encoding="utf-8"))
 
             scripts = list(
                 (self.home / f".{client}/hooks/agent-tools").glob(
@@ -264,10 +276,8 @@ class InstallTest(unittest.TestCase):
             "--with-subagents",
         )
         self.assertFalse((self.home / ".claude").exists())
-        self.assertTrue(
-            (self.home / ".codex/agents/agent-tools-change-reviewer.toml")
-            .is_symlink()
-        )
+        reviewer = self.home / ".codex/agents/agent-tools-change-reviewer.toml"
+        self.assertTrue(reviewer.is_file() and not reviewer.is_symlink())
         self.assertTrue((self.home / ".codex/hooks.json").is_file())
 
     def test_copy_install_uninstall_removes_only_owned_content(self):
@@ -342,20 +352,19 @@ class InstallTest(unittest.TestCase):
         foreign_link = skills_dir / "skill-authoring"
         foreign_link.symlink_to(foreign_source)
 
-        self.run_install(
+        result = self.run_install(
             "--targets",
             "claude",
             "--skills",
             "skill-authoring",
             "--with-subagents",
+            check=False,
         )
+        self.assertEqual(1, result.returncode, result.stdout)
+        self.assertIn("claude skill skill-authoring: skip (foreign link, use --force)", result.stdout)
         self.assertEqual(foreign_source, foreign_link.resolve())
-        self.assertTrue(
-            (
-                self.home
-                / ".claude/agents/agent-tools-solution-reviewer.md"
-            ).is_symlink()
-        )
+        reviewer = self.home / ".claude/agents/agent-tools-solution-reviewer.md"
+        self.assertTrue(reviewer.is_file() and not reviewer.is_symlink())
         self.assertTrue((self.home / ".claude/settings.json").is_file())
 
     def test_foreign_reviewer_aborts_before_any_install_write(self):
@@ -414,10 +423,11 @@ class InstallTest(unittest.TestCase):
             "--force",
         )
 
-        self.assertTrue(foreign_agent.is_symlink())
+        self.assertTrue(foreign_agent.is_file() and not foreign_agent.is_symlink())
+        source = (REPO / "agents/claude/agent-tools-solution-reviewer.md").read_text(encoding="utf-8")
         self.assertEqual(
-            (REPO / "agents/claude/agent-tools-solution-reviewer.md").resolve(),
-            foreign_agent.resolve(),
+            source.replace("{{AGENT_TOOLS_ROOT}}", str(REPO)),
+            foreign_agent.read_text(encoding="utf-8"),
         )
 
     def test_reviewer_race_after_preflight_aborts_before_any_install_write(self):
@@ -699,10 +709,8 @@ class InstallTest(unittest.TestCase):
             )
             manifest_path = self.home / ".claude/.agent-tools-install.json"
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            self.assertIn(
-                str(self.home / ".claude/skills/skill-authoring"),
-                manifest["pending_copies"],
-            )
+            owned = {**manifest["pending_copies"], **manifest["copies"]}
+            self.assertIn(str(self.home / ".claude/skills/skill-authoring"), owned)
 
             args.copy = False
             args.uninstall = True

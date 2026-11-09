@@ -2,7 +2,7 @@
 name: manage-tqm-test-cases
 description: 在乐信质量管理平台（TQM，tqm.oa.fenqile.com）给乐效流程的需求版本查看模块与用例，按确认后的清单批量创建核心用例（每批不超过 10 条，同名跳过），并在项目环境/预发布/线上验证阶段填写用例执行结果；先 dry-run 再写入，写后回读校验，复用 get-browser-session 浏览器登录态。Use when 用户给出 TQM 版本页链接，要求把需求的核心用例录入质量管理平台、在 TQM 给需求版本建用例、点“执行”填写用例执行情况、查看版本下已有用例或找用例所属模块；不负责编写本地用例清单，也不编辑、删除、导入导出、评审平台用例或推进测试阶段。
 metadata:
-  version: 1.1.0
+  version: 1.1.1
 ---
 
 # manage-tqm-test-cases
@@ -12,14 +12,14 @@ metadata:
 - 治理：在 TQM 上为一个需求版本查看版本信息、模块树和现有用例，把已确认的核心用例（≤10 条）创建到指定模块，并在测试阶段（项目环境测试/预发布环境测试/线上验证）为用例填写执行结果和实际结果。
 - 不治理：用例编辑、删除、批量编辑、导入导出、用例评审、点“测试完成”或“下一步”推进阶段、STEP（步骤描述）模式用例的逐步结果；这些脚本不调用，让用户在页面上操作。
 - 相邻 skill：
-  - `dev-derive-test-cases` 产出本地测试清单（`/home/joney/docs/requirements-development/<需求名>/test-cases/test-cases.md`），是本 skill 提炼用例的来源之一；本 skill 不写也不改本地清单。
+  - `dev-derive-test-cases` 产出本地测试清单（`~/docs/requirements-development/<需求名>/test-cases/test-cases.md`），是本 skill 提炼用例的来源之一；本 skill 不写也不改本地清单。
   - `dev-verify-change` 产出验证结论与实际测试数据；本 skill 只引用其中验证过的数据，不做验证。
   - `get-browser-session` 是登录态层；本 skill 只复用 `main` profile，不处理登录。
 
 ## 脚本
 
 ```bash
-S=/home/joney/projects/ai/agent-tools/skills/lexin/manage-tqm-test-cases/scripts/tqm_cases.js
+S=scripts/tqm_cases.js
 node $S version --url='<TQM 版本页链接>'
 node $S modules --url='<链接>' --match=<关键字> [--sample]
 node $S list    --url='<链接>'
@@ -77,7 +77,7 @@ node $S execute --url='<链接>' --file=<results.json> [--stage=...] [--overwrit
 
 ## cases.json 字段
 
-示例：`/home/joney/projects/ai/agent-tools/skills/lexin/manage-tqm-test-cases/references/cases.example.json`（TAPD 1426731 乐包复制支持实时查询乐包的 7 条用例）。
+示例：`references/cases.example.json`（TAPD 1426731 乐包复制支持实时查询乐包的 7 条用例）。
 
 | 字段 | 必填 | 说明 |
 |---|---|---|
@@ -102,7 +102,7 @@ node $S execute --url='<链接>' --file=<results.json> [--stage=...] [--overwrit
 
 ## results.json 字段
 
-示例：`/home/joney/projects/ai/agent-tools/skills/lexin/manage-tqm-test-cases/references/results.example.json`（同一需求项目环境阶段的 7 条结果）。
+示例：`references/results.example.json`（同一需求项目环境阶段的 7 条结果）。
 
 | 字段 | 必填 | 说明 |
 |---|---|---|
@@ -115,7 +115,7 @@ node $S execute --url='<链接>' --file=<results.json> [--stage=...] [--overwrit
 ## 登录态与已知坑
 
 - 脚本报 `TQM login required` 或 `non-JSON response ... session may have expired` 时，按 `get-browser-session` 的登录态排查顺序处理；需要重新登录时 MCP 优先用 `browser_session.ensure_session`，脚本兜底：
-  `node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js --ensure --url=https://tqm.oa.fenqile.com/ --success-text=none`。不要在聊天中索取密码、OTP 或 Cookie。
+  `node $AGENT_TOOLS_ROOT/skills/lexin/get-browser-session/scripts/browser_session.js --ensure --url=https://tqm.oa.fenqile.com/ --success-text=none`。不要在聊天中索取密码、OTP 或 Cookie。
 - 打开 TQM 页面必须用 `waitUntil: 'domcontentloaded'` 再等几秒；`networkidle` 会一直挂住，因为页面有常驻请求。
 - 模块树名称和用例 `node_path` 可能不同：树里叫“决策支撑”，旧用例的 node_path 显示“/决策平台/…”。按树里的名称和 id 选模块，`nodePath` 由脚本按树拼接。
 - 单次最多 10 条；更多用例说明平台录入的不是“核心用例”，回到第 3 步收敛。

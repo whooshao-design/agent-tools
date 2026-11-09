@@ -2,7 +2,7 @@
 name: healthy-dashboard-config
 description: "修改已有 Healthy/雷神/Nightingale 监控大盘的配置，以及按指标列举、按模板新建、修改、停用/启用告警规则。Use when 用户要求修改已有监控大盘、配置大盘变量、Prometheus 面板或穿透加载监控指标，或要查某个指标有没有告警规则、在某个业务组分类下配置告警规则、修改已有告警规则的 PromQL/名称/备注、停用或启用告警规则；读取和更新 /api/n9e/board/{id}/configs 与 alert-rules，并复用本地浏览器登录态完成回读校验。"
 metadata:
-  version: 1.3.0
+  version: 1.3.1
 ---
 
 # healthy-dashboard-config
@@ -29,7 +29,7 @@ metadata:
 
 ## 核心约束
 
-- 复用 `get-browser-session` 获取 Healthy 登录态，默认 profile：`/home/joney/.local/state/agent-tools/browser-profiles/healthy`。
+- 复用 `get-browser-session` 获取 Healthy 登录态，默认 profile：`~/.local/state/agent-tools/browser-profiles/healthy`。
 - 不在回复、skill 或脚本输出中暴露完整 `Authorization`、`ticket`、Cookie。
 - 修改前必须回读并备份原始大盘配置；修改后必须再次回读确认。
 - Healthy 写入 configs 的 body 必须是 `{"configs":"<config JSON string>"}`，不能直接传对象。
@@ -80,19 +80,19 @@ Content-Type: application/json;charset=UTF-8
 优先使用本 skill 的脚本，避免手写 token、字符串转义和 configs 包装：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/healthy-dashboard-config/scripts/healthy_dashboard_config.js \
+node scripts/healthy_dashboard_config.js \
   --board=16761 \
   --mode=hawk-read-through \
-  --profile=/home/joney/.local/state/agent-tools/browser-profiles/healthy \
+  --profile=~/.local/state/agent-tools/browser-profiles/healthy \
   --apply
 ```
 
 只回读和备份：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/healthy-dashboard-config/scripts/healthy_dashboard_config.js \
+node scripts/healthy_dashboard_config.js \
   --board=16761 \
-  --profile=/home/joney/.local/state/agent-tools/browser-profiles/healthy \
+  --profile=~/.local/state/agent-tools/browser-profiles/healthy \
   --read
 ```
 
@@ -102,7 +102,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/healthy-dashboard-config/s
 只读验证预发布页面：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/healthy-dashboard-config/scripts/healthy_dashboard_config.js \
+node scripts/healthy_dashboard_config.js \
   --board=17103 --env=prod --verify-page \
   --variables-json='{"env":["pre"],"ip":["all"]}'
 ```
@@ -115,7 +115,7 @@ JSON 配置、查询条件和验证证据是数据文件，可保留用于复查
 雷神改过 Nightingale，规则只能按「业务组 → 分类」列举和新建，标准的 `/api/n9e/busi-group/{gid}/alert-rules` 读写都返回 404。规则页 URL `alert-rules?id=88&cid=68` 里 `id` 是业务组、`cid` 是分类。
 
 ```bash
-S=/home/joney/projects/ai/agent-tools/skills/lexin/healthy-dashboard-config/scripts
+S=scripts
 # 某个指标有没有告警规则；不传 --gid 时遍历全部业务组，--cid 只查一个分类
 node $S/healthy_alert_rules.js list --metric='fql_fk_server_hawk_decision_task_error' [--gid=88] [--cid=68]
 # 新建：默认 dry-run 只打印请求体；确认后加 --apply
@@ -143,7 +143,7 @@ node $S/healthy_alert_rules.js disable|enable --id=110444 [--apply]
 
 ```text
 url=https://healthy.lexincloud.com/dashboards/{boardId}
-profile=/home/joney/.local/state/agent-tools/browser-profiles/healthy
+profile=~/.local/state/agent-tools/browser-profiles/healthy
 success-text=none 或 Healthy 页面上的稳定文案
 ```
 

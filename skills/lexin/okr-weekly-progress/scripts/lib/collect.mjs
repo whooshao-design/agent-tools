@@ -1,11 +1,22 @@
 // 定时段的确定性取数：飞书周报、本机会话、git 提交、需求文档阶段日期、乐空间 OKR。任一来源失败只标注，不中断其他来源。
+// agent-tools bootstrap（模板 lib/agent_tools/bootstrap.mjs，lint 规则六校验逐字一致）
+import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'; import { fileURLToPath } from 'node:url';
+// probe 返回 'hit' | 'miss' | <异常码>：与 locate.py 同序先看 install.py（缺失即 miss），再看 skills/；用会抛错的 statSync，不用对一切错误都返回 false 的 existsSync
+const probe = (d) => { if (!d) return 'miss'; try { const i = fs.statSync(path.join(d, 'install.py'), { throwIfNoEntry: false }); if (!i || !i.isFile()) return 'miss'; const s = fs.statSync(path.join(d, 'skills'), { throwIfNoEntry: false }); return s && s.isDirectory() ? 'hit' : 'miss'; } catch (e) { return e.code || 'error'; } };
+const tried = []; let root = '', r = 'miss';
+try { let d = fs.realpathSync(path.dirname(fileURLToPath(import.meta.url))); tried.push(`上溯起点 ${d}`); while ((r = probe(d)) === 'miss' && path.dirname(d) !== d) d = path.dirname(d); if (r === 'hit') root = d; else tried[0] += r === 'miss' ? ' 未命中有效根（install.py 文件 + skills/ 目录）' : ` ${r}（放弃上溯）`; }
+catch (e) { tried.push(`上溯起点 ${path.dirname(fileURLToPath(import.meta.url))} ${e.code || e.message}`); }
+if (!root) { const v = process.env.AGENT_TOOLS_ROOT || ''; r = probe(v); tried.push(`AGENT_TOOLS_ROOT=${v || '<unset>'}${r === 'hit' || r === 'miss' ? '' : ' ' + r}`); if (r === 'hit') root = v; }
+if (!root) { const p = path.join(os.homedir(), '.config/agent-tools/root'); try { const v = fs.readFileSync(p, 'utf8').trim(); r = probe(v); tried.push(`${p} = ${v}${r === 'hit' || r === 'miss' ? '' : ' ' + r}`); if (r === 'hit') root = v; } catch (e) { tried.push(`${p} ${e.code === 'ENOENT' ? '<absent>' : e.code}`); } }
+if (!root) { console.error(['agent-tools: 未找到仓库根', ...tried, '请在仓库目录运行 python3 install.py'].join('\n')); process.exit(2); }
+// agent-tools bootstrap end
 import { execFileSync } from 'node:child_process';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
+import { createRequire } from 'node:module';
 
-const FEISHU = '/home/joney/projects/ai/agent-tools/skills/lexin/manage-feishu-doc/scripts/feishu_doc.mjs';
-const SESSIONS = '/home/joney/projects/ai/agent-tools/skills/common/recall-agent-sessions/scripts/agent_sessions.py';
+const require = createRequire(import.meta.url);
+const { skillDir, docsRoot, workspaceRoot } = require(path.join(root, 'lib/agent_tools/locate.js'));
+const FEISHU = skillDir('manage-feishu-doc', 'scripts', 'feishu_doc.mjs');
+const SESSIONS = skillDir('recall-agent-sessions', 'scripts', 'agent_sessions.py');
 const CN_OFFSET_MS = 8 * 3600 * 1000;  // 北京时间无夏令时
 
 // 本周一 00:00（北京时间）到 now
@@ -100,6 +111,15 @@ export function gitRepos(root, depth = 5) {
   return out;
 }
 
+// 统计 git 提交用的作者：--author，否则 env/credentials.env 的 OKR_WEEKLY_AUTHOR（交互会话经 bin/with-env 加载，定时段由 run_scheduled.sh 加载）；
+// 都没有时报错，不再猜测本机用户名
+export const AUTHOR_ENV = 'OKR_WEEKLY_AUTHOR';
+export function resolveAuthor(opts = {}, env = process.env) {
+  const author = String(opts.author || env[AUTHOR_ENV] || '').trim();
+  if (!author) throw Object.assign(new Error(`${AUTHOR_ENV} 未配置：在 env/credentials.env 填写该键并经 bin/with-env 运行，或传 --author=<git 作者>`), { code: 'AUTHOR_REQUIRED' });
+  return author;
+}
+
 export function collectCommits(root, author, window) {
   return guard(() => {
     const commits = [];
@@ -174,8 +194,8 @@ export function archivePlan(dir, feishu, window) {
 export const DEFAULTS = {
   folder: 'https://lexin.feishu.cn/drive/folder/BR06fpVhtl6224dAVuscxF5Wnnc',
   mid: 49548,
-  projects: path.join(os.homedir(), 'projects'),
-  archiveDir: path.join(os.homedir(), 'docs', 'weekly-reports'),
-  requirementsDir: path.join(os.homedir(), 'docs', 'requirements-development'),
+  projects: workspaceRoot(),
+  archiveDir: path.join(docsRoot(), 'weekly-reports'),
+  requirementsDir: path.join(docsRoot(), 'requirements-development'),
   stateDir: path.join(os.homedir(), '.local', 'state', 'agent-tools', 'okr-weekly'),
 };

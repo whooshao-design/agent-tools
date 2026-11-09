@@ -4,24 +4,31 @@
 //
 // usage: node check_mermaid.js <markdown-file> <out-dir> [--versions 8.13.0,11]
 //
-// Defaults reuse the browser toolchain that get-browser-session already installs:
-//   PW_PATH      ~/tools/lexiao-browser/node_modules/playwright
-//   CHROME_PATH  ~/tools/lexiao-browser/browsers/chrome-linux64/chrome
-//   RUNTIME_LIBS ~/tools/lexiao-browser/runtime-libs/usr/lib/x86_64-linux-gnu  (libasound etc.)
+// Defaults reuse the browser toolchain that get-browser-session already installs (browserRuntime():
+// BROWSER_SESSION_TOOL_DIR or setup_browser_tool.sh); each can be overridden by an env var:
+//   PW_PATH      playwright package dir
+//   CHROME_PATH  Chromium executable
+//   RUNTIME_LIBS Linux runtime library dir (libasound etc.)
 //   MERMAID_CACHE ~/.cache/agent-tools/mermaid  (<version>/mermaid.min.js, filled by `npm pack` on first use)
 // mermaid is injected from the local cache, so only the first run of a version needs the npm registry
 // (whatever `npm config get registry` points to); the browser never touches the network.
 // Exit code: 0 all blocks ok, 2 at least one block failed, 1 fatal.
-const fs = require('fs');
+// agent-tools bootstrap（模板 lib/agent_tools/bootstrap.js，lint 规则六校验逐字一致）
+const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
+// probe 返回 'hit' | 'miss' | <异常码>：与 locate.py 同序先看 install.py（缺失即 miss），再看 skills/；用会抛错的 statSync，不用对一切错误都返回 false 的 existsSync
+const probe = (d) => { if (!d) return 'miss'; try { const i = fs.statSync(path.join(d, 'install.py'), { throwIfNoEntry: false }); if (!i || !i.isFile()) return 'miss'; const s = fs.statSync(path.join(d, 'skills'), { throwIfNoEntry: false }); return s && s.isDirectory() ? 'hit' : 'miss'; } catch (e) { return e.code || 'error'; } };
+const tried = []; let root = '', r = 'miss';
+try { let d = fs.realpathSync(__dirname); tried.push(`上溯起点 ${d}`); while ((r = probe(d)) === 'miss' && path.dirname(d) !== d) d = path.dirname(d); if (r === 'hit') root = d; else tried[0] += r === 'miss' ? ' 未命中有效根（install.py 文件 + skills/ 目录）' : ` ${r}（放弃上溯）`; }
+catch (e) { tried.push(`上溯起点 ${__dirname} ${e.code || e.message}`); }
+if (!root) { const v = process.env.AGENT_TOOLS_ROOT || ''; r = probe(v); tried.push(`AGENT_TOOLS_ROOT=${v || '<unset>'}${r === 'hit' || r === 'miss' ? '' : ' ' + r}`); if (r === 'hit') root = v; }
+if (!root) { const p = path.join(os.homedir(), '.config/agent-tools/root'); try { const v = fs.readFileSync(p, 'utf8').trim(); r = probe(v); tried.push(`${p} = ${v}${r === 'hit' || r === 'miss' ? '' : ' ' + r}`); if (r === 'hit') root = v; } catch (e) { tried.push(`${p} ${e.code === 'ENOENT' ? '<absent>' : e.code}`); } }
+if (!root) { console.error(['agent-tools: 未找到仓库根', ...tried, '请在仓库目录运行 python3 install.py'].join('\n')); process.exit(2); }
+// agent-tools bootstrap end
 const { execFileSync } = require('child_process');
-const os = require('os');
-const path = require('path');
+const { browserRuntime } = require(path.join(root, 'lib/agent_tools/locate.js'));
 
 const home = os.homedir();
-const PW_PATH = process.env.PW_PATH || path.join(home, 'tools/lexiao-browser/node_modules/playwright');
-const CHROME_PATH = process.env.CHROME_PATH || path.join(home, 'tools/lexiao-browser/browsers/chrome-linux64/chrome');
 const MERMAID_CACHE = process.env.MERMAID_CACHE || path.join(home, '.cache/agent-tools/mermaid');
-const RUNTIME_LIBS = process.env.RUNTIME_LIBS || path.join(home, 'tools/lexiao-browser/runtime-libs/usr/lib/x86_64-linux-gnu');
 
 // 返回本地 mermaid.min.js 路径；缓存没有时用 npm pack 从当前 registry 取一次（含 UMD 版 dist/mermaid.min.js）
 function mermaidFile(ver) {
@@ -82,6 +89,11 @@ function main() {
   if (!blocks.length) { console.log('no mermaid blocks'); fs.writeFileSync(path.join(outDir, 'results.md'), '无 mermaid 块\n'); process.exit(0); }
 
   // 只有存在 mermaid 块才需要浏览器工具链；等宽文本图或无图方案不依赖 Playwright。
+  let RUNTIME;
+  try { RUNTIME = browserRuntime(); } catch (error) { console.error(error.message); process.exit(1); }
+  const PW_PATH = process.env.PW_PATH || RUNTIME.playwrightDir;
+  const CHROME_PATH = process.env.CHROME_PATH || RUNTIME.executablePath;
+  const RUNTIME_LIBS = process.env.RUNTIME_LIBS || RUNTIME.runtimeLibDir;
   const { chromium } = require(PW_PATH);
 
   const files = {};

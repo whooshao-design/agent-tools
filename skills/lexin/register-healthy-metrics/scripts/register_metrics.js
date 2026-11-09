@@ -1,9 +1,18 @@
 #!/usr/bin/env node
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
+// agent-tools bootstrap（模板 lib/agent_tools/bootstrap.js，lint 规则六校验逐字一致）
+const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
+// probe 返回 'hit' | 'miss' | <异常码>：与 locate.py 同序先看 install.py（缺失即 miss），再看 skills/；用会抛错的 statSync，不用对一切错误都返回 false 的 existsSync
+const probe = (d) => { if (!d) return 'miss'; try { const i = fs.statSync(path.join(d, 'install.py'), { throwIfNoEntry: false }); if (!i || !i.isFile()) return 'miss'; const s = fs.statSync(path.join(d, 'skills'), { throwIfNoEntry: false }); return s && s.isDirectory() ? 'hit' : 'miss'; } catch (e) { return e.code || 'error'; } };
+const tried = []; let root = '', r = 'miss';
+try { let d = fs.realpathSync(__dirname); tried.push(`上溯起点 ${d}`); while ((r = probe(d)) === 'miss' && path.dirname(d) !== d) d = path.dirname(d); if (r === 'hit') root = d; else tried[0] += r === 'miss' ? ' 未命中有效根（install.py 文件 + skills/ 目录）' : ` ${r}（放弃上溯）`; }
+catch (e) { tried.push(`上溯起点 ${__dirname} ${e.code || e.message}`); }
+if (!root) { const v = process.env.AGENT_TOOLS_ROOT || ''; r = probe(v); tried.push(`AGENT_TOOLS_ROOT=${v || '<unset>'}${r === 'hit' || r === 'miss' ? '' : ' ' + r}`); if (r === 'hit') root = v; }
+if (!root) { const p = path.join(os.homedir(), '.config/agent-tools/root'); try { const v = fs.readFileSync(p, 'utf8').trim(); r = probe(v); tried.push(`${p} = ${v}${r === 'hit' || r === 'miss' ? '' : ' ' + r}`); if (r === 'hit') root = v; } catch (e) { tried.push(`${p} ${e.code === 'ENOENT' ? '<absent>' : e.code}`); } }
+if (!root) { console.error(['agent-tools: 未找到仓库根', ...tried, '请在仓库目录运行 python3 install.py'].join('\n')); process.exit(2); }
+// agent-tools bootstrap end
 const { createRequire } = require('module');
-const { launchLockedContext } = require('../../get-browser-session/scripts/browser_session');
+const { skillDir, browserRuntime } = require(path.join(root, 'lib/agent_tools/locate.js'));
+const { launchLockedContext } = require(path.join(skillDir('get-browser-session', 'scripts'), 'browser_session'));
 
 const BASE_URLS = {
   stable: 'https://stable-eye.oa.fenqile.com',
@@ -16,7 +25,6 @@ const DEFAULT_BUSINESS_LINE = '风控研发中心';
 const DEFAULT_CLUSTER = 'Default';
 const DEFAULT_LANGUAGE = 'zh';
 const DEFAULT_PROFILE = '/tmp/healthy-metrics-profile';
-const DEFAULT_TOOL_DIR = '~/tools/lexiao-browser';
 
 const APP_LABELS = {
   server_hawk_decision_dispatcher: '米霍克dispatcher主应用',
@@ -75,7 +83,7 @@ Options:
   --business-line    Defaults to 风控研发中心
   --token            Bearer token. Also supports env HEALTHY_METRIC_TOKEN
   --profile          Browser profile with Healthy login state
-  --tool-dir         Local Playwright tool dir, defaults to ~/tools/lexiao-browser
+  --tool-dir         Local Playwright tool dir, defaults to BROWSER_SESSION_TOOL_DIR or the setup_browser_tool.sh directory
   --apply            POST missing metrics. Without --apply only dry-runs
   --plan-only        Only expand fields, no network access
   --retry-times      Verification retries after registration, default 3
@@ -238,13 +246,15 @@ function resolveDesc(target, app, suffix, descMap, appLabelMap) {
 }
 
 function resolvePaths(args) {
-  const toolDir = expandHome(args['tool-dir'] || DEFAULT_TOOL_DIR);
+  // 工具目录、Chromium 与运行库只经 browserRuntime() 取；--tool-dir 通过 BROWSER_SESSION_TOOL_DIR 传给它。
+  if (args['tool-dir']) process.env.BROWSER_SESSION_TOOL_DIR = expandHome(args['tool-dir']);
+  const runtime = browserRuntime();
   return {
-    toolDir,
+    toolDir: runtime.toolDir,
     profileDir: expandHome(args.profile || DEFAULT_PROFILE),
-    chromePath: expandHome(args.chrome || path.join(toolDir, 'browsers/chrome-linux64/chrome')),
-    runtimeLibDir: expandHome(args['runtime-lib-dir'] || path.join(toolDir, 'runtime-libs/usr/lib/x86_64-linux-gnu')),
-    playwrightPackage: path.join(toolDir, 'package.json'),
+    chromePath: expandHome(args.chrome) || runtime.executablePath,
+    runtimeLibDir: expandHome(args['runtime-lib-dir']) || runtime.runtimeLibDir,
+    playwrightPackage: path.join(runtime.toolDir, 'package.json'),
   };
 }
 

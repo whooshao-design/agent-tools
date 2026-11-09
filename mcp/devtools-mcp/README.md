@@ -64,7 +64,7 @@ mcp/devtools-mcp/.env
 - `MQ_ALLOWED_HOSTS`
 - `ARTIFACT_REPO_ALLOWED_HOSTS`
 
-`java_app_diag` 通过 `BASTION_CONFIG` 指定堡垒机配置，默认查找 `/home/joney/projects/ai/agent-tools/mcp/bastion-mcp/config.json`。诊断工具会在首次执行时自动复用或建立堡垒机连接；如果密钥认证不可用，仍需传入 password/otp。
+`java_app_diag` 通过 `BASTION_CONFIG` 指定堡垒机配置，默认查找本仓库的 `mcp/bastion-mcp/config.json`（`install.py --with-mcp` 注册时把这个绝对路径写进 `BASTION_CONFIG`）。诊断工具会在首次执行时自动复用或建立堡垒机连接；如果密钥认证不可用，仍需传入 password/otp。
 `mysql_readonly` 不再使用本地 mysql 客户端和 `~/.config/codex-mysql-readonly/instances.json`；线上和 stable 都走各自域名的 lxcloud HTTP SQL，授权从对应域名的浏览器 localStorage token 复用。lxcloud 查询接受任意经授权的 `db_type`，不维护客户端实例白名单，实例应由上层 skill 从用户输入或目标项目运行时数据源代码确认。
 通用浏览器入口、`redis_query`、`dubbo_test`、`lexiao` 默认复用 `~/.local/state/agent-tools/browser-profiles/main`，接受 `BROWSER_SESSION_PROFILE` / `DEVTOOLS_BROWSER_PROFILE` 覆盖。`healthy` 保持独立的 `browser-profiles/healthy`，浏览器会话层访问 WebShell 时默认使用 `browser-profiles/webshell`；显式 `profile` 参数可覆盖默认值。
 

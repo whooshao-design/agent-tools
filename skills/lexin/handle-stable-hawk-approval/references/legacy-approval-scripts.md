@@ -1,6 +1,6 @@
 # 旧审批脚本对照（approval.py / approval-overseas.py）
 
-`/home/joney/tools/hawk/approval.py` 与 `/home/joney/tools/hawk/approval-overseas.py` 是本 skill 的前身。
+`~/tools/hawk/approval.py` 与 `~/tools/hawk/approval-overseas.py` 是本 skill 的前身。
 两者都是"常驻轮询 + 自动通过所有待审批"的脚本，能力已被 `stable_approval_cli.py` 覆盖。
 **不要直接运行它们**：内嵌凭据早已失效，且带下面几个会导致误操作的缺陷。
 

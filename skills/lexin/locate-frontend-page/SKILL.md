@@ -2,7 +2,7 @@
 name: locate-frontend-page
 description: 从后端反查线上前端页面地址：Dubbo 接口（可带 method）、OA 网关 URL 或 MySQL 表，经 OA 网关规则和 rc_fd 前端工程 product 分支里的调用代码，得到可直接在浏览器打开的线上页面地址。Use when 用户问“这个接口/表/网关 URL 在哪个页面用”“对应前端页面地址”“前端哪个目录调用了这个接口”“想在浏览器里看这个功能的页面”等只读反查；前端 URL 查后端实现用 query-oa-gateway-interface。
 metadata:
-  version: 1.0.2
+  version: 1.0.3
 ---
 
 # locate-frontend-page
@@ -14,13 +14,13 @@ metadata:
 ## 用法
 
 ```bash
-S=/home/joney/projects/ai/agent-tools/skills/lexin/locate-frontend-page/scripts/locate_frontend_page.js
+S=scripts/locate_frontend_page.js
 node $S --interface=com.fenqile.rc.mock.service.UserWhitelistCgiService [--method=page]
 node $S --url=/rc_oa_gateway/rc_mock/user_whitelist_page        # 也接受带域名的完整 URL
 node $S --table=rc_credit_ms_db.t_user_whitelist               # 库名前缀可省
 ```
 
-三个入口只能给一个。可选参数：`--verify`（用登录态 GET 页面、核对 `<title>`）、`--refresh-projects`（刷新 rc_fd 工程清单缓存）、`--frontend-root`（默认 `/home/joney/projects/frontend`）、`--backend-root`（默认 `/home/joney/projects/backend`）、`--profile`。
+三个入口只能给一个。可选参数：`--verify`（用登录态 GET 页面、核对 `<title>`）、`--refresh-projects`（刷新 rc_fd 工程清单缓存）、`--frontend-root`（默认 `~/projects/frontend`）、`--backend-root`（默认 `~/projects/backend`）、`--profile`。
 
 输出 JSON 第一段 `summary` 每条线上规则一行：后端方法、前端接口、`pageUrls`、调用位置 `工程@分支:文件:行`。其余字段是证据：`tableTrace`、`nonProdRules`（被排除的非线上规则）、`repos`（clone/fetch 情况与提交号）、`results[].pages[]`（模块、HTML、路由、`notes`）。
 
@@ -34,7 +34,7 @@ node $S --table=rc_credit_ms_db.t_user_whitelist               # 库名前缀可
 3. **前端工程**：
    - 网关域名的首段（如 `hawkeye`）匹配工程名（去掉 `web`、`oa` 和分隔符后比较），精确匹配优先。工程清单来自 GitLab `rc_fd` 组页面，缓存 7 天，位置 `~/.cache/agent-tools/locate-frontend-page/rc_fd-projects.json`。
    - 本地已有的工程只 `git fetch origin product`，不切换分支、不改工作区。
-   - 本地没有的工程 `git clone -b product` 到 `/home/joney/projects/frontend/`，单次最多 clone 3 个。没有 `product` 分支时按默认分支 clone，并在 `note` 里写明。
+   - 本地没有的工程 `git clone -b product` 到 `~/projects/frontend/`，单次最多 clone 3 个。没有 `product` 分支时按默认分支 clone，并在 `note` 里写明。
 4. **调用代码**：在 `origin/product` 上 `git grep` 网关路径。前端拦截器会统一补 `rc_oa_gateway/` 前缀，所以搜索时去掉它；`.json` 后缀有无两种都搜。命中 `user_whitelist_page_v2` 这类前缀扩展的行会被排除。
 5. **页面地址**：
    - 模块：从命中文件往上找最近的 `main.js` 所在目录作为模块。`src/modules/A/B` 对应 `a/b.html`，各段转 kebab-case；`Index` 对应站点根。
@@ -53,7 +53,7 @@ node $S --table=rc_credit_ms_db.t_user_whitelist               # 库名前缀可
 
 | 现象 | 处理 |
 |---|---|
-| `LOGIN_REQUIRED`（网关 16051006；脚本已自动打开网关控制台续登并重试过一次） | `node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js --ensure --url=https://gateway.oa.fenqile.com/ --success-text=none` 后重跑 |
+| `LOGIN_REQUIRED`（网关 16051006；脚本已自动打开网关控制台续登并重试过一次） | `node $AGENT_TOOLS_ROOT/skills/lexin/get-browser-session/scripts/browser_session.js --ensure --url=https://gateway.oa.fenqile.com/ --success-text=none` 后重跑 |
 | GitLab 工程列表不是 JSON | 同上，把 `--url` 换成 `http://gitlab.fenqile.com/` 登录 GitLab |
 | `PROFILE_IN_USE` / 锁超时 | 等其他浏览器脚本结束，不并行跑多个本脚本 |
 | `fetch-failed` / `clone-failed` | 报告 `note` 里的 git 错误；内网波动可稍后重试，不要改用其他分支凑结果 |

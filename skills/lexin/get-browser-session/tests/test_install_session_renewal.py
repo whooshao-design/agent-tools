@@ -186,5 +186,21 @@ class SessionRenewalInstallerTest(unittest.TestCase):
         uninstall.assert_called_once_with()
 
 
+    def test_service_carries_repo_root_for_copy_mode(self):
+        service, _ = installer.build_unit_contents(
+            browser_script=Path("/x/browser_session.js"), targets=installer.default_targets(), schedule="*-*-* 11:00:00", root="/r")
+        self.assertIn('Environment="AGENT_TOOLS_ROOT=/r"', service)
+        service, _ = installer.build_unit_contents(
+            browser_script=Path("/x/browser_session.js"), targets=installer.default_targets(), schedule="*-*-* 11:00:00")
+        self.assertIn(f'Environment="AGENT_TOOLS_ROOT={Path(__file__).parents[4]}"', service)
+
+    def test_non_systemd_platform_exits_2_with_manual_steps(self):
+        with patch.object(installer.locate, "platform", return_value="darwin"), patch("sys.stderr") as err:
+            with self.assertRaises(SystemExit) as raised:
+                installer.uninstall()
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("launchd", "".join(call.args[0] for call in err.write.call_args_list))
+
+
 if __name__ == "__main__":
     unittest.main()

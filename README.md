@@ -163,9 +163,10 @@
 共享浏览器状态与技能源码分开存放：`~/.local/state/agent-tools/browser-profiles/{main,healthy,webshell}` 保存隔离的登录态，`~/.local/state/agent-tools/session-snapshots/` 保存本机凭据快照，均不入 Git。主 profile 的参数/环境变量优先级见 `get-browser-session`；移动已有 profile 前必须停止浏览器和续期任务，整套备份迁移，不能把两个 Cookie 数据库合并。升级前已启动的 MCP 可能仍持有旧默认路径：迁移时可暂留旧 `.cache` 路径的软链接，重启所有客户端并确认没有旧引用后再移除链接。
 
 ```bash
-git clone git@github.com:whooshao-design/agent-tools.git ~/projects/ai/agent-tools
-cd ~/projects/ai/agent-tools
-python3 install.py           # 符号链接到 ~/.claude/skills 和 ~/.codex/skills
+git clone git@github.com:whooshao-design/agent-tools.git <任意目录>
+cd <任意目录>
+cp env/local.env.example env/local.env   # 可选：文档根、工作区根、浏览器工具目录、打开命令
+python3 install.py           # 符号链接到 ~/.claude/skills 和 ~/.codex/skills，并把仓库根写进两端 env 与 ~/.config/agent-tools/root
 ```
 
 选择性安装与卸载：
@@ -177,7 +178,8 @@ python3 install.py --targets claude        # 只装 Claude
 python3 install.py --copy                  # 复制模式兜底
 python3 install.py --with-subagents        # 额外安装双端 reviewer agents 与结果守卫 hook
 python3 install.py --with-subagents --dry-run
-python3 install.py --with-global           # 额外把 AGENTS.global.md 链接为 ~/.codex/AGENTS.md 与 ~/.claude/CLAUDE.md
+python3 install.py --with-global           # 额外把 AGENTS.global.md 渲染（填占位符、追加 env/AGENTS.local.md）为 ~/.codex/AGENTS.md 与 ~/.claude/CLAUDE.md
+python3 install.py --with-mcp              # 额外在两端注册 devtools / bastion / bastion_dba MCP
 python3 install.py --with-session-cleanup  # 额外给 Claude 加 SessionEnd hook，会话结束删除该会话的临时目录
 python3 install.py --list
 python3 install.py --with-subagents --uninstall
@@ -186,9 +188,8 @@ python3 install.py --with-subagents --uninstall
 `--with-subagents` 会先检查所有 reviewer 目标；若发现同名外部 agent，默认整次失败且不写入，只有显式 `--force` 才替换，避免“外部 reviewer + 官方 hook”的半安装状态。它只合并本仓库拥有的 `SubagentStop` handler，不覆盖其他 hooks 或设置。Codex 首次安装或 hook 内容变化后，按客户端提示使用 `/hooks` 审查并信任新定义；安装器不会绕过该安全确认。
 若 `~/.claude/settings.json` 或 `~/.codex/hooks.json` 本身由符号链接管理，安装器会拒绝替换链接；请在真实配置源中手工合并或改用普通文件。
 
-MCP 注册（每端一次）：Claude 用 `claude mcp add --scope user`，Codex 在 `~/.codex/config.toml`，
-PYTHONPATH 指向本仓库内对应 MCP 目录，模块形如 `python3 -m devtools_mcp.jenkins_server`。
-凭据通过环境变量或本地 `.env` / `config.json` 提供，不入 git。
+MCP 注册由 `python3 install.py --with-mcp` 完成（Claude `claude mcp add --scope user`，Codex `codex mcp add`），`PYTHONPATH` 与 `BASTION_CONFIG` 指向本仓库；
+业务 token 与内网域名放 `mcp/devtools-mcp/.env`（模板 `.env.example`），不再写进注册项。完整的新机器步骤见 `docs/setup-new-machine.md`。
 
 ## 更新
 

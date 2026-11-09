@@ -1,6 +1,6 @@
 # 前端开发细则
 
-写集含 `.vue`、`.js`、`.jsx`、`.ts`、`.tsx`、`.scss`、`.less`、`.css`、`.html` 模板，或文件位于前端仓库时读取本文件。阶段流程、DEV 清单和简洁性要求仍以主文件为准；本文只补前端特有的做法。示例取自米霍克 OA 前端 `/home/joney/projects/frontend/web_mihawk_oa`（Vue 2 + Element UI 2.15 + 自研 `@rc/toss-vui`），规则同样适用于其他 Vue 2/3 或 React 仓库。
+写集含 `.vue`、`.js`、`.jsx`、`.ts`、`.tsx`、`.scss`、`.less`、`.css`、`.html` 模板，或文件位于前端仓库时读取本文件。阶段流程、DEV 清单和简洁性要求仍以主文件为准；本文只补前端特有的做法。示例取自米霍克 OA 前端 `~/projects/frontend/web_mihawk_oa`（Vue 2 + Element UI 2.15 + 自研 `@rc/toss-vui`），规则同样适用于其他 Vue 2/3 或 React 仓库。
 
 ## 1. 编码前必读
 
@@ -81,10 +81,10 @@ B 端后台的版式目标是“和仓库里同类界面一样、和组件库默
 
 - 最低要求：改动的 `.vue` 能通过模板编译（如 `vue-template-compiler` 的 `compile` 无错误），脚本能通过语法检查；仓库有 lint/type-check/test 脚本时一并执行。
 - 资源允许时必须启动本地 dev server（以启动工具的资源门禁为准，例如 `start-local-frontend doctor` 全绿），确认 webpack/vite 编译通过且无新增报错。web_mihawk_oa 使用 `start-local-frontend`：先 `doctor` 过资源门禁，再 `start`，等 webpack 明确报告编译完成。
-- 改动了页面上可见的界面（弹窗、表单、表格、按钮区、提示）时，交付前必须跑 `verify-browser-qa` 的 `ui_check.js`：用模拟接口在本地渲染出改动的界面，`status` 不能是 `fail`，`warn` 逐条判断并在开发记录里说明保留理由；然后打开 `target-*.png` 截图看一遍，看过才算完成。米霍克用 `start-local-frontend` 的 `references/ui-check/` 基础场景，不需要登录。把截图路径和 `ui_check` 结论写进开发结果。
+- 改动了页面上可见的界面（弹窗、表单、表格、按钮区、提示）时，交付前必须跑 `verify-browser-qa` 的 `ui_check.js`：用模拟接口在本地渲染出改动的界面，`status` 不能是 `fail`，`warn` 逐条判断并在开发记录里说明保留理由；然后打开 `target-*.png` 截图看一遍，看过才算完成。米霍克用 `$AGENT_TOOLS_ROOT/skills/lexin/start-local-frontend/references/ui-check/` 基础场景，不需要登录。把截图路径和 `ui_check` 结论写进开发结果。
 - 能在浏览器里复现的交互，用浏览器自动化截图留证，做法参考 `verify-browser-qa`。
 - 需要真实后端或登录态的交互，如果 agent 拿不到环境登录态（例如项目环境 OA 网关不认自动化浏览器 profile），不要转发 Cookie 绕过。在开发结果里把它列为用户验收项，写清入口 URL、操作步骤和预期结果。
-- 验证阶段的路由见 `dev-verify-change` 的 `references/test-execution-routing.md`“前端验证”小节。
+- 验证阶段的路由见 `$AGENT_TOOLS_ROOT/skills/dev-workflow/dev-verify-change/references/test-execution-routing.md`“前端验证”小节。
 
 ## 7. 前后端契约与发布
 

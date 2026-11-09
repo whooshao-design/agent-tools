@@ -10,13 +10,15 @@ function loadTopology(withHealthyClient, argv = [], env = {}, overrides = {}) {
   const source = fs.readFileSync(script, 'utf8');
   const exported = { exports: {} };
   const requireMock = name => {
-    if (overrides[name]) return overrides[name];
-    if (name.endsWith('/healthy_client')) return { withHealthyClient };
-    if (name === 'module') return { createRequire: () => { throw new Error('独立鉴权不得启动浏览器'); } };
+    const bare = name.replace(/^node:/, '');  // 引导代码用 node:fs / node:os / node:path，覆盖项按裸名登记
+    if (overrides[bare]) return overrides[bare];
+    if (bare.endsWith('/healthy_client')) return { withHealthyClient };
+    if (bare === 'module') return { createRequire: () => { throw new Error('独立鉴权不得启动浏览器'); } };
     return require(name);
   };
   vm.runInNewContext(source, {
     require: requireMock, module: exported,
+    __dirname: path.dirname(script), __filename: script,  // 引导代码从脚本真实目录上溯找仓库根
     process: { argv: ['node', script, ...argv], env },
     console: { log() {}, error() {} }, URL, AbortController,
     setTimeout: fn => setTimeout(fn, 0), clearTimeout,

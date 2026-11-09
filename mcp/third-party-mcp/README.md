@@ -17,8 +17,8 @@
 无凭据即可启动的通用 MCP：
 
 ```bash
-codex mcp add context7 -- /home/joney/projects/ai/agent-tools/mcp/third-party-mcp/context7/bin/context7-mcp
-codex mcp add markitdown -- /home/joney/projects/ai/agent-tools/mcp/third-party-mcp/markitdown/bin/markitdown-mcp
+codex mcp add context7 -- $AGENT_TOOLS_ROOT/mcp/third-party-mcp/context7/bin/context7-mcp
+codex mcp add markitdown -- $AGENT_TOOLS_ROOT/mcp/third-party-mcp/markitdown/bin/markitdown-mcp
 ```
 
 GitHub 和 Sonatype 需要 token；不要在未设置 token 时默认注册，否则 Codex 启动会报 MCP startup failed。
@@ -26,7 +26,7 @@ GitHub 和 Sonatype 需要 token；不要在未设置 token 时默认注册，�
 
 ```bash
 export GITHUB_PERSONAL_ACCESS_TOKEN=...
-codex mcp add github -- /home/joney/projects/ai/agent-tools/mcp/third-party-mcp/github/bin/github-mcp
+codex mcp add github -- $AGENT_TOOLS_ROOT/mcp/third-party-mcp/github/bin/github-mcp
 
 export SONATYPE_GUIDE_MCP_TOKEN=...
 codex mcp add sonatype --url https://mcp.guide.sonatype.com/mcp --bearer-token-env-var SONATYPE_GUIDE_MCP_TOKEN
@@ -35,7 +35,7 @@ codex mcp add sonatype --url https://mcp.guide.sonatype.com/mcp --bearer-token-e
 飞书需要 App 凭证与一次性 OAuth 授权，配置见 `lark/README.md`：
 
 ```bash
-codex mcp add lark -- /home/joney/projects/ai/agent-tools/mcp/third-party-mcp/lark/bin/lark-mcp mcp
+codex mcp add lark -- $AGENT_TOOLS_ROOT/mcp/third-party-mcp/lark/bin/lark-mcp mcp
 ```
 
 不要把 token 写入 Codex 配置。Context7 API key 是可选项，需要更高限流时在启动 Codex 前导出：
@@ -47,18 +47,18 @@ export CONTEXT7_API_KEY=...
 ## Claude Code 注册
 
 ```bash
-claude mcp add --scope user context7 -- /home/joney/projects/ai/agent-tools/mcp/third-party-mcp/context7/bin/context7-mcp
-claude mcp add --scope user markitdown -- /home/joney/projects/ai/agent-tools/mcp/third-party-mcp/markitdown/bin/markitdown-mcp
+claude mcp add --scope user context7 -- $AGENT_TOOLS_ROOT/mcp/third-party-mcp/context7/bin/context7-mcp
+claude mcp add --scope user markitdown -- $AGENT_TOOLS_ROOT/mcp/third-party-mcp/markitdown/bin/markitdown-mcp
 ```
 
 有 token 后再按需注册：
 
 ```bash
 export GITHUB_PERSONAL_ACCESS_TOKEN=...
-claude mcp add --scope user github -- /home/joney/projects/ai/agent-tools/mcp/third-party-mcp/github/bin/github-mcp
+claude mcp add --scope user github -- $AGENT_TOOLS_ROOT/mcp/third-party-mcp/github/bin/github-mcp
 
 export SONATYPE_GUIDE_MCP_TOKEN=...
-claude mcp add --scope user sonatype -- /home/joney/projects/ai/agent-tools/mcp/third-party-mcp/sonatype/bin/sonatype-mcp
+claude mcp add --scope user sonatype -- $AGENT_TOOLS_ROOT/mcp/third-party-mcp/sonatype/bin/sonatype-mcp
 ```
 
 ## 运行时缓存

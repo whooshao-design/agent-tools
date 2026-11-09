@@ -2,7 +2,7 @@
 name: dev-verify-change
 description: Use when 代码改动已完成，需要跑测试、执行构建检查或做验证：围绕本次变更做最小必要验证，给出验证结论，并决定是否需要扩大验证范围。
 metadata:
-  version: 1.12.0
+  version: 1.12.1
 ---
 
 # dev-verify-change
@@ -15,7 +15,7 @@ metadata:
 
 ## 默认产物目录
 
-如需把测试验证结果落盘，默认放到 `/home/joney/docs/requirements-development/<requirement-name>/test-verification/verification.md`，使用 `references/verification-template.md`。
+如需把测试验证结果落盘，默认放到 `~/docs/requirements-development/<requirement-name>/test-verification/verification.md`，使用 `references/verification-template.md`。
 
 - `<requirement-name>` 使用简短、稳定、可读的需求名目录标识
 - 用户明确指定路径时，优先使用用户路径
@@ -42,7 +42,7 @@ metadata:
 - 本次改动了什么
 - 哪些模块、接口、页面或行为受到影响
 - 最小可证明“改动成立”的验证方式是什么
-- 按 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/artifact-identity.md` 生成的 `gate_context G` 和待验证 `change_revision`
+- 按 `$AGENT_TOOLS_ROOT/skills/dev-workflow/references/artifact-identity.md` 生成的 `gate_context G` 和待验证 `change_revision`
 - `change_revision` 中各 `DEV-*` 的来源、最终状态、实际写集和执行证据
 
 按 `G.mode` 检查交接材料：
@@ -110,7 +110,7 @@ approved 逐条输出“检查项 ID (`TC-*`) → 对应 `DEV-*`/实现位置 �
 
 ## 输出物
 
-表达遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/writing-principles.md`，名称与准确性按其 2.1 节逐条自检。验证结论写出执行的命令、范围和结果数字，没跑的明确写没跑。
+表达遵循 `$AGENT_TOOLS_ROOT/skills/dev-workflow/references/writing-principles.md`，名称与准确性按其 2.1 节逐条自检。验证结论写出执行的命令、范围和结果数字，没跑的明确写没跑。
 
 默认输出一份轻量验证结果；正式落盘时使用 `references/verification-template.md`。至少包括：
 - 前提状态：`gate_context G`、审批/任务/waiver 记录、待验 `change_revision`

@@ -63,7 +63,7 @@ test('requires --app and rejects unknown enum values', () => {
 
 test('builds the archLog/page payload with the codes the page sends', () => {
   const query = buildQuery({ app: 'server_x', type: 'dubbo', env: 'gray', 'trace-id': 'T1', ip: '10.0.0.1', service: 'Svc', method: 'm', uid: '7', keyword: ['a', 'b'], 'keyword-mode': 'or', order: 'asc', page: 2, 'page-size': 50 }, NOW);
-  const payload = buildPayload({ ...query, userName: 'joney' });
+  const payload = buildPayload({ ...query, userName: 'alice' });
   assert.equal(payload.type, 3);
   assert.equal(payload.env, 'gray');
   assert.equal(payload.filterType, 2);
@@ -75,7 +75,7 @@ test('builds the archLog/page payload with the codes the page sends', () => {
   assert.equal(payload.mth, 'm');
   assert.equal(payload.page, 2);
   assert.equal(payload.limit, 50);
-  assert.equal(payload.min, 'joney');
+  assert.equal(payload.min, 'alice');
   assert.deepEqual(payload.times, [new Date(query.from).toISOString(), new Date(query.to).toISOString()]);
   const defaults = buildPayload({ ...buildQuery({ app: 'server_x' }, NOW), userName: 'u' });
   assert.equal(defaults.type, 10);

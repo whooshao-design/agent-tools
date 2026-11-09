@@ -2,7 +2,7 @@
 name: query-mysql-data
 description: 查询和验证公司内网 MySQL 数据，stable/测试和线上都通过各自域名的 lxcloud HTTP SQL 只读查询。Use when 用户要求只读查询 MySQL、查看表结构或样例记录、验证数据库数据；未明确实例时必须优先从目标项目运行时数据源代码反查实例与逻辑库，db_type 不使用静态白名单，可复用浏览器 session 获取 lxcloud token，最终必须输出 SQL 和查询结果。
 metadata:
-  version: 3.0.4
+  version: 3.0.5
 ---
 
 # query-mysql-data
@@ -18,7 +18,7 @@ metadata:
 
 不再使用本地 mysql 客户端直连，也不再读取 `~/.config/codex-mysql-readonly/instances.json`；预发布/灰度等其他环境不在本 skill 范围内。
 
-MCP 优先、脚本兜底。已注册 `mysql_readonly` MCP 时优先调用 `mysql_lxcloud_query`（`env` 取 `prod`/`stable`）；MCP 不可用时使用脚本，路径固定为 `/home/joney/projects/ai/agent-tools/skills/lexin/query-mysql-data/scripts/mysql_readonly.js`。
+MCP 优先、脚本兜底。已注册 `mysql_readonly` MCP 时优先调用 `mysql_lxcloud_query`（`env` 取 `prod`/`stable`）；MCP 不可用时使用脚本，路径固定为 `scripts/mysql_readonly.js`。
 
 ## 核心约束
 
@@ -61,13 +61,13 @@ MCP 优先、脚本兜底。已注册 `mysql_readonly` MCP 时优先调用 `mysq
 检查环境入口和依赖：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/query-mysql-data/scripts/mysql_readonly.js --doctor
+node scripts/mysql_readonly.js --doctor
 ```
 
 如果浏览器登录态缺失，先打开对应站点完成登录（stable 换成 `https://stable-lxcloud.lexincloud.com/`）：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js \
+node $AGENT_TOOLS_ROOT/skills/lexin/get-browser-session/scripts/browser_session.js \
   --ensure \
   --url=https://lxcloud.lexincloud.com/ \
   --success-text=none
@@ -76,7 +76,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/script
 stable 查询：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/query-mysql-data/scripts/mysql_readonly.js \
+node scripts/mysql_readonly.js \
   --env stable \
   --db-type HawkDecisionDB \
   --query "SHOW DATABASES"
@@ -85,7 +85,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/query-mysql-data/scripts/m
 线上查询（`--env prod` 可省略）：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/query-mysql-data/scripts/mysql_readonly.js \
+node scripts/mysql_readonly.js \
   --env prod \
   --db-type ProcesstestDB \
   --query "SELECT * FROM process_engine_test_db.t_test_task WHERE Ftask_id = 46349"
@@ -94,7 +94,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/query-mysql-data/scripts/m
 实例由代码确认后可直接传入，不受客户端固定列表限制：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/query-mysql-data/scripts/mysql_readonly.js \
+node scripts/mysql_readonly.js \
   --env prod \
   --db-type ProcessmanageDB \
   --query "SHOW TABLE STATUS FROM process_engine_db LIKE 't_process'"
@@ -107,7 +107,7 @@ read -r -s LXCLOUD_BEARER_TOKEN
 export LXCLOUD_BEARER_TOKEN
 export LXCLOUD_USER_NAME="joneyshao"
 
-node /home/joney/projects/ai/agent-tools/skills/lexin/query-mysql-data/scripts/mysql_readonly.js \
+node scripts/mysql_readonly.js \
   --env prod \
   --db-type ProcesstestDB \
   --query "SELECT * FROM process_engine_test_db.t_test_task WHERE Ftask_id = 46349"
@@ -118,12 +118,12 @@ unset LXCLOUD_BEARER_TOKEN
 如 lxcloud 同时要求 Cookie，不要让用户在聊天里粘贴 Cookie。先复用 `get-browser-session` 作为会话层：MCP 可用时优先调用 `browser_session` 的 `check_session`/`ensure_session` 和 `get_cookies`，目标 URL 和 domain 使用当前环境的站点（线上 `lxcloud.lexincloud.com`，stable `stable-lxcloud.lexincloud.com`）；MCP 不可用时再用脚本兜底检查或刷新登录态：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js \
+node $AGENT_TOOLS_ROOT/skills/lexin/get-browser-session/scripts/browser_session.js \
   --ensure \
   --url=https://lxcloud.lexincloud.com/ \
   --success-text=none
 
-node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js \
+node $AGENT_TOOLS_ROOT/skills/lexin/get-browser-session/scripts/browser_session.js \
   --cookies \
   --domain=lxcloud.lexincloud.com \
   --url=https://lxcloud.lexincloud.com/

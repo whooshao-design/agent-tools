@@ -1,10 +1,16 @@
 # Global Agent Guidelines
 
 ## Scope & Precedence
-- This file defines cross-workspace defaults for local Codex and Claude Code sessions. Its source is `/home/joney/projects/ai/agent-tools/AGENTS.global.md`; `~/.codex/AGENTS.md` and `~/.claude/CLAUDE.md` are links installed by `python3 install.py --with-global`. Edit the repository file, not the links.
+- This file defines cross-workspace defaults for local Codex and Claude Code sessions. Its source is `{{AGENT_TOOLS_ROOT}}/AGENTS.global.md`; `~/.codex/AGENTS.md` and `~/.claude/CLAUDE.md` are rendered copies written by `python3 install.py --with-global` (placeholders filled in, `env/AGENTS.local.md` appended when present). Edit the repository file and rerun that command; do not edit the copies.
 - When multiple `AGENTS.md` files apply, use the most local one for repository or module specifics, while keeping these global defaults unless a local guide overrides them.
 - The core principles below have broad coverage, but they do not override platform or safety constraints, the user's explicit requirements, or more specific repository, module, and task instructions.
 - Use task-specific skills to refine execution. When guidance conflicts, follow the higher-priority instruction; among instructions at the same level, prefer the more specific one.
+
+## Reference Resolution
+Skills, agents and this file refer to repository files in three layers. Resolve them as follows:
+1. A reference that starts with `scripts/` or `references/` inside a SKILL.md is relative to the skill directory the client reported when it loaded the skill. If the client gave no directory, use `$AGENT_TOOLS_ROOT/skills/<category>/<skill>`; find the category with `ls -d $AGENT_TOOLS_ROOT/skills/*/<skill>`.
+2. `$AGENT_TOOLS_ROOT` is the agent-tools repository root on this machine: `{{AGENT_TOOLS_ROOT}}`. Use the variable as written in shell commands; substitute that path when you call the Read tool. A process that did not load this file (an external reviewer started with `--ignore-user-config` or `--slim`) takes the value from the `AGENT_TOOLS_ROOT=` line at the top of its task text.
+3. The document root is `{{AGENT_TOOLS_DOCS_ROOT}}` and the workspace root is `{{AGENT_TOOLS_WORKSPACE_ROOT}}` (local values; `~/docs` and `~/projects` expanded when unset). Read `~/docs` and `~/projects` in SKILL.md text as these two values.
 
 ## Core Engineering Principles
 
@@ -43,7 +49,6 @@
 - When the user says they left comments on a local document ("看评论", "按评论改"), read them with `mdview comments <file>` (JSON with quote, heading, and approximate source `line`). Evaluate each one, edit the document, then run `mdview comments <file> --resolve <id> --reply "<what changed or why not>"`; leave a comment open and ask when it needs the user's decision.
 - Publishing work content to an external service (Claude Artifacts and similar) requires an explicit request from the user, because repositories routinely contain internal hostnames, code paths, and business rules that should not leave the machine by default.
 - When the user names a specific model or backend for a subtask (qwen, deepseek, kimi, glm, ...), run it through the `spawn-model-agent` skill, which starts a separate agent process on that backend; in-process subagents cannot switch provider, so do not try.
-- When the user needs to look at a screenshot or other local image (for example before confirming a dry-run form), open it in JPEGView instead of only printing its path: `(cd /mnt/c && /mnt/c/Users/joneyshao/AppData/Local/Programs/JPEGView/JPEGView.exe "$(wslpath -w <file>)" >/dev/null 2>&1 &)`. Do not use `explorer.exe` or the default `.png` association: it opens WPS 图片, which held about 500 MB, while JPEGView held 79 MB working set (54 MB private) on the same 1440x900 PNG (measured 2026-11-04). Also give the `\\wsl.localhost\...` path from `wslpath -w` in case no window appears. JPEGView 1.3.46 is the portable build from the official GitHub release; if the exe is missing, say so instead of falling back to another viewer.
 
 ## Explanation & Presentation
 - When simplifying, preserve conditions, negation, uncertainty, scope, environment, time window, numbers, units, defaults, authorization requirements, and failure behavior. Keep commands, identifiers, and protocol values exact. Preserve meaning even when a longer sentence is necessary; do not impose English word-count limits on Chinese.
@@ -104,7 +109,7 @@ These rules apply to every output: terminal replies, reports, review findings, r
 - Before the final response, triage every file in that directory:
   - Disposable (raw dumps, one-off outputs): delete it.
   - Evidence the user may need later (conclusions, reports): move it into the task's product or `docs/` directory.
-  - Workaround for a missing capability (a hand-written probe or reverse-engineered API, repeated manual queries, a script re-created because a skill or MCP lacked it): add an entry to `/home/joney/projects/ai/agent-tools/docs/skill-gaps.md`, then delete the file.
+  - Workaround for a missing capability (a hand-written probe or reverse-engineered API, repeated manual queries, a script re-created because a skill or MCP lacked it): add an entry to `$AGENT_TOOLS_ROOT/docs/skill-gaps.md`, then delete the file.
 - State the triage result in one line of the final response. If the task was interrupted, say which directory still holds files.
 - Scripts and tools that create temporary directories must remove them on exit, or keep them under a bounded, self-pruning location; fix the owning skill or MCP rather than cleaning up after it by hand.
 
@@ -120,6 +125,7 @@ These rules apply to every output: terminal replies, reports, review findings, r
 
 ### Rule
 
+Use `rtk` only when it is on PATH (`command -v rtk`); otherwise run the native command as is.
 Use `rtk` when its output filter preserves the evidence needed for the task.
 Use `rtk proxy <command>` for complete skill/instruction reads, JSON or protocol
 output, precise diffs, pipelines, and commands whose exact output matters.

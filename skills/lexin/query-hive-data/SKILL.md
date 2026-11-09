@@ -2,7 +2,7 @@
 name: query-hive-data
 description: 通过乐信大数据门户「即席分析」（data.oa.fenqile.com）以 Presto/Spark 引擎只读查询 Hive 数仓表并整理结果。Use when 用户要求查 Hive 表、数仓表、dp_ods/dp_snap/rt_ods/lx_dwd/rt_mart 等库的数据、米霍克离线流水或规则元数据、SHOW SCHEMAS/SHOW TABLES/DESCRIBE 表结构，或让即席分析跑一条 SQL；最终必须同时输出执行 SQL 和查询结果。
 metadata:
-  version: 1.0.2
+  version: 1.0.3
 ---
 
 # query-hive-data
@@ -17,7 +17,7 @@ metadata:
 本 skill 没有对应 MCP 工具，脚本是唯一入口：
 
 ```text
-/home/joney/projects/ai/agent-tools/skills/lexin/query-hive-data/scripts/hive_query.js
+scripts/hive_query.js
 ```
 
 ## 前置条件
@@ -27,7 +27,7 @@ metadata:
 确认需要重新登录再执行（MCP 优先用 `browser_session.ensure_session`，脚本兜底）：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js \
+node $AGENT_TOOLS_ROOT/skills/lexin/get-browser-session/scripts/browser_session.js \
   --ensure \
   --url=https://data.oa.fenqile.com/microapps/data/portal/improvisationAnalysis \
   --success-text=none
@@ -54,17 +54,17 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/script
 ## 查询流程
 
 1. 确认目标：库表、时间范围、业务 ID、统计指标、是否去重或对比。表不确定时读
-   `/home/joney/projects/ai/agent-tools/skills/lexin/query-hive-data/references/hive-tables.md` 选候选表，
+   `references/hive-tables.md` 选候选表，
    再用 `SHOW TABLES IN <db> LIKE '<前缀>%'`（Presto，全量列表会撞 1000 行上限）和 `DESCRIBE <db>.<table>` 校验。
    列库只能 `SHOW DATABASES --engine spark`：Presto 不认 `SHOW DATABASES`，`SHOW SCHEMAS` 会被门户预检拒绝，`information_schema` 无权限。
 2. 编写只读 SQL：显式写 `db.table`，先带分区和 `LIMIT` 做小范围探查，再跑正式查询。
 3. 执行脚本（复杂 SQL 用 `--query-file` 避免 shell 转义问题）：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/query-hive-data/scripts/hive_query.js \
+node scripts/hive_query.js \
   --query "SELECT count(*) FROM dp_ods.hawkeye_decision_engine_record_db_t_rule_decision WHERE f_p_date = '2026-09-15'"
 
-node /home/joney/projects/ai/agent-tools/skills/lexin/query-hive-data/scripts/hive_query.js \
+node scripts/hive_query.js \
   --query-file /tmp/xxx.sql --engine spark --timeout 1200 --max-rows 50 --output /tmp/xxx-result.json
 ```
 
@@ -85,7 +85,7 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/query-hive-data/scripts/hi
 - `--profile` / `--tool-dir` / `--chrome`：与 `get-browser-session` 相同的浏览器覆盖项。
 
 接口细节、状态码和页面约束见
-`/home/joney/projects/ai/agent-tools/skills/lexin/query-hive-data/references/portal-http.md`。
+`references/portal-http.md`。
 
 ## 输出格式
 

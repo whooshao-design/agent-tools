@@ -2,7 +2,7 @@
 name: convert-epub-to-markdown
 description: 将本地 EPUB 电子书转换为适合阅读、检索和文档问答的 Markdown，保留原件、章节和图片并校验正文。Use when 用户要求“EPUB 转 MD”“把电子书提供给 ChatGPT 读取”；不用于 PDF 转换、OCR 或 DRM 解密。
 metadata:
-  version: 1.0.1
+  version: 1.0.2
 ---
 
 # EPUB 转 Markdown
@@ -28,26 +28,26 @@ metadata:
 
 脚本和依赖位于：
 
-- `/home/joney/projects/ai/agent-tools/skills/common/convert-epub-to-markdown/scripts/convert_epub.py`
-- `/home/joney/projects/ai/agent-tools/skills/common/convert-epub-to-markdown/scripts/requirements.txt`
+- `scripts/convert_epub.py`
+- `scripts/requirements.txt`
 
 优先复用可用的隔离 Python 环境；缺依赖时创建临时环境，不改全局 Python：
 
 ```bash
 python3 -m venv /tmp/epub-md-venv
-/tmp/epub-md-venv/bin/python -m pip install --no-cache-dir -r /home/joney/projects/ai/agent-tools/skills/common/convert-epub-to-markdown/scripts/requirements.txt
+/tmp/epub-md-venv/bin/python -m pip install --no-cache-dir -r scripts/requirements.txt
 ```
 
 先只读检查；终端只显示计数和必要的元数据，不打印全部 OPF、NCX 或正文：
 
 ```bash
-/tmp/epub-md-venv/bin/python /home/joney/projects/ai/agent-tools/skills/common/convert-epub-to-markdown/scripts/convert_epub.py '/path/to/book.epub' --inspect
+/tmp/epub-md-venv/bin/python scripts/convert_epub.py '/path/to/book.epub' --inspect
 ```
 
 转换并校验：
 
 ```bash
-/tmp/epub-md-venv/bin/python /home/joney/projects/ai/agent-tools/skills/common/convert-epub-to-markdown/scripts/convert_epub.py '/path/to/book.epub'
+/tmp/epub-md-venv/bin/python scripts/convert_epub.py '/path/to/book.epub'
 ```
 
 需要明确选择时加 `--layout single` 或 `--layout split`；自定义目录用 `--output-dir '/path/to/new-output'`。批量处理时逐本执行，结果与原件分别对应。

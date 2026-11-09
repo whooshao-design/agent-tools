@@ -2,7 +2,7 @@
 name: query-clickhouse-water
 description: 只读查询 ClickHouse 流水；DecisionWaterHawkCK 默认走 bastion_dba、通道不可用时自动降级乐信云 HTTP，其他 CK 实例默认走乐信云 HTTP，支持用户显式指定通道。Use when 用户要求查询预发布/灰度/线上/stable/测试 ClickHouse 流水、决策/规则/trace cost 流水，验证流水口径或优化查询 SQL；输出执行 SQL 和查询结果。
 metadata:
-  version: 1.4.2
+  version: 1.4.3
 ---
 
 # query-clickhouse-water
@@ -22,15 +22,15 @@ metadata:
 | 未指定通道，其他 CK 实例 | 乐信云 HTTP |
 
 - 预发布/灰度/线上：HTTP 页面统一为 `https://lxcloud.lexincloud.com/#/details_clickhouse/query_clickhouse`；不能用 stable 域名替代。`pre`、`gray`、`prod`/`online` 仅选择入口，不自动添加 `Fenv` 等过滤条件；同一入口不代表业务口径相同。
-- stable/测试：HTTP 页面为 `https://stable-lxcloud.oa.fenqile.com/#/details_clickhouse/query_clickhouse`，实例使用 `ABTestCK`。stable/测试是部署环境，不代表测试执行；当前查询不带 `test` 的线上执行流水表。见 `/home/joney/projects/ai/agent-tools/skills/lexin/query-clickhouse-water/references/stable-http.md`。
+- stable/测试：HTTP 页面为 `https://stable-lxcloud.oa.fenqile.com/#/details_clickhouse/query_clickhouse`，实例使用 `ABTestCK`。stable/测试是部署环境，不代表测试执行；当前查询不带 `test` 的线上执行流水表。见 `references/stable-http.md`。
 - 实例不明确时先列实例、核对数据库和表；不要把所有 Hawk 表都直接映射为同一实例，也不要采用页面缓存选中的实例。
 - 用户未说明环境且无法从上下文可靠判断时，先确认是预发布/灰度/线上还是 stable/测试，不能静默选择数据源。
 
 ## 乐信云 HTTP 步骤
 
-接口、命令和限制见 `/home/joney/projects/ai/agent-tools/skills/lexin/query-clickhouse-water/references/lxcloud-http.md`。
+接口、命令和限制见 `references/lxcloud-http.md`。
 
-1. 使用 `/home/joney/projects/ai/agent-tools/skills/lexin/query-clickhouse-water/scripts/clickhouse_http.js`，显式传 `--env` 和已确认的 `--instance`；实例不明时先 `--action instances`，再用 `databases`/`tables` 探查。
+1. 使用 `scripts/clickhouse_http.js`，显式传 `--env` 和已确认的 `--instance`；实例不明时先 `--action instances`，再用 `databases`/`tables` 探查。
 2. 脚本在同一 BrowserContext 内复用登录态、读取当前用户并查询，不导出凭据。需要登录时交给 `get-browser-session`，不重复启动浏览器或自行索取凭据。
 3. HTTP 目前接受单条 `SELECT`/`SHOW`，其中 `SELECT` 服务端要求必须带 `WHERE` 和 `LIMIT`，表结构用 `SHOW CREATE TABLE <database.table>`；不要发 `DESCRIBE`，也不要假设有 `system` 库权限。复杂 SQL 无法等价改写时报告接口限制，不自动改走堡垒机。
 4. 同时校验 HTTP 状态、外层 `code`、内层 `code` 和 `query_code`。错误与成功的空结果分别报告。
@@ -74,7 +74,7 @@ metadata:
 
 ## 表清单
 
-Hawk 当前常见流水表见 `/home/joney/projects/ai/agent-tools/skills/lexin/query-clickhouse-water/references/water-tables.md`。当用户未给表名时，读取该 reference 选择候选表，并按通道校验结构。
+Hawk 当前常见流水表见 `references/water-tables.md`。当用户未给表名时，读取该 reference 选择候选表，并按通道校验结构。
 
 ## SQL 优化准则
 

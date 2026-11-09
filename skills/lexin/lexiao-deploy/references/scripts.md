@@ -7,59 +7,59 @@ Use the bundled scripts for repeated Lexiao operations. Do not recreate temporar
 Common commands:
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/lexiao-deploy/scripts/lexiao_project_env.js \
+node scripts/lexiao_project_env.js \
   --action=status \
   --url=<lexiao-related-demand-url> \
   --app=<app-name>
 
-node /home/joney/projects/ai/agent-tools/skills/lexin/lexiao-deploy/scripts/lexiao_project_env.js \
+node scripts/lexiao_project_env.js \
   --action=deploy \
   --url=<lexiao-related-demand-url> \
   --app=<app-name> \
   [--cluster=<cluster-id-or-set>] [--build-timeout=900000] [--deploy-timeout=900000] [--poll-ms=10000]
 
-node /home/joney/projects/ai/agent-tools/skills/lexin/lexiao-deploy/scripts/lexiao_project_env.js \
+node scripts/lexiao_project_env.js \
   --action=build \
   --url=<lexiao-related-demand-url> \
   --app=<app-name> \
   [--build-timeout=1200000] [--poll-ms=30000] [--start-timeout=180000]
 
-node /home/joney/projects/ai/agent-tools/skills/lexin/lexiao-deploy/scripts/lexiao_pre_release.js \
+node scripts/lexiao_pre_release.js \
   --action=list-apps \
   --url=<lexiao-url>
 
-node /home/joney/projects/ai/agent-tools/skills/lexin/lexiao-deploy/scripts/lexiao_pre_release.js \
+node scripts/lexiao_pre_release.js \
   --action=branch-status \
   --url=<lexiao-url>
 
-node /home/joney/projects/ai/agent-tools/skills/lexin/lexiao-deploy/scripts/lexiao_pre_release.js \
+node scripts/lexiao_pre_release.js \
   --action=branch-integrate \
   --url=<lexiao-url>
 
-node /home/joney/projects/ai/agent-tools/skills/lexin/lexiao-deploy/scripts/lexiao_pre_release.js \
+node scripts/lexiao_pre_release.js \
   --action=build \
   --url=<lexiao-url> \
   --app=<app-name> \
   --app-id=<app-id> \
   --project-id=<project-id>
 
-node /home/joney/projects/ai/agent-tools/skills/lexin/lexiao-deploy/scripts/lexiao_pre_release.js \
+node scripts/lexiao_pre_release.js \
   --action=build-many \
   --url=<lexiao-url> \
   --apps=<app-name-1>,<app-name-2>
 
-node /home/joney/projects/ai/agent-tools/skills/lexin/lexiao-deploy/scripts/lexiao_pre_release.js \
+node scripts/lexiao_pre_release.js \
   --action=wait-build-many \
   --url=<lexiao-url> \
   --apps=<app-name-1>,<app-name-2> \
   --poll-ms=30000
 
-node /home/joney/projects/ai/agent-tools/skills/lexin/lexiao-deploy/scripts/lexiao_pre_release.js \
+node scripts/lexiao_pre_release.js \
   --action=open-order \
   --url=<lexiao-url> \
   --app=<app-name>
 
-node /home/joney/projects/ai/agent-tools/skills/lexin/lexiao-deploy/scripts/lexiao_pre_release.js \
+node scripts/lexiao_pre_release.js \
   --action=deploy-one \
   --url=<lexiao-url> \
   --app=<app-name> \
@@ -74,13 +74,13 @@ For gray deployment, add `--env=gray`; gray skips branch integration and build, 
 For container instance logs during deployment verification, call the diagnostics-owned helper instead of writing a new script:
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/java-server-diagnostics/scripts/container_log_check.js \
+node $AGENT_TOOLS_ROOT/skills/lexin/java-server-diagnostics/scripts/container_log_check.js \
   --app=<log-app-name> \
   --env=pre \
   --lines=120
 ```
 
-If a deployment flow already has a `login_pod_addr`, use `/home/joney/projects/ai/agent-tools/skills/lexin/java-server-diagnostics/scripts/webshell_log_check.js` directly. The old `lexiao-deploy/scripts/webshell_log_check.js` path is only a compatibility wrapper.
+If a deployment flow already has a `login_pod_addr`, use `$AGENT_TOOLS_ROOT/skills/lexin/java-server-diagnostics/scripts/webshell_log_check.js` directly. The old `lexiao-deploy/scripts/webshell_log_check.js` path is only a compatibility wrapper.
 
 `lexiao_pre_release.js --action=deploy-one` deploys one target only. It chooses VM/KVM first when `--target-type=auto`; use `--target-ip=<ip>` to pin a VM or `--target-type=container --deployment-id=<id>` for one container target.
 

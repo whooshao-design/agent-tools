@@ -13,7 +13,7 @@
 页面需要 OA 登录态。优先使用 `browser_session` MCP 检查和复用 session；MCP 不可用时，用底层脚本检查：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/scripts/browser_session.js \
+node $AGENT_TOOLS_ROOT/skills/lexin/get-browser-session/scripts/browser_session.js \
   --status \
   --url=https://stable-lxcloud.oa.fenqile.com/#/details_clickhouse/query_clickhouse \
   --success-text=none
@@ -23,10 +23,10 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/get-browser-session/script
 
 ## HTTP 查询
 
-共用接口、认证、响应判定和脚本见 `/home/joney/projects/ai/agent-tools/skills/lexin/query-clickhouse-water/references/lxcloud-http.md`。使用 `--env stable`，默认实例为 `ABTestCK`，不需要改写请求或复制登录流程：
+共用接口、认证、响应判定和脚本见 `references/lxcloud-http.md`。使用 `--env stable`，默认实例为 `ABTestCK`，不需要改写请求或复制登录流程：
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/query-clickhouse-water/scripts/clickhouse_http.js \
+node scripts/clickhouse_http.js \
   --env stable --action tables --database risk_control_base_db
 ```
 

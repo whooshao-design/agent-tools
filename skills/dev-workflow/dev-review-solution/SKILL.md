@@ -2,7 +2,7 @@
 name: dev-review-solution
 description: Use when 已有可评审的技术方案，需要在编码前基于需求、代码和约束做独立技术评审，识别阻断问题与风险，并给出通过、有条件通过、修改后复审、退回重设计或材料不足的明确结论。
 metadata:
-  version: 3.12.0
+  version: 3.12.1
 ---
 
 # dev-review-solution
@@ -15,11 +15,11 @@ metadata:
 
 默认只读取方案、需求、代码和配置，不直接修改方案或业务代码。评审可以否决推荐方向，但方案修订交回 `dev-design-solution` 完成。
 
-方案的核心壳、主 profile、横切覆盖、内容归属、可读性和追踪闭环统一按 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/solution-structure-contract.md` 评审；本 skill 只补充证据复核、严重度和准入结论。
+方案的核心壳、主 profile、横切覆盖、内容归属、可读性和追踪闭环统一按 `$AGENT_TOOLS_ROOT/skills/dev-workflow/references/solution-structure-contract.md` 评审；本 skill 只补充证据复核、严重度和准入结论。
 
 ## 默认产物目录
 
-正式评审每轮写入 `/home/joney/docs/requirements-development/<requirement-name>/solution-review/rounds/round-<N>/`。
+正式评审每轮写入 `~/docs/requirements-development/<requirement-name>/solution-review/rounds/round-<N>/`。
 
 - `<requirement-name>` 与被评审方案使用同一需求目录
 - 用户明确指定路径时，优先使用用户路径
@@ -67,7 +67,7 @@ metadata:
 
 ### 2. 独立核对方案依据
 
-- 正式评审必须由 `agent-tools-solution-reviewer` 或满足同一契约的独立 agent 执行，并遵循 `/home/joney/projects/ai/agent-tools/skills/dev-workflow/references/delegation-contract.md`；身份、只读、写入、工具面和结果结构的准入只以该契约为准。派发前按委派契约 §3.1 让用户选择 reviewer 模型（外部模型、同模型子 agent 或双评审），同一需求已选过时沿用；经 `spawn-model-agent` 以 `--readonly --tools Read,Grep,Glob` 运行的外部模型进程同样满足本契约。
+- 正式评审必须由 `agent-tools-solution-reviewer` 或满足同一契约的独立 agent 执行，并遵循 `$AGENT_TOOLS_ROOT/skills/dev-workflow/references/delegation-contract.md`；身份、只读、写入、工具面和结果结构的准入只以该契约为准。派发前按委派契约 §3.1 让用户选择 reviewer 模型（外部模型、同模型子 agent 或双评审），同一需求已选过时沿用；经 `spawn-model-agent` 以 `--readonly --tools Read,Grep,Glob` 运行的外部模型进程同样满足本契约。
 - 编排器先冻结 `(R,S,B)` 和输入指纹，再只传原始需求、待评方案、必要代码证据与上一轮待复核 findings；不传设计方的推理过程或预期结论
 - 方案的 `producer_agent_refs[]` 必须完整且可稳定标识；根 agent 直接产出时使用会话级 ref 并在执行记录中说明其强度限制，不构成审批阻塞（见 `delegation-contract.md` §1）
 - 编排器在 reviewer 停止后按委派契约校验运行记录；任何一项无法由运行时事实证明时，不得形成正式领域结论
@@ -179,8 +179,8 @@ metadata:
 冻结、快照和审批记录用共享脚本生成，不手写。版本号从产物文件头读取，`--prior-round` 会带上上一轮的报告、findings、审批记录、`resolution.md`，并按上一版归档目录 `versions/<版本>/` 生成 diff：
 
 ```bash
-RR=/home/joney/projects/ai/agent-tools/skills/dev-workflow/scripts/review_round.py
-REQ=/home/joney/docs/requirements-development/<requirement-name>
+RR=$AGENT_TOOLS_ROOT/skills/dev-workflow/scripts/review_round.py
+REQ=~/docs/requirements-development/<requirement-name>
 python3 $RR --req-dir $REQ --round <N> freeze --artifact R=requirements:summary.md \
   --artifact S=solution-design:solution.md,traceability.md \
   --artifact reader_test=solution-design:reader-test/agent-v<M>.md,reader-test/answer-key-v<M>.md \
@@ -194,7 +194,7 @@ python3 $RR --req-dir $REQ --round <N> persist --transcript <subagent 记录> --
   --reviewer-ref <spawn 返回的实例 ID> --model <模型> --trust-limit "<信任限制>"
 # 用户选了外部模型时，派发与收口改为（双评审时次 reviewer 用 --slot secondary 先落盘）：
 python3 $RR --req-dir $REQ --round <N> task
-python3 /home/joney/projects/ai/agent-tools/skills/common/spawn-model-agent/scripts/spawn_model_agent.py --backend <后端> \
+python3 $AGENT_TOOLS_ROOT/skills/common/spawn-model-agent/scripts/spawn_model_agent.py --backend <后端> \
   --readonly --tools Read,Grep,Glob --cwd <代码仓库> --wait --task @$REQ/solution-review/rounds/round-<N>/evidence/external-task-primary.md
 python3 $RR --req-dir $REQ --round <N> persist --spawn-job <作业目录> --findings <json> --selected-by user
 ```

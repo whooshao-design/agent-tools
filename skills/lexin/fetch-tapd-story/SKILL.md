@@ -2,7 +2,7 @@
 name: fetch-tapd-story
 description: 只读抓取 TAPD 需求单的字段、描述、评论和图片，落盘为本地 Markdown，复用 get-browser-session 浏览器登录态。Use when 用户给出 www.tapd.cn 需求链接要求下载或读取 TAPD 原文，或其他 skill 需要取回 TAPD 原文；不修改 TAPD，不处理缺陷/任务单。
 metadata:
-  version: 1.0.0
+  version: 1.0.1
 ---
 
 # fetch-tapd-story
@@ -18,7 +18,7 @@ metadata:
 ## 用法
 
 ```bash
-node /home/joney/projects/ai/agent-tools/skills/lexin/fetch-tapd-story/scripts/fetch_tapd_story.js \
+node scripts/fetch_tapd_story.js \
   --url=<TAPD需求URL> \
   --out-dir=<输出目录>
 ```
@@ -54,5 +54,5 @@ node /home/joney/projects/ai/agent-tools/skills/lexin/fetch-tapd-story/scripts/f
 ## 验证
 
 ```bash
-node --test /home/joney/projects/ai/agent-tools/skills/lexin/fetch-tapd-story/tests/fetch_tapd_story.test.js
+node --test tests/fetch_tapd_story.test.js
 ```

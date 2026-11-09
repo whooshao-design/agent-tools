@@ -24,18 +24,23 @@ class SpawnModelAgentTest(unittest.TestCase):
             self.assertEqual(sma.detect_client(), "codex")
         tree = {100: ("python3", 90), 90: ("bash", 80), 80: ("codex.exe", 1)}
 
-        def fake_open(path, *a, **k):
-            pid = int(path.split("/")[2])
-            comm, ppid = tree[pid]
-            body = comm if path.endswith("comm") else f"{pid} ({comm}) S {ppid} 1 1"
-            return mock.mock_open(read_data=body)()
-
         with mock.patch.dict("os.environ", {}, clear=True), mock.patch("os.getppid", return_value=100), \
-                mock.patch("builtins.open", side_effect=fake_open):
+                mock.patch.object(sma, "_process_info", side_effect=lambda pid: tree.get(pid)):
             self.assertEqual(sma.detect_client(), "codex")
         with mock.patch.dict("os.environ", {}, clear=True), mock.patch("os.getppid", return_value=1), \
-                mock.patch("builtins.open", side_effect=OSError):
+                mock.patch.object(sma, "_process_info", return_value=None):
             self.assertIsNone(sma.detect_client())
+
+    def test_process_info_parses_ps_output_and_child_env_carries_repo_root(self):
+        # macOS ps prints the executable path in comm; Linux prints the bare name
+        with mock.patch("subprocess.run", return_value=mock.Mock(stdout="/Applications/Codex.app/Contents/MacOS/codex 80\n")):
+            self.assertEqual(sma._process_info(90), ("codex", 80))
+        with mock.patch("subprocess.run", return_value=mock.Mock(stdout="")):
+            self.assertIsNone(sma._process_info(90))
+        with mock.patch("subprocess.run", side_effect=FileNotFoundError):
+            self.assertIsNone(sma._process_info(90))
+        self.assertEqual(sma.child_env("claude-kimi", False)["AGENT_TOOLS_ROOT"], str(REPO))
+        self.assertEqual(sma.CODEX_REVIEWER, str(REPO / "bin" / "codex-reviewer"))
 
     def test_short_names_follow_host_and_full_names_pass_through(self):
         with mock.patch.object(sma, "wrappers_on_path", return_value=WRAPPERS):

@@ -18,7 +18,7 @@ mcp = FastMCP("Healthy Dashboard")
 
 HEALTHY_SCRIPT = skill_path("healthy-dashboard-config", "scripts", "healthy_dashboard_config.js")
 METRICS_SCRIPT = skill_path("inspect-healthy-metrics", "scripts", "inspect_metrics.js")
-DEFAULT_PROFILE = "/home/joney/.local/state/agent-tools/browser-profiles/healthy"
+DEFAULT_PROFILE = str(Path.home() / ".local/state/agent-tools/browser-profiles/healthy")
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True)
 # 结果文件要留给调用方读取，不能随调用删除；集中放在一个目录并按保留期清理，避免在 /tmp 根目录堆积。
 RESULTS_ROOT = Path(tempfile.gettempdir()) / "agent-work" / "healthy-metrics"

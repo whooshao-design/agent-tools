@@ -2,7 +2,7 @@
 name: parse-experian-ser
 description: 只读拉取并解析旧规则引擎的 Experian Strategy Manager SER 规则包（解密后的 .ser，Java 序列化 ExecutableStrategy），输出可读的决策流程、拒绝规则、衍生变量脚本和输入输出字段。Use when 用户要求查看某个 SER 包（如 FQLDHTE、BE）里的规则内容、决策点分支、阈值或原因码，核对旧 SER 规则逻辑，或为 SER 迁移米霍克做规则对照；不用于米霍克规则或 SER 部署发布。
 metadata:
-  version: 1.2.0
+  version: 1.2.1
 ---
 
 # parse-experian-ser
@@ -38,13 +38,13 @@ metadata:
    只用只读命令；不得在服务器上写、删、移动文件或重定向输出。
 3. **组装与校验**（Claude Code 会话；transcript 在 `~/.claude/projects/<目录名>/<会话ID>.jsonl`，子 agent 的在同目录 `<会话ID>/subagents/` 下）：
    ```bash
-   python3 -I /home/joney/projects/ai/agent-tools/skills/lexin/parse-experian-ser/scripts/assemble_b64_chunks.py \
+   python3 -I scripts/assemble_b64_chunks.py \
      --transcript SESSION.jsonl --remote-path FILE --out WORKDIR/X.ser --size BYTES --md5 HEX
    ```
    结果过大被客户端存进 `tool-results/` 文件时，脚本会按 transcript 里的 "saved to" 路径读取原文。size 或 md5 不一致时不要继续解析，重拉缺失或出错的块。
 4. **渲染**：
    ```bash
-   /home/joney/projects/ai/agent-tools/skills/lexin/parse-experian-ser/scripts/ser_render.sh WORKDIR/X.ser pretty > X.pretty.txt
+   scripts/ser_render.sh WORKDIR/X.ser pretty > X.pretty.txt
    ```
    `dump` 模式输出完整对象树，用于 `pretty` 未覆盖的节点类型。`xml` 模式（spike，仅以 FQLBYJ 验证过）把 .ser 还原成米霍克迁移工具 `SerXmlElement` 可读的 XML，未覆盖的节点类型在 stderr 打 `WARN` 并在 XML 中留 `UNSUPPORTED` 标记；原脚本注释、画布布局、`obj_info` 无法恢复。反序列化报 `serialVersionUID` 不匹配或流损坏，说明文件不完整或 jar 版本不对。
 5. **解读与交付**：按决策点（`decision_scene`）找目标分支，整理衍生变量、拒绝规则集、额度/决策树和最终输出字段；每条结论注明来自哪个节点（如 `P149`），由结构推断的引擎语义标"推断"。

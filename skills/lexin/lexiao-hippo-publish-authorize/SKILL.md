@@ -2,7 +2,7 @@
 name: lexiao-hippo-publish-authorize
 description: 在乐效需求/版本里登记「hippo 发布授权」，标记本次发布需要一并发布哪些应用的 hippo namespace，并回读校验登记结果。Use when 用户要求在乐效版本里标记需要发布的 hippo、配置 hippo 发布授权、查看某需求已登记哪些 hippo namespace，或在发版前核对配置发布清单是否遗漏应用。
 metadata:
-  version: 1.1.1
+  version: 1.1.2
 ---
 
 # lexiao-hippo-publish-authorize
@@ -48,18 +48,18 @@ namespace。它只写"登记"这一层元数据，**不修改配置值、不发�
 
 ```bash
 # 查看某需求已登记哪些
-node /home/joney/projects/ai/agent-tools/skills/lexin/lexiao-hippo-publish-authorize/scripts/lexiao_hippo_authorize.js \
+node scripts/lexiao_hippo_authorize.js \
   list --demand-id=1423729
 
 # 登记（只提交尚未登记的，写入后自动回读校验）
-node /home/joney/projects/ai/agent-tools/skills/lexin/lexiao-hippo-publish-authorize/scripts/lexiao_hippo_authorize.js \
+node scripts/lexiao_hippo_authorize.js \
   add --demand-id=1423729 --namespace=encryption \
       --apps=server_hawk_decision_manage,process-engine-console-java
 ```
 
 参数：`--demand-id`（正整数，必填）、`--apps`（add 必填，逗号分隔）、`--namespace`（add 必须显式指定，不使用默认值）、
 `--instance-type`（仅支持 `1`）、`--resource-type`（仅支持 `hippo`）、`--profile`（默认
-`/home/joney/.local/state/agent-tools/browser-profiles/main`）、`--page-url`（默认乐效首页）。
+`~/.local/state/agent-tools/browser-profiles/main`）、`--page-url`（默认乐效首页）。
 
 ## 强制约束
 
