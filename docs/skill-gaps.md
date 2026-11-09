@@ -77,3 +77,10 @@
 | 2026-11-05 | agent-tools 可移植方案评审 round-1：`review_round.py snapshot` 的写入证明范围是整个仓库跟踪/未跟踪文件加产物目录，评审期间本机其他会话给 `docs/skill-gaps.md` 追加行就让双评审整轮按 environment 作废（两位 reviewer 均只读、结果有效，仍不能形成审批事实）；另外合并双评审 findings、按分类写 `findings.json` 仍靠手写 | 待补：`snapshot` 支持 `--exclude <path>`（或默认排除 `docs/` 等与被评审对象无关的目录，排除项写进审批记录）；`persist` 增加从两份 report 抽取 findings 表生成待分类 JSON 骨架的子命令 |
 | 2026-11-06 | agent-tools 可移植方案评审 round-4～6 的机械检查 | `review_round.py freeze` 的 `evidence_cited_in_solution` 只识别 `[E-n]` 写法，正文不带方括号的 `E-41`、`E-44` 引用不计入；`section_refs` 把追踪文件里“第 8、28、34 行”的“第 8”当成章节引用报 `section_refs_missing_in_solution: ["8"]`；`doc_metrics.py` 把“0.5 GiB”的 0.5 当章节号 | reviewer 在报告里逐轮说明误报；设计方把“第 8 行”改写成 `文件:8`、“0.5 GiB”改“半 GiB”绕开 | `review_round.py` 的证据引用正则同时识别 `E-n` 与 `[E-n]`，章节引用只匹配“第 N 章/节”或 `N.M` 形式并排除“第 N 行”；`doc_metrics.py` 章节号匹配排除带单位的小数 |
 | 2026-11-06 | agent-tools 可移植方案评审共 10 轮有效双评审（round-3～10）仍未"通过"，用户叫停：每轮两位 reviewer 都提出成立的新问题（累计 89 条编号、噪音 0），其中多条由上一轮修订引入（bash 上溯层数两次算错、谓词改双条件后其他位置未回扫、`_run()` 顺序改动未复测），Low 级措辞问题也触发整轮读者测试 + 双评审 + 落盘（每轮约 40～60 分钟、两位 reviewer 各 30 万 token、读者测试两次约 0.5 美元） | 用户裁定跳过剩余 solution-review 与 test-design-review 门禁、以 waiver 进入开发；效率问题待需求完成后反思 | `dev-review-solution` / `dev-design-solution` 流程：允许把只剩 Low 的轮次直接"通过并附后续建议"而不是再开一轮；读者测试只在机制章节变化时重跑，措辞改动不触发；修订后由编排器先做"同一谓词/术语全文回扫"的机械检查再派发，避免 reviewer 反复抓同一类不一致；双评审在收敛阶段（连续两轮无 High）改单评审或抽验 |
+
+## 2026-11-09 MySQL MCP 大脚本返回固定截断，需按脚本大小分批
+
+- 场景：只读比较墨西哥乐包 2799 的 30423/30440 版本，读取生成 Groovy 和组件源码。
+- 缺口：`mysql_lxcloud_query` 即使传 `max_chars=700000` 或 `1500000`，本例返回仍为 `truncated=true` 且 stdout 长度为 100000 个字符，截断 JSON 无法解析；返回中没有说明有效捕获上限。本次核查的本地源码 `mcp/devtools-mcp/devtools_mcp/mysql_readonly_server.py` 用 `bounded_int(max_chars, 20000, 1000, 100000)` 限制上限，`common.py` 的 `command_result_text` 按字符切片并设置截断标志。另，SQL LIMIT 200 被平台拒绝，需拆到每版 82/83 条的 LIMIT 100 查询。
+- 本次替代：通过 SQL 先取脚本 LENGTH 和 MD5，对 34 条转换候选按完整脚本 MD5 分为 22 组；每组读取代表脚本，按约 24000 字节脚本总量组成小批次，并重新计算 MD5 校验。使用内存编排，没有保留临时探测脚本；完整对比、源码和 SQL 留在任务文档目录。
+- 建议：MCP 对 max_chars 超过固定捕获上限的请求明确报出有效上限；提供按字符范围读取大文本列或受控导出完整结果的能力，保持截断标志与完整性校验。
