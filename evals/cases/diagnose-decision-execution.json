@@ -1,0 +1,37 @@
+{
+  "skill_name": "diagnose-decision-execution",
+  "trigger": {
+    "positive": [
+      {
+        "prompt": "O20261104643572700718 这个订单具体是在哪个流程做的 hold 单？为什么中间间隔了三分钟，环境是线上",
+        "top_k": 1
+      },
+      {
+        "prompt": "帮我确认一下流程实例 I2026110462556524804335965440718 的决策结果，哪个乐包节点给出了拒绝",
+        "top_k": 1
+      },
+      {
+        "prompt": "线上这笔交易单二审为什么转人工了，approval_result 和 disposal_codes 分别是什么意思",
+        "top_k": 2
+      },
+      {
+        "prompt": "排查一下这个 uid 昨天晚上在米霍克乐包的决策执行，规则命中了什么导致流程中断",
+        "top_k": 3
+      }
+    ],
+    "negative": [
+      {
+        "prompt": "查一下线上 ClickHouse 节点决策流水最近一小时的条数",
+        "owner": "query-clickhouse-water"
+      },
+      {
+        "prompt": "这个字段被哪些乐包和策略节点引用了",
+        "owner": "query-hawk-field-reference"
+      },
+      {
+        "prompt": "排查一下这条雷神告警是不是误报",
+        "owner": "diagnose-healthy-alert"
+      }
+    ]
+  }
+}

@@ -19,7 +19,7 @@ agent-tools/
 ├── agents/
 │   ├── claude/          # Claude Code 只读独立评审 subagents
 │   └── codex/           # Codex 只读独立评审 agents
-├── hooks/               # SubagentStop 结构化结果守卫、SessionEnd 会话临时目录清理及测试
+├── hooks/               # SubagentStop 结构化结果守卫、SessionEnd 会话临时目录清理、Stop 决策排查案例沉淀提醒及测试
 ├── mcp/
 │   ├── devtools-mcp/    # 研发工具链 MCP（16 个 server；查询为主，部分工具可写）
 │   ├── bastion-mcp/     # 堡垒机 SSH 通道 MCP（config.json 本地化）

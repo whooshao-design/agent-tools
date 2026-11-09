@@ -127,6 +127,7 @@
 | `inspect-healthy-jvm-dashboard` | 只读查看雷神 JVM/G1 看板，整理变量、面板、PromQL 和页面快照；巡检突出结论、指标与异常实例 | `healthy`, `browser_session` |
 | `register-healthy-metrics` | 查询、注册和复查 Healthy/雷神指标 | `browser_session` |
 | `diagnose-healthy-alert` | 从雷神告警排查原因：事件到日志的证据链；默认简短定性，复杂故障按需组织证据、影响与处置建议 | `browser_session` |
+| `diagnose-decision-execution` | 按订单号/流程实例 ID/traceId 排查流程引擎流程与米霍克乐包的一次线上决策执行：串起 CK 流水、名称、引擎与调用方日志，解释结果码与执行间隔；案例沉淀在 `references/cases.md` | 复用 `query-clickhouse-water`、`query-app-logs`、`query-mysql-data` |
 | `inspect-app-call-topology` | 复用 Healthy 登录态，支持多应用合并查询 FSOF/Dubbo 上下游流量与同窗口服务归属；异常下钻默认关闭，按需开启；按应用生成主报告 | `browser_session` |
 | `okr-weekly-progress` | 汇总飞书周报、本机会话与提交，按乐空间 OKR 的 KR 归类生成本地周报（mdview 评审），确认后整组读改写只存草稿；每周五 13:40 systemd 定时生成 | `okr_weekly.mjs`、`install_timer.py` |
 
@@ -181,6 +182,7 @@ python3 install.py --with-subagents --dry-run
 python3 install.py --with-global           # 额外把 AGENTS.global.md 渲染（填占位符、追加 env/AGENTS.local.md）为 ~/.codex/AGENTS.md 与 ~/.claude/CLAUDE.md
 python3 install.py --with-mcp              # 额外在两端注册 devtools / bastion / bastion_dba MCP
 python3 install.py --with-session-cleanup  # 额外给 Claude 加 SessionEnd hook，会话结束删除该会话的临时目录
+# Stop hook hooks/decision_case_reminder.py（决策排查案例沉淀提醒）不经安装器，按 skills/lexin/diagnose-decision-execution/SKILL.md 手动登记
 python3 install.py --list
 python3 install.py --with-subagents --uninstall
 ```

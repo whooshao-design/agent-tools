@@ -1,0 +1,6 @@
+interface:
+  display_name: "Diagnose Decision Execution"
+  short_description: "按订单号/流程实例 ID 排查流程引擎与米霍克乐包的一次线上决策执行并解释结果"
+  default_prompt: "使用 $diagnose-decision-execution 排查指定订单或流程实例的决策执行链路与结果。"
+policy:
+  allow_implicit_invocation: true

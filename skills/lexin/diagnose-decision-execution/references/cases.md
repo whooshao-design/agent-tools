@@ -77,3 +77,14 @@
 - 查询路径：`MxgHawkDecisionDB.hawkeye_decision_engine_db`，`query_role=master`；对 `t_rule` 的 82/83 条 `Fvalid_state=0` 记录完整检索字段引用，读取每版直接引用该字段的两条规则的原文、生成脚本和结果配置；按 `t_element.Findex` 读取组件 70605 v1、70735 v10/v11；另查 34 条含常见数值转换词的记录，按完整 `Fscript_data` 的数据库 MD5 分成 22 组，读取代表脚本并重新计算 MD5 校验。
 - 结论：规则 2294604 两版原文、生成脚本和结果配置逐项相同；规则 2300176 从组件 70735 v10 升到 v11，与 gd 比较相关的变化为前置 v4/v5 分层条件。两版对 gd 都是 `def $0$_gd_x_7 = map['$0$_gd_x_7'];` 后直接 `>=10`，没有针对 gd 的显式 double 转换。`BuiltInFunction.toNumeric` 的参数是 uid；同节点 `Double.valueOf` 处理的是上一笔风险利率，不是 gd。不能用旧流水是 Double 推断旧规则做了转换，也不能把字段类型变化归因为 30440 删除了这类转换；字段服务和框架转换需另证。
 - 沉淀：按字段声明 double 与执行转换代码分别取证；直接字段引用检索要覆盖 Frule_data/Fscript_data/Fresult_data，并继续查组件版本。组件历史记录本例 `Fis_test=1`，不能仅按列名猜 0 为目标生产记录；用规则保存的组件 ID、版本和实际 Findex 核对。本次材料按版本 ID 读取管理库记录，没有证明当时执行进程加载的快照内容。
+
+## 2026-11-09 墨西哥 2799 `gd_x_7` 变字符串：转换位置在 service-action
+
+- 入口：乐包 2799 版本 30423 / 30440，节点 290364；trace `0AF803291794104380046106103DF2`（30423）、`0AF8034F179412643540869320261D`（30440），订单 `CA20261108022619522498`；墨西哥 prod。
+- 查询路径：`MexicoCK` `t_decision_trace_cost_serial.Fpull_fields` 按 `Ftrace_id` 看米霍克收到的值和 JSON 类型 → `MexicoCK` `risk_feature_platform_db.t_feature_invoke_water` 按 `Forder_id` 看字段平台逐特征返回与 `Ffeature_status` → 代码沿 dispatcher `FieldBatchComputeServiceMex` → `service-middle-gateway` → `service-action` → `mx-field-service-mexyw` → `middle-risk-core` → 字段平台逐跳确认谁转类型。
+- 结论：字段平台两版输出一致（200 返回 `'-1'`、`'1.0'`，404 返回 Double 默认值 `-1.0`）；类型转换在 `service-action` 的 `FieldServiceImpl.handleFieldDataType`，一个字段转换失败就放弃后续字段且异常被吞。30440 节点 290364 新增的字段中有一个每次失败，`gd_x_7` 未被转 Double。最可疑为 `fuid_his_ovd_principal_max_prd`（值总带小数，若在 `action_db.t_data_field` 登记 int 则每次失败），待查该表定论。前两条 2799 案例中“转换位置尚未确认”的问题由本条回答。
+- 沉淀：
+  - 墨西哥字段类型问题先做两端对账：`Fpull_fields` 保留 JSON 类型，`t_feature_invoke_water.Ffeature_value` 统一存 String 看不出类型；两端值相同而类型不同，问题在 `service-action`。
+  - 墨西哥字段平台调用方记录为 `Finvoker=1001`、`Finvoker_app=middle-risk-core`，不是米霍克的 invoker 18。
+  - `action_db` 的乐信云实例未确认；乐信云 MySQL 对不存在的实例名也提示“没有实例权限”，不能靠猜名判断。
+  - 完整链路、对账表和排查顺序见 `mexico-field-chain.md`（2026-11-09 核对）。
