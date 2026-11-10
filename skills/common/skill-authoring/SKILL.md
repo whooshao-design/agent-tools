@@ -2,7 +2,7 @@
 name: skill-authoring
 description: Use when 需要在 agent-tools 仓库中创建新 skill、修改 skill 分类，或检查现有 skill 是否符合仓库约定（frontmatter、路径、分类、双端安装）。
 metadata:
-  version: 1.3.1
+  version: 1.3.2
 ---
 
 # skill-authoring
@@ -81,7 +81,7 @@ policy:
 python3 ~/.codex/skills/.system/skill-creator/scripts/quick_validate.py <path/to/skill-folder>
 ```
 
-再安装到双端：
+再安装到双端（由 agent 自己运行，不要列成“需要用户执行”；它可能弹出一次权限确认，只有被拒绝时才把命令和拒绝原因交给用户）：
 
 ```bash
 cd "$AGENT_TOOLS_ROOT" && python3 install.py
