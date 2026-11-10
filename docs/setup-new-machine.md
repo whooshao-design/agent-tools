@@ -110,6 +110,8 @@ auto mode 的分类器对三类调用不会自动放行：改 `~/.claude` 下配
 "Bash(node -e:*)", "Bash(node -p:*)", "Bash(node --version:*)",
 "Bash(git diff:*)", "Bash(git log:*)", "Bash(git status:*)", "Bash(git show:*)", "Bash(git ls-files:*)",
 "Bash(python3 install.py --dry-run:*)",
+"Bash(rg:*)", "Bash(grep:*)", "Bash(find:*)", "Bash(ls:*)", "Bash(cat:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(sed -n:*)", "Bash(wc:*)",
+"Bash(stat:*)", "Bash(file:*)", "Bash(which:*)", "Bash(pwd)", "Bash(echo:*)", "Bash(mvn -v)", "Bash(python3 --version)",
 "Bash(python3 <AGENT_TOOLS_ROOT>/skills/lexin/test-dubbo-api/scripts/dubbo_request.py:*)",
 "Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/query-mysql-data/scripts/mysql_readonly.js *)",
 "Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/query-hippo-config/scripts/hippo_query.js *)",
