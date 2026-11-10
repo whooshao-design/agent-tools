@@ -164,7 +164,7 @@ Codex 经 `codex mcp add` 写 `~/.codex/config.toml`），`PYTHONPATH` 与 `BAST
   多数工具不实现业务逻辑，而是用 `common.skill_path("<skill>", "scripts", "<file>")` 定位 skill 脚本，经 `run_command` 调用、
   `command_result_text` 截断后返回；改 skill 脚本的命令行参数时必须同步对应 server 与 `mcp/devtools-mcp/tests`。
 - `skill_path()` 按 `skills/<分类>/<skill>` 搜索，`DEVTOOLS_SKILLS_DIR` 可覆盖为扁平目录，都找不到时回退 `~/.codex/skills/<skill>`。
-- 公共辅助集中在 `devtools_mcp/common.py`：`env_value()` 先读进程环境、再读 `mcp/devtools-mcp/.env`（`DEVTOOLS_MCP_ENV` 可改路径）；
+- 公共辅助集中在 `devtools_mcp/common.py`：`env_value()` 先读进程环境、再读 `mcp/devtools-mcp/.env`（`DEVTOOLS_MCP_ENV` 可改路径），两处的空值都视为未设置、取代码默认值；
   `internal_http_request()` 只放行 `INTERNAL_HTTP_ALLOWED_HOSTS`（默认公司内网域名）且仅支持 GET/POST；
   `use_browser_session=True` 时请求交给 `get-browser-session/scripts/browser_session.js` 在浏览器上下文内发出，Cookie 不经过 Python。
 - `java_app_diag` 复用 `bastion-mcp` 的 `SSHManager`：`java_app_diag_core.py` 找不到包时把 `BASTION_MCP_ROOT`（默认同级 `mcp/bastion-mcp`）

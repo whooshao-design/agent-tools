@@ -396,6 +396,8 @@ class PortabilityInstallTest(unittest.TestCase):
                 os.environ["HOME"] = saved_home
             self.assertEqual(str(self.home / "mydocs"), values["AGENT_TOOLS_DOCS_ROOT"])
             expected = installer.render_placeholders(installer.GLOBAL_SOURCE.read_text(encoding="utf-8"), values)
+            if installer.LOCAL_OVERLAY_SOURCE.is_file():  # a developer's own env/AGENTS.local.md is appended by install.py
+                expected = expected.rstrip("\n") + "\n\n" + installer.LOCAL_OVERLAY_SOURCE.read_text(encoding="utf-8")
             self.assertEqual(expected, rendered)
             self.assertNotIn("{{", rendered)
         finally:

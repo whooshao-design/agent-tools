@@ -1,0 +1,6 @@
+interface:
+  display_name: "Clone App Repo"
+  short_description: "按应用名经乐效定位 GitLab 仓库并克隆到工作区"
+  default_prompt: "使用 $clone-app-repo 定位并克隆这个应用的代码仓库。"
+policy:
+  allow_implicit_invocation: true

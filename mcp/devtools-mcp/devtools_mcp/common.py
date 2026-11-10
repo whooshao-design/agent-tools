@@ -76,7 +76,9 @@ def env_value(name: str, default: str = "") -> str:
             continue
         key, raw = stripped.split("=", 1)
         if key.strip() == name:
-            return raw.strip().strip("'\"")
+            # An empty placeholder (KEY=) copied from .env.example must not override the code default,
+            # the same rule bin/_load_env.sh applies to env/credentials.env.
+            return raw.strip().strip("'\"") or default
     return default
 
 

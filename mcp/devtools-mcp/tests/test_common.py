@@ -13,7 +13,30 @@ sys.path.insert(0, str(PACKAGE_ROOT))
 from devtools_mcp import common  # noqa: E402
 
 
+class EnvValueTest(unittest.TestCase):
+    def test_empty_dotenv_placeholder_falls_back_to_default(self):
+        import tempfile
+
+        with tempfile.NamedTemporaryFile("w", suffix=".env", delete=False) as handle:
+            handle.write("# comment\nEMPTY_KEY=\nQUOTED_KEY='quoted'\nPLAIN_KEY=plain\n")
+            env_path = handle.name
+        self.addCleanup(os.unlink, env_path)
+        with patch.dict(os.environ, {"DEVTOOLS_MCP_ENV": env_path}, clear=False):
+            os.environ.pop("EMPTY_KEY", None)
+            self.assertEqual(common.env_value("EMPTY_KEY", "fallback"), "fallback")
+            self.assertEqual(common.env_value("QUOTED_KEY", "fallback"), "quoted")
+            self.assertEqual(common.env_value("PLAIN_KEY", "fallback"), "plain")
+            self.assertEqual(common.env_value("MISSING_KEY", "fallback"), "fallback")
+            self.assertTrue(common.is_allowed_host("healthy.lexincloud.com", ""))
+
+
 class BrowserSessionRequestTest(unittest.TestCase):
+    def setUp(self):
+        # The developer's mcp/devtools-mcp/.env may narrow the allow-list; these tests assert the default policy.
+        patcher = patch.dict(os.environ, {"INTERNAL_HTTP_ALLOWED_HOSTS": common.DEFAULT_INTERNAL_ALLOWED_HOSTS})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_default_profile_matches_browser_session_script(self):
         if "BROWSER_SESSION_PROFILE" not in os.environ and "DEVTOOLS_BROWSER_PROFILE" not in os.environ:
             self.assertEqual(

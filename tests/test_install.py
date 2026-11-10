@@ -32,11 +32,25 @@ MATCHER = "^(" + "|".join(AGENT_NAMES) + ")$"
 
 
 class InstallTest(unittest.TestCase):
+    # In-process installer._run() calls must never touch the real HOME: redirect every
+    # home-derived module path to the temporary home for the duration of each test.
+    HOME_PATHS = {
+        "POINTER_FILE": ".config/agent-tools/root",
+        "CLAUDE_SETTINGS": ".claude/settings.json",
+        "CLAUDE_MCP_CONFIG": ".claude.json",
+        "CODEX_CONFIG": ".codex/config.toml",
+    }
+
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.home = Path(self.temp_dir.name)
+        self._saved_paths = {name: getattr(installer, name) for name in self.HOME_PATHS}
+        for name, relative in self.HOME_PATHS.items():
+            setattr(installer, name, self.home / relative)
 
     def tearDown(self):
+        for name, value in self._saved_paths.items():
+            setattr(installer, name, value)
         self.temp_dir.cleanup()
 
     def run_install(self, *args, check=True):

@@ -715,6 +715,30 @@ async function collectWithBrowser(args, selectedType, limit) {
   }
 }
 
+// Generic session wrapper for sibling skills (clone-app-repo): cache first, browser fallback, same
+// invalidate/refresh rules as collectWithCachedSession/collectWithBrowser. fn(page) does the queries.
+async function withLexiaoSession(args, fn) {
+  const profiles = args.profile ? [expandHome(args.profile)] : DEFAULT_PROFILES;
+  for (const profile of profiles) {
+    const cookieHeader = sessionCache.readCookieHeader(profile, API_BASE);
+    if (!cookieHeader) continue;
+    try {
+      const result = await fn(new DirectClient(cookieHeader));
+      return { result, profile, networkPolicy: 'direct-only', sessionSource: 'cache' };
+    } catch (_) {
+      sessionCache.invalidate(profile, API_BASE);
+    }
+  }
+  const { context, page, profile, networkPolicy } = await openLoggedInPage(args);
+  try {
+    const result = await fn(page);
+    await sessionCache.saveContextCookies(context, profile, API_BASE);
+    return { result, profile, networkPolicy, sessionSource: 'browser' };
+  } finally {
+    await context.close();
+  }
+}
+
 if (require.main === module) {
   main().catch((error) => {
     console.error(JSON.stringify({ error: error.message }, null, 2));
@@ -723,8 +747,14 @@ if (require.main === module) {
 }
 
 module.exports = {
+  API_BASE,
+  appNameCandidates,
+  getAppById,
+  normalizeName,
   normalizePod,
   parseArgs,
   pickEnvs,
   resolveApp,
+  searchAppsByField,
+  withLexiaoSession,
 };
