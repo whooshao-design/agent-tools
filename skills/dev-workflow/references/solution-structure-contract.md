@@ -16,8 +16,9 @@ solution-design/solution.md        给人读的设计叙事
 solution-design/traceability.md    给评审和交付用的追踪台账
 └── 身份、AC 映射、确认表、CHG 矩阵、横切覆盖、风险登记、证据清单
 
-solution-design/key-questions.md   写正文前与用户对齐的关键问题清单（不进 S）
-└── 待裁定、待选型、设计方已定、待查证；确认结果写进 traceability.md 的确认表
+solution-design/key-questions.md   写正文前与用户对齐的方案纲要和关键问题清单（不进 S；只由用户确认，不做读者测试和 agent 评审）
+├── 第 0 节方案纲要：验收承接、一句话方案与主图草图、候选方向、核心机制要点、变更范围、发布顺序与最大风险
+└── 第 1～4 节：待裁定、待选型、设计方已定、待查证；确认结果写进 traceability.md 的确认表
 
 solution-design/solution.html      由 solution.md 渲染的交互阅读页（派生文件，不进 S）
 

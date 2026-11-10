@@ -2,7 +2,7 @@
 name: dev-design-solution
 description: Use when 需求边界和验收标准已基本明确，需要写技术方案、出方案或做方案设计：基于代码上下文产出可评审、可实施、可验证的技术方案，比较存在实质取舍的实现路径并收敛设计决策。
 metadata:
-  version: 4.9.2
+  version: 4.10.0
 ---
 
 # dev-design-solution
@@ -20,7 +20,7 @@ metadata:
 不要一次加载所有 reference：
 
 - 每次先读 `references/template-routing.md`，判断是否需要正式方案并选择一个主 profile。
-- 第 4 步生成关键问题清单时读 `references/key-questions-template.md`。
+- 第 4 步生成方案纲要与关键问题清单时读 `references/key-questions-template.md`。
 - 输出正式文档时读 `references/solution-template.md`、`references/traceability-template.md`、`references/design-dimensions.md`、`references/readability-and-writing.md` 和选中的 `references/profiles/<profile>.md`。
 - 决定画什么图、怎么校验时读 `references/visualization-routing.md`。
 - 2.4 变更总览里有"应用或端"为前端应用的行时读 `references/frontend-design.md`。
@@ -31,7 +31,7 @@ metadata:
 
 正式方案默认放到 `~/docs/requirements-development/<requirement-name>/solution-design/`：
 
-- `key-questions.md`：写正文前与用户对齐的关键问题清单，按 `key-questions-template.md`；不进 `S`。
+- `key-questions.md`：写正文前与用户对齐的方案纲要（第 0 节）和关键问题清单（第 1～4 节），按 `key-questions-template.md`；只由用户确认，不做读者测试和 agent 评审，不进 `S`。
 - `solution.md`：给人读的设计叙事，按 `solution-template.md`。
 - `traceability.md`：身份、AC 映射、CHG 矩阵、横切覆盖、风险登记、证据清单，按 `traceability-template.md`。
 - `diagrams/`：`check_mermaid.js` 输出的 mmd、SVG、PNG 和 `results.md`。
@@ -89,19 +89,26 @@ metadata:
 
 多项命中时选择风险最高、最影响正确性结论的一项，其他问题作为横切维度写回相关机制；不得拼接多份 profile。`CHG-*` 只做交付追踪，不控制正文叙事。
 
-### 4. 确定核心机制并对齐关键问题
+### 4. 确定核心机制，与用户对齐方案纲要和关键问题
 
 先回答"本方案若做错，哪段逻辑会直接违背需求"确定核心机制。核心机制的正确性要在代码里查透，包括所有写入同一数据的入口、现有方法实际处理的形态和边界数据，以及每个依赖组件在为空、不存在、异常、超时和部分成功时的实际表现（读到代码或日志为止，不凭印象）；查证中发现的风险优先改设计消除，而不是登记为风险。
 
-然后按 `key-questions-template.md` 生成 `solution-design/key-questions.md`：按六类来源列问题并筛选，分入待裁定、待选型、设计方已定，填完依赖行为、影响面、需求偏差三张待查证表。两组都为空时告知"无待裁定项"后继续；待裁定超过 7 条且需求边界未收敛时，交互运行回 `dev-clarify-task`，auto-loop 下返回 `awaiting_human`。
+然后按 `key-questions-template.md` 生成 `solution-design/key-questions.md`，它是详细设计前唯一要用户确认的文件：
 
-两组非空时：交互运行在当前会话输出清单并结束本轮回复，用户在同一会话回复后续写，回复里有针对清单的表态就按表态处理，没有表态保持"待用户确认"、不写正文。由 `dev-auto-loop` 派发（派发任务要求返回带 `run_id` 的 `producer-stage-result-v1`；没有这项要求或缺 `run_id` 按交互运行处理）时，有"auto-loop 停"为是的行就返回 `status=blocked`、`outcome=awaiting_human`，否则采用默认答案在同一次派发内继续；`output_artifacts` 每次返回都列出本次派发写过的全部文件，`produced` 只在 `solution.md`、`traceability.md` 都写出后返回。
+- 第 0 节方案纲要：问题与验收承接（每条 `AC-*`、`CON-*` 由哪个机制满足）、一句话方案与主图草图、候选方向与推荐、核心机制要点（关键数据结构、全部写入入口、不变量）、变更范围、发布顺序与最大风险。它是方案的缩略版，不超过约 80 行，只写已查证的事实和设计方的推荐。
+- 第 1～4 节关键问题清单：按六类来源列问题并筛选，分入待裁定、待选型、设计方已定，填完依赖行为、影响面、需求偏差三张待查证表。0.3 有两个及以上真实候选方向时，方向选择必须是一条待裁定。
 
-用户确认或 auto-loop 采用默认后，按 `traceability-template.md` 第 2 节写确认表（两组为空时也写设计方已定的行）。"改变需求"为是的行，冻结的需求版本须不低于表中所写（按模板的分段比较规则）才写正文：否则交互运行回 `dev-clarify-task` 升需求版本，auto-loop 下再次返回 `awaiting_human` 并列出所需版本与当前版本，不在 auto-loop 内改需求；用户核对后确认表写错的，设计方更正后续写。
+待裁定超过 7 条且需求边界未收敛时，交互运行回 `dev-clarify-task`，auto-loop 下返回 `awaiting_human`。
+
+这份文件必须经用户确认，也只经用户确认：状态行为"已确认"之前不写 `solution.md` 和 `traceability.md`，待裁定、待选型都为空时也要等用户确认第 0 节；不对它做读者测试，不派 agent 评审它。交互运行在当前会话给出文件路径，并在回复里列出一句话方案、推荐方向和待裁定、待选型的条目与默认答案，然后结束本轮回复；用户在同一会话回复后续写，回复里有针对本文件的表态就按表态处理，没有表态保持"待用户确认"、不写正文。用户要求改方向、范围或机制时，改完第 0 节和受影响的条目再次交用户确认。
+
+由 `dev-auto-loop` 派发时不在会话里等回复：状态行不是"已确认"就返回 `awaiting_human`，不采用默认答案继续；判定是否由 auto-loop 派发、已确认之后新条目的处理和返回字段见 `key-questions-template.md` 第 5 节。
+
+用户确认后，把状态行改为"已确认"并写上原话与日期，按 `traceability-template.md` 第 2 节写确认表（两组为空时也写设计方已定的行）。"改变需求"为是的行，冻结的需求版本须不低于表中所写（按模板的分段比较规则）才写正文：否则交互运行回 `dev-clarify-task` 升需求版本，auto-loop 下再次返回 `awaiting_human` 并列出所需版本与当前版本，不在 auto-loop 内改需求；用户核对后确认表写错的，设计方更正后续写。
 
 ### 5. 收敛推荐方案
 
-以清单为输入：已确认的待选型直接写成选型 `DEC-*` 与第 4 章对比表，设计方已定的条目写成 `DEC-*`，不重复比较；核心机制与依赖查证已在第 4 步完成，这里只补第 4 步没覆盖到的依赖。其余存在实质取舍的决策分配 `DEC-*`，比较 2 到 3 个真实候选的正确性、现有边界一致性、复杂度、兼容/迁移/回滚成本和演进风险。明显只有一个合理最小路径时，不制造陪跑方案，只说明其他路径为何不成立。
+以已确认的 `key-questions.md` 为输入：0.3 的推荐方向与落选方向直接写成 `DEC-*` 和第 4 章的候选表，已确认的待选型直接写成选型 `DEC-*` 与第 4 章对比表，设计方已定的条目写成 `DEC-*`，不重复比较；核心机制与依赖查证已在第 4 步完成，这里只补第 4 步没覆盖到的依赖。其余存在实质取舍的决策分配 `DEC-*`，比较 2 到 3 个真实候选的正确性、现有边界一致性、复杂度、兼容/迁移/回滚成本和演进风险。明显只有一个合理最小路径时，不制造陪跑方案，只说明其他路径为何不成立。
 
 引入新的第三方库、框架、中间件或外部服务，或升级已有依赖的主版本时，必须单列一条选型 `DEC-*`，第 4 章按 `solution-template.md` 给出选型对比，不能只在术语表或构建配置里写选中的名字和版本。选型已在对话或预研中定下时同样要写：方案读者看不到对话，预研报告通常只证明选中项可行、不记录落选项。
 
@@ -109,7 +116,7 @@ metadata:
 
 ### 6. 先写给人看的部分
 
-按 `solution-template.md` 的顺序写 `solution.md`：头部一行、相关文档、摘要、背景与目标、方案概览（一句话方案、主图、关键决策、成立理由、变更总览）、详细设计、替代方案、影响、发布验证回滚、风险与未决。
+按 `solution-template.md` 的顺序写 `solution.md`：头部一行、相关文档、摘要、背景与目标、方案概览（一句话方案、主图、关键决策、成立理由、变更总览）、详细设计、替代方案、影响、发布验证回滚、风险与未决。已确认的第 0 节是各章的初稿（去向见 `key-questions-template.md` 1.1）：正文在它的基础上补精度，不改变它的方向、核心机制要点、变更范围和发布顺序；写的过程中发现必须改变这些内容时，按该模板第 6 节停下来重新交用户确认。
 
 摘要不超过 150 字，只压缩正文已有结论。主图按 `visualization-routing.md` 的触发条件和 profile 默认图型决定，不画要写豁免理由。第 3 章按选中 profile 使用 guide → reference 顺序：先用机制导读和代表性场景建立心智模型，再说明参与者、契约、状态、时序、不变量、失败、兼容和边界；标题使用技术机制或状态变化。核心机制单列一节并写得最深，按 `readability-and-writing.md` 4.1 先在节首定义关键数据结构（类型签名、字段表、小实例、访问模式），再给出变更清单表、前后对照示例、流程图加实现对照表、边界情况表、依赖调用结果表和不变量（含各自的静默破坏条件）；`key-questions.md` 4.1 的行整行搬进依赖调用结果表，4.2、4.3 的结论进 `traceability.md` 证据清单，清单里只留"依赖 + 情形 → 章节号"或 `[E-n]` 引用。其余正文只展开本次变化、违反直觉、高风险、存在争议、影响正确性或缺少细节会导致不同实现的内容。
 
@@ -123,13 +130,13 @@ metadata:
 
 ### 8. 校验图与指标
 
-运行 `node scripts/check_mermaid.js solution-design/solution.md solution-design/diagrams`，全部通过后再交付；改不好的图换成等宽文本块。打开渲染出的 PNG 看一遍，并按 `visualization-routing.md` 第 1 节逐行核对：满足触发条件却没画的地方补图或写理由。运行 `python3 scripts/doc_metrics.py solution-design/solution.md --traceability solution-design/traceability.md`，逐条处理它给出的提示，尤其是摘要长度、主图缺失、长段落、正文代码名过密、缺术语对照表、缺变更总览或图中无变更标识、修订痕迹和追踪引用失联。
+以下命令在需求目录（`solution-design/` 的上一级）执行，脚本在本 skill 的 `scripts/` 下，记 `S=$AGENT_TOOLS_ROOT/skills/dev-workflow/dev-design-solution/scripts`。运行 `node $S/check_mermaid.js solution-design/solution.md solution-design/diagrams`，全部通过后再交付；改不好的图换成等宽文本块。打开渲染出的 PNG 看一遍，并按 `visualization-routing.md` 第 1 节逐行核对：满足触发条件却没画的地方补图或写理由。运行 `python3 $S/doc_metrics.py solution-design/solution.md --traceability solution-design/traceability.md`，逐条处理它给出的提示，尤其是摘要长度、主图缺失、长段落、正文代码名过密、缺术语对照表、缺变更总览或图中无变更标识、修订痕迹和追踪引用失联。
 
 ### 9. 输出前自检与读者测试
 
 按 `readability-and-writing.md` 第 7 节执行自检。然后按 `reader-test-protocol.md` 先写答案键 `reader-test/answer-key-v<N>.md`，交由编排器派发与设计方不同模型的 agent 读者只读 `solution.md` 作答，比对结果写入 `reader-test/agent-v<N>.md`。按协议 §5 判定不通过（全文读者七问、截断读者前五问、核心机制探针、成立的探针问题）时先修方案再进入正式评审。
 
-读者测试通过、正文不再改动后，作为送审前最后一步运行 `node scripts/render_solution.mjs solution-design/solution.md solution-design/solution.html` 生成交互阅读页，再运行同目录的 `check_solution_html.mjs solution-design/solution.html` 自检，失败时修正后重跑；渲染结束列出的 F4 未匹配节点可改节点名或加 `node-map` 指令，不作门禁。
+读者测试通过、正文不再改动后，作为送审前最后一步运行 `node $S/render_solution.mjs solution-design/solution.md solution-design/solution.html` 生成交互阅读页，再运行 `node $S/check_solution_html.mjs solution-design/solution.html` 自检（`$S` 同第 8 步），失败时修正后重跑；渲染结束列出的 F4 未匹配节点可改节点名或加 `node-map` 指令，不作门禁。
 
 方案必须能交给 `dev-review-solution` 独立评审：reviewer 不读 `traceability.md` 也能理解机制、影响和上线验证，深读时能从两个文件定位精确契约、边界、证据及所有 CHG。
 
@@ -139,7 +146,7 @@ metadata:
 
 成立需修的 finding 由设计方直接修订，不先询问用户是否修改；只有接受风险、改变范围或验收标准、在产品行为不同的修复方案间选择时才交给用户。
 
-修订改变核心机制或某个 `DEC-*` 时，先改 `key-questions.md` 受影响的行并重做对应查证。改变已确认条目（确认结果为采纳默认或改为）的答案，或出现新的待裁定、待选型时，交互运行重新交用户确认并更新确认表该行的答案、原话和日期；auto-loop 下改已确认条目一律返回 `awaiting_human`，新出现的条目按"auto-loop 停"判定。确认表其余行的修订写法见 `traceability-template.md` 第 2 节。
+修订改变核心机制或某个 `DEC-*` 时，先改 `key-questions.md` 受影响的行并重做对应查证。修订触及第 0 节已确认的方向、核心机制要点、变更范围或发布顺序时，按 `key-questions-template.md` 第 6 节先改第 0 节并重新交用户确认，auto-loop 下返回 `awaiting_human`。改变已确认条目（确认结果为采纳默认或改为）的答案，或出现新的待裁定、待选型时，交互运行重新交用户确认并更新确认表该行的答案、原话和日期；auto-loop 下改已确认条目一律返回 `awaiting_human`，新出现的条目按"auto-loop 停"判定。确认表其余行的修订写法见 `traceability-template.md` 第 2 节。
 
 修订完成后回扫：列出本次改动的名称、数值、对象和结论，逐个运行 `rg -n '<名称或数值>' solution.md traceability.md key-questions.md` 同步其他出现处，并在 `resolution.md` 记录每条命令和命中数。
 

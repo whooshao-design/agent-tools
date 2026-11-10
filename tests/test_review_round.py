@@ -171,6 +171,12 @@ class ReviewRoundTest(unittest.TestCase):
             checks, err = self.key_questions_required()
             self.assertEqual((checks["key_questions_present"], checks["key_questions_required"]), (True, True))
             self.assertNotIn("key_questions_required_but_missing", err)
+            self.assertFalse(checks["key_questions_confirmed"])  # status line is not 已确认
+            self.assertIn('"key_questions_not_confirmed": true', err)
+            (self.req / "solution-design/key-questions.md").write_text("# 方案纲要\n\n状态：已确认（用户：同意，2026-11-10） · 对应需求 v1\n")
+            checks, err = self.key_questions_required()
+            self.assertTrue(checks["key_questions_confirmed"])
+            self.assertNotIn("key_questions_not_confirmed", err)
 
     def test_solution_html_warnings(self):
         sd = self.req / "solution-design"

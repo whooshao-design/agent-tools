@@ -194,8 +194,11 @@ def solution_checks(base: Path, legacy_reason: str | None = None) -> dict | None
     cited = sorted(set(re.findall(r"\[E-(\d+)\]", sol)), key=int)
     defined = set(re.findall(r"^\| E-(\d+) \|", tr, re.M))
     ac_req, ac_tr = sorted(set(re.findall(r"AC-\d+", req))), sorted(set(re.findall(r"^\| (AC-\d+) \|", tr, re.M)))
-    present = (base / "solution-design/key-questions.md").exists()
+    kq_p = base / "solution-design/key-questions.md"
+    present = kq_p.exists()
     kq = {"key_questions_present": present,
+          # the outline and question list must be confirmed by the user before the solution is written
+          "key_questions_confirmed": present and bool(re.search(r"^状态：已确认", kq_p.read_text(), re.M)),
           "key_questions_required": present or not (legacy_reason or is_historic_solution(base))}
     if legacy_reason:
         kq["key_questions_legacy_override"] = {"reason": legacy_reason, "date": datetime.date.today().isoformat()}
@@ -282,6 +285,8 @@ def cmd_freeze(args) -> None:
             bad["AC_sets_equal"] = False
         if checks.get("key_questions_required") and not checks.get("key_questions_present"):
             bad["key_questions_required_but_missing"] = True
+        if checks.get("key_questions_present") and not checks.get("key_questions_confirmed"):
+            bad["key_questions_not_confirmed"] = True
         if bad:
             print("mechanical check failures: " + json.dumps(bad, ensure_ascii=False), file=sys.stderr)
     if solution_review and (warning := html_warning(Path(out["S"]["ref"]))):
