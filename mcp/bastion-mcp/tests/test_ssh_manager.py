@@ -532,3 +532,18 @@ class UnreachableKeepaliveTest(SharedChannelTest):
         self.assertIn("没有进入目标机 shell", manager.execute_on_target("10.0.0.1", "hostname"))
         self.assertEqual("host-10.0.0.2", manager.execute_on_target("10.0.0.2", "hostname"))
         self.assertEqual(1, len(manager.transport.channels))
+
+
+class OtpPromptThenCloseTest(SharedChannelTest):
+    def test_missing_code_on_a_channel_the_bastion_then_closes_is_reported_as_is(self):
+        class ClosingBastion(_FakeBastion):
+            def handle(self, cmd):
+                out = super().handle(cmd)
+                if self.state == "otp":
+                    self.closed = True  # bastion drops the shell while the code prompt is pending
+                return out
+
+        manager = self._manager(ClosingBastion, otp="")
+        error = manager._start_keepalive("10.0.0.1")
+        self.assertIn("要求输入安全码", error)
+        self.assertIn("AskUserQuestion", error)

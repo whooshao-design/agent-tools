@@ -665,7 +665,9 @@ class SSHManager:
             # 提示出现后 channel 随即关闭，说明是断线前的残留输出，不是在等待输入
             dead = _channel_dead(ch)
             ch.close()
-            if dead:
+            # 已经发过密码并被堡垒机接受、随后才缺安全码或安全码被拒：这是凭据问题，堡垒机随后关 channel 属正常，
+            # 原样返回提示，不当成隧道断开去重试
+            if dead and not self._credentials_sent:
                 raise _GatewayClosed("打开 shell", f"shell channel 已关闭（{msg}）")
             return msg
 
