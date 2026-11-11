@@ -218,7 +218,7 @@ PEM 密钥认证 ──成功──→ 进入堡垒机
 
 堡垒机服务端决定是否需要密码和验证码。PEM 认证足够时无需额外输入。
 
-PEM 认证通过后，堡垒机 shell 仍可能再问一次 `password:`，随后问 MOA 验证码（2026-11-11 实测：`config.json` 的 `password` 为空时三次连接都停在 `password:`；刚用其他客户端登录过的一段时间内不问，所以表现为时好时坏）。要让 agent 稳定登录，在 `config.json` 填 `password`（或设 `BASTION_PASSWORD`），需要验证码时再填 `totp_secret`（或设 `BASTION_TOTP_SECRET`）；这两个值只放在 gitignore 的 `config.json` 或进程环境里。
+PEM 认证通过后，堡垒机 shell 仍可能再问一次 `password:`，随后问 MOA 验证码（2026-11-11 实测：`config.json` 的 `password` 为空时三次连接都停在 `password:`；刚用其他客户端登录过的一段时间内不问，所以表现为时好时坏）。要让 agent 稳定登录，在 `config.json` 填 `password`（或设 `BASTION_PASSWORD`），需要验证码时再填 `totp_secret`（或设 `BASTION_TOTP_SECRET`）；这两个值只放在 gitignore 的 `config.json` 或进程环境里。没有配置 `totp_secret` 时，连接会返回“要求输入安全码”的错误，agent 应向用户弹出输入框要当前 6 位 MOA 码，再带 `otp` 重连；连上后由保活线程维持，同一 MCP 进程内不用再输。
 
 ## 环境变量
 

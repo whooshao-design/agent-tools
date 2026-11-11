@@ -596,7 +596,9 @@ class SSHManager:
             if not otp:
                 return False, (
                     "错误：堡垒机 shell 要求输入安全码（OTP），请提供 otp 参数"
-                    f"（提示行：{_last_line(clean)!r}）；或在 config.json 填 totp_secret / 设置 BASTION_TOTP_SECRET 自动生成"
+                    f"（提示行：{_last_line(clean)!r}）。未配置 totp_secret / BASTION_TOTP_SECRET 时，"
+                    "请立即向用户弹出输入框索取当前 6 位 MOA 安全码（Claude Code 用 AskUserQuestion，其他客户端直接提问），"
+                    "拿到后用 otp 参数重连一次；安全码一次有效，不要用旧码或空码重试"
                 )
             logger.info("检测到安全码提示，自动输入安全码")
             self._credentials_sent = True

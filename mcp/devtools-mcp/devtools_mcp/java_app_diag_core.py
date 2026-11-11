@@ -158,7 +158,7 @@ class BastionDiagSession:
         if host:
             detail += f", host={host}"
         if any(marker in result for marker in AUTH_HINT_MARKERS):
-            detail += "；MCP 不能复用 Xshell 的交互输入，请传入 password/otp，或确认该 profile 的 PEM/免密认证与 JumpServer 登录态可用"
+            detail += "；MCP 不能复用 Xshell 的交互输入：缺密码时在 bastion config.json 填 password，缺安全码时向用户索取当前 6 位 MOA 码并用 otp 参数重连"
         return f"{result}（{detail}）"
 
     async def connect(
