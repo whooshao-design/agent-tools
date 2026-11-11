@@ -1,8 +1,8 @@
 ---
 name: query-app-logs
-description: 统一只读查询 Java 应用日志：VM/KVM 服务器日志走 java_app_diag MCP，容器 Pod 日志走 container_log_check/webshell_log_check 脚本，超出服务器保存期或需要跨机器按 traceId 汇总时走日志平台 log.oa.fenqile.com（热数据 90 天）。Use when 用户要求查某应用的日志、按 traceId/关键字/时间段找日志、看几天到几个月前的历史日志、服务器日志已轮转找不到、或明确说用日志平台；应用名必须明确。
+description: 统一只读查询 Java 应用日志：按应用、时间、关键字、traceId、IP 的检索默认走架构日志服务（OA 网关加 lxctl token，不可用时回退日志平台浏览器登录态），需要服务器上的原始文件（stable/项目环境、启动与 GC 日志、任意路径文件）时 VM/KVM 走 java_app_diag MCP、容器 Pod 走 container_log_check/webshell_log_check 脚本。Use when 用户要求查某应用的日志、按 traceId/关键字/时间段找日志、看几天到几个月前的历史日志、服务器日志已轮转找不到、或明确说用日志平台或 lxctl 查日志；应用名必须明确。
 metadata:
-  version: 1.1.4
+  version: 1.2.0
 ---
 
 # query-app-logs
@@ -11,9 +11,11 @@ metadata:
 
 查 Java 应用日志的统一入口，三条只读路径按场景路由：
 
-- A. VM/KVM 服务器日志：`java_app_diag` MCP。
+- A. VM/KVM 服务器日志：`java_app_diag` MCP，经堡垒机读服务器上的文件。
 - B. 容器 Pod 日志：`java-server-diagnostics/scripts/` 下的 `container_log_check.js`、`webshell_log_check.js`（脚本路径不变，本 skill 只负责调用）。
-- C. 日志平台 `https://log.oa.fenqile.com/#/dashboard`：本 skill 的 `scripts/log_platform_query.js`。
+- C. 架构日志服务（日志平台 `https://log.oa.fenqile.com/#/dashboard` 背后的检索接口）：本 skill 的 `scripts/log_platform_query.js`。它有两种传输，查的是同一个后端、参数和输出相同：`gateway`（OA 网关 + `lxctl` 的 OAuth token，见 `lxctl-gateway`）和 `browser`（日志平台页面的浏览器登录态）。默认 `--via auto`：本机有 `lxctl` token 就走 `gateway`，网关通道不可用时回退 `browser`。
+
+C 是默认首选：不需要知道机器，不需要堡垒机密码和 MOA 安全码，单次查询实测 0.7～3 秒。A/B 读的是服务器上的原始文件，在 C 覆盖不到时使用。
 
 它不做进程、端口、JVM、GC 诊断（那是 `java-server-diagnostics`，它的日志章节也指向本 skill），不做任何写操作，不重启服务。
 应用名必填；机器/Pod 由 `query-app-instances` 给出；`diagnose-healthy-alert` 等上游 skill 产出的 traceId、关键字直接作为本 skill 输入。
@@ -23,14 +25,18 @@ metadata:
 
 | 场景 | 路径 |
 |---|---|
-| 最近的日志（仍在服务器保存期内）且已知 IP 或 Pod | A / B，服务器文件是权威来源：完整多行堆栈、实时、含 `stdout.log` 启动日志 |
-| 时间超出服务器保存期；`error.log`/轮转文件（含 `.gz`）已不存在 | C |
-| 不知道具体机器，或要跨机器、跨环境按 traceId / 关键字汇总 | C，再按平台返回的 `ip` 决定是否回到 A/B 取完整上下文 |
-| 用户明确要求日志平台 | C |
-| 启动日志、需要 `stdout.log`、平台无数据但机器可达 | A / B（平台是按行入库的聚合视图，`etlTime` 有入库延迟，平台无数据不等于服务器无日志） |
+| `prod`/`pre`/`gray` 环境，按时间段、级别、关键字、traceId、IP、类名、方法查应用日志（INFO/ERROR/NGINX/DUBBO） | C |
+| 不知道具体机器，或要跨机器按 traceId / 关键字汇总 | C，结果里的 `ip` 指出产生日志的机器 |
+| 历史日志：服务器上的文件已轮转或删除 | C（2026-11-11 实测 120 天、180 天前的 1 小时窗口都返回了数据） |
+| `stable`/测试/项目环境 | A / B。C 对 `env=stable`、`env=test` 实测返回 0 行，这些环境的日志没有入库 |
+| 没有被采集的文件：`stdout.log` 启动日志、GC 日志、`deploy.log`、任意路径的文件 | A / B |
+| C 返回 0 行但事件刚发生或机器可达 | A / B 复核。入库有延迟（`etlTime`），C 无数据不等于服务器无日志 |
+| 需要某条日志前后相邻的原始行（C 按条件检索，不提供“上下 N 行”） | 先用 C 定位 `ip` 和时间，再到 A / B 取上下文 |
+| 用户明确指定通道（“登机器看”“用日志平台”“用 lxctl”） | 按用户指定；“用 lxctl”即 C 加 `--via gateway` |
 
-- 两边都可用时先 A/B，历史部分用 C 补；结论里注明来源。
-- 平台热数据保留 90 天（`hotDueDay`）；更早的走冷备，2026-09-16 实测冷备后端报历史表不存在，只能如实告知，不要反复重试。
+- 结论里注明来源（C 的 `transport`，或 A/B 的机器与文件）。同一问题先 C 后 A/B 时，两边的条数口径不同，不要相加。
+- C 的环境取值是 `prod`/`pre`/`gray`/`oa`；实测 `server_credit_api` 最近 1 小时 `prod` 约 63 万行、`pre` 221 行、`gray` 与 `oa` 0 行。0 行只说明该应用在该环境该时段没有入库日志。
+- 走 A 要先登录堡垒机：线上与 stable 堡垒机都会追问密码和 6 位 MOA 安全码，首次进入一台机器实测 8～13 秒，同机后续命令约 2 秒。这是 C 作为首选的原因之一。
 - 用户只说"看下服务日志"而没有应用名时，按 `java-server-diagnostics` 的"缺少服务名或机器时"顺序从上下文推断；推断不出就问一句最小问题，不要猜。
 
 ## 路径 A：VM/KVM 服务器日志
@@ -38,7 +44,7 @@ metadata:
 1. 快检直接调用 `check_app_error_log(ip, app_name?, env?)`，它会自动复用/建立堡垒机连接；PEM 可用时不要先单独连接。只有 `error.log` 暴露线索或用户继续要求时才递进。
 2. 递进：`list_log_files` 确认真实文件名 → `grep_app_log` / `tail_app_log`（共享日志 `/home/product/logs/<app_name>_logs/`：`error.log`、`warn.log`、`info.log`、`debug.log`、`stdout.log` 及轮转文件，支持 `.gz`）；启动问题看版本目录 `/home/publish_product/server_java/<app_name>/<version_tag>/logs/` 的 `grep_version_log` / `tail_version_log`。
 3. 环境映射：`pre`/预发布/灰度/`prod`/线上 → `profile=online`（默认，环境不明时按线上处理）；项目环境/`stable`/`test`/`prj` → `profile=dev`。优先传 `env`，只有需要强制路径时才传 `profile`。
-4. "未连接堡垒机"表示当前 MCP 进程尚未建立连接，不是服务器故障；按环境连接一次，认证失败再处理认证，不跨环境重试，不在聊天索取密码/OTP 之外的凭据。
+4. "未连接堡垒机"表示当前 MCP 进程尚未建立连接，不是服务器故障；按环境连接一次，不跨环境重试。返回“要求输入安全码”时弹出输入框向用户要一次当前 6 位 MOA 码，带 `otp` 重连；返回“要求输入密码”时请用户在 bastion 的 `config.json` 填 `password`；命令结果是“命令没有在目标机执行”时按 MCP 故障报告，不重复向用户要码。
 5. 文件已轮转、`.gz` 也不在、或用户要的时间早于服务器保存期 → 转路径 C。
 
 ## 路径 B：容器 Pod 日志
@@ -75,9 +81,16 @@ node $AGENT_TOOLS_ROOT/skills/lexin/java-server-diagnostics/scripts/webshell_log
 
 先读输出的 `targetSource/loginUrlSource/access/accessAttempts/errorCode/warningCode`，再看 `summary` 或 `forensics`；`warningCode=RESULT_TRUNCATED` 时缩小时间窗或提高受控上限重查；自动登录失败时把返回的乐效 `manualUrl` 交给用户在浏览器打开。`--files` 可读任意文件：相对路径基于 `/home/product/logs/<app>_logs/`（如 `deploy.log`、`deploy/deploy_*.log`，支持通配符），也可传绝对路径，路径中不能有空白字符；路径 A 的 MCP `file_name` 同样不限文件。
 
-## 路径 C：日志平台
+## 路径 C：架构日志服务
 
-前置：脚本在 `get-browser-session` 的 `main` profile 内发请求，需要该 profile 已登录 OA。报 `browser session is not ready ... (LOGIN_REQUIRED|PROXY_INTERCEPTED|FORBIDDEN|UPSTREAM_ERROR)` 时先按 `get-browser-session` 的"登录态排查顺序"确认，确需重登再执行（MCP 优先 `browser_session.ensure_session`，脚本兜底）：
+传输与前置：
+
+- `gateway`（有 `lxctl` token 时的默认）：需要本机装过 `lxctl` 并 `lxctl auth login`，状态用 `node $AGENT_TOOLS_ROOT/skills/lexin/lxctl-gateway/scripts/lxctl_gateway.js doctor` 看。token 过期由脚本自动续期；网络错误、超时、502 自动重试 2 次（实测偶发 `socket disconnected` 和 30 秒无响应，重试后成功）。
+- `browser`（没有 token，或网关通道不可用时的回退）：脚本在 `get-browser-session` 的 `main` profile 内发请求，需要该 profile 已登录 OA。
+- `--via auto` 只在网关通道本身不可用（未登录、token 续期失败、无权限、网络）时回退，并在 `warnings` 里写明原因；日志服务返回的查询错误（`retcode` 非 0）不换通道重试。输出的 `transport` 字段是实际使用的传输。
+- 两种传输都不可用时，先按 `lxctl-gateway` 的“安装与登录”恢复 `gateway`（只需用户在浏览器点一次确认），它比恢复浏览器登录态更省事。
+
+`browser` 传输报 `browser session is not ready ... (LOGIN_REQUIRED|PROXY_INTERCEPTED|FORBIDDEN|UPSTREAM_ERROR)` 时先按 `get-browser-session` 的"登录态排查顺序"确认，确需重登再执行（MCP 优先 `browser_session.ensure_session`，脚本兜底）：
 
 ```bash
 node $AGENT_TOOLS_ROOT/skills/lexin/get-browser-session/scripts/browser_session.js \
@@ -112,16 +125,18 @@ node scripts/log_platform_query.js \
 - `--order desc|asc`（默认 desc，时间倒序）。
 - `--page`（默认 1）、`--page-size`（默认 100，最大 500）、`--max-pages`（默认 1，最大 50）。
 - `--max-body`：stdout 每条 body 截断长度（默认 2000）；`--output <file>`：完整结果写 JSON。
-- `--user-name`/`LOG_PLATFORM_USER_NAME`：覆盖 OA 账号（正常不需要）；`--profile` 等浏览器覆盖项同 `get-browser-session`。
+- `--via auto|gateway|browser`（默认 auto）：见上“传输与前置”。
+- `--user-name`/`LOG_PLATFORM_USER_NAME`：覆盖 OA 账号（正常不需要；`gateway` 从 token 取，`browser` 从 OA 会话取）；`--profile` 等浏览器覆盖项同 `get-browser-session`，只对 `browser` 传输有效。
 
 输出 JSON：`rows[]` 每条含 `time`（北京时间）、`env`、`ip`、`level`（从 body 解析，可能为 null）、`tid`、`cls`、`mth`、`uid`、`body`、`bodyTruncated`；
-`totalNum`/`totalPage` 是平台总匹配数（去重前）；每页实际条数可能少于 `--page-size`，因为平台按页去重相同日志行；`warnings` 提示截断或超出热数据期；`cost` 是平台耗时；`--output` 时 `resultFile` 指向完整文件。
+`totalNum`/`totalPage` 是平台总匹配数（去重前）；每页实际条数可能少于 `--page-size`，因为平台按页去重相同日志行；`warnings` 提示截断、通道回退或（`browser` 传输下）起始时间早于热数据期；`cost` 是平台耗时；`transport` 是实际传输（`gateway`/`browser`），`hotDueDay` 只有 `browser` 传输能取到（`gateway` 下为 null）；`--output` 时 `resultFile` 指向完整文件。
 
 使用要点：
 
 - 宽泛条件（ALL + 1 小时）动辄数万条，先加 traceId、`--type error` 或关键字收窄；默认只取一页，不要为了"拉全"无限提高 `--max-pages`。
 - 平台的 `type` 字段把 INFO/WARN 都记为 0，级别以 `level` 为准；`ip` 是产生日志的机器，可据此回到路径 A/B 取完整上下文。
-- `retcode` 非 0 时脚本直接报错并带 `detail` 首行；不要改条件碰运气，先判断是冷备（起始时间早于 90 天）还是条件问题。
+- `retcode` 非 0 时脚本直接报错并带 `detail` 首行；不要改条件碰运气，先判断是历史表问题（起始时间早于 90 天的热数据期；2026-09-16 报过历史表不存在，2026-11-11 两种传输查 120 天前都正常）还是条件问题。
+- 时间窗越宽越慢：实测 1 小时窗口 0.7～1.6 秒，偶发 5～13 秒；一次查几天时先用 `--type error`、traceId 或关键字收窄，仍超时就按天拆开查。
 - 接口字段与编码见 `references/log-platform-http.md`。
 
 ## 输出格式

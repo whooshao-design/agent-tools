@@ -11,21 +11,31 @@ if (!root) { const v = process.env.AGENT_TOOLS_ROOT || ''; r = probe(v); tried.p
 if (!root) { const p = path.join(os.homedir(), '.config/agent-tools/root'); try { const v = fs.readFileSync(p, 'utf8').trim(); r = probe(v); tried.push(`${p} = ${v}${r === 'hit' || r === 'miss' ? '' : ' ' + r}`); if (r === 'hit') root = v; } catch (e) { tried.push(`${p} ${e.code === 'ENOENT' ? '<absent>' : e.code}`); } }
 if (!root) { console.error(['agent-tools: 未找到仓库根', ...tried, '请在仓库目录运行 python3 install.py'].join('\n')); process.exit(2); }
 // agent-tools bootstrap end
-// Read-only search on the 日志平台 (log.oa.fenqile.com) archLog API through the shared browser session.
-// No credential is read or printed here; the browser profile carries the OA login.
+// Read-only search on the 架构日志服务 archLog API. Two transports reach the same backend:
+//   gateway — OA AI gateway with the lxctl OAuth token (lxctl-gateway skill); no browser needed
+//   browser — 日志平台 log.oa.fenqile.com through the shared browser session (get-browser-session)
+// No credential is read or printed here.
 const { createRequire } = require('module');
 const { skillDir } = require(path.join(root, 'lib/agent_tools/locate.js'));
 
-const BROWSER_SESSION_DIR = skillDir('get-browser-session', 'scripts');
-const {
-  DEFAULT_LOGIN_PATTERN,
-  DEFAULT_PORTAL_PATTERN,
-  classifyRequestSession,
-  launchReadOnlyContext,
-  resolvePaths,
-} = require(path.join(BROWSER_SESSION_DIR, 'browser_session.js'));
-const { buildBrowserEnv, chromiumArgsFor } = require(path.join(BROWSER_SESSION_DIR, 'browser_network.js'));
-const sessionCache = require(path.join(BROWSER_SESSION_DIR, 'session_cache.js'));
+const gateway = require(skillDir('lxctl-gateway', 'scripts', 'lxctl_gateway.js'));
+const GATEWAY_PAGE = { path: '/ai/archLog/page', appId: 'arch_log_service' };
+const VIA = new Set(['auto', 'gateway', 'browser']);
+
+// The browser transport's modules are loaded only when it is used, so the gateway transport works on a
+// machine without Playwright.
+let browserModules = null;
+function browserDeps() {
+  if (!browserModules) {
+    const dir = skillDir('get-browser-session', 'scripts');
+    browserModules = {
+      ...require(path.join(dir, 'browser_session.js')),
+      ...require(path.join(dir, 'browser_network.js')),
+      sessionCache: require(path.join(dir, 'session_cache.js')),
+    };
+  }
+  return browserModules;
+}
 
 const PLATFORM_BASE = 'https://log.oa.fenqile.com';
 const PAGE_URL = `${PLATFORM_BASE}/#/dashboard`;
@@ -41,7 +51,8 @@ const ORDERS = new Set(['desc', 'asc']);
 // The platform renders and accepts Asia/Shanghai wall-clock times regardless of the local machine zone.
 const TZ_OFFSET_MS = 8 * 60 * 60 * 1000;
 const DEFAULT_RANGE_MS = 60 * 60 * 1000;
-const LEVEL_PATTERN = /^\d{4}-\d{2}-\d{2} [\d:.]+\|[^|]*\|[^|]*\|[^|]*\|(TRACE|DEBUG|INFO|WARN|ERROR|FATAL)\|/;
+// Apps differ in how many fields sit between the timestamp and the level: `time|thread|traceId||LEVEL|` or `time|pid|traceId|LEVEL|`.
+const LEVEL_PATTERN = /^\d{4}-\d{2}-\d{2} [\d:.]+\|(?:[^|]*\|){2,3}(TRACE|DEBUG|INFO|WARN|ERROR|FATAL)\|/;
 
 const USAGE = `Usage:
   node log_platform_query.js --app <app_name> [--last 1h | --from "2026-09-16 10:00:00" --to "2026-09-16 11:00:00"]
@@ -49,6 +60,10 @@ const USAGE = `Usage:
       [--trace-id <tid>] [--ip <host>] [--service <class>] [--method <name>] [--uid <uid>]
       [--keyword <text>]... [--keyword-mode and|or] [--order desc|asc]
       [--page 1] [--page-size 100] [--max-pages 1] [--max-body 2000] [--output <file.json>] [--user-name <min>]
+      [--via auto|gateway|browser]
+
+--via auto (default) uses the OA gateway when an lxctl token exists and falls back to the browser session only when
+the gateway itself is unusable (not logged in, token rejected, network); a query error is never retried elsewhere.
 
 Times are Asia/Shanghai wall-clock ("YYYY-MM-DD HH:mm[:ss]"), ISO strings or epoch milliseconds.
 Default window is the last hour. Output is JSON on stdout; log bodies are truncated to --max-body characters.`;
@@ -205,6 +220,7 @@ function loadPlaywright(paths) {
 
 // Direct-only like get-browser-session: proxy variables are stripped and --no-proxy-server is forced.
 async function openContext(paths, chromium) {
+  const { buildBrowserEnv, chromiumArgsFor, launchReadOnlyContext } = browserDeps();
   const env = buildBrowserEnv(PAGE_URL, { ...process.env }).env;
   env.LD_LIBRARY_PATH = [paths.runtimeLibDir, process.env.LD_LIBRARY_PATH].filter(Boolean).join(':');
   return launchReadOnlyContext(chromium, paths.profileDir, {
@@ -222,7 +238,11 @@ class DirectClient {
   }
 }
 
+// Calls the same API through the OA gateway with the lxctl token.
+class GatewayClient {}
+
 async function requestDirect(client, url, options) {
+  const { sessionCache } = browserDeps();
   const cookieHeader = sessionCache.readCookieHeader(client.profileDir, url);
   if (!cookieHeader) throw new PlatformError(`no cached session for ${new URL(url).host}`);
   const result = await sessionCache.fetchWithCookies(cookieHeader, url, {
@@ -244,6 +264,7 @@ async function requestDirect(client, url, options) {
 
 async function requestJson(context, url, options = {}) {
   if (context instanceof DirectClient) return requestDirect(context, url, options);
+  const { DEFAULT_LOGIN_PATTERN, DEFAULT_PORTAL_PATTERN, classifyRequestSession } = browserDeps();
   const response = await context.request.fetch(url, {
     method: options.method || 'GET',
     data: options.data,
@@ -274,6 +295,7 @@ async function requestJson(context, url, options = {}) {
 
 async function resolveUserName(context, override) {
   if (override) return String(override);
+  if (context instanceof GatewayClient) return (gateway.readToken() || {}).userMin || ''; // the gateway also derives the user from the token
   const json = await requestJson(context, SESSION_URL);
   const rows = (json && json.result_rows) || [];
   const min = rows[0] && rows[0].min;
@@ -282,13 +304,16 @@ async function resolveUserName(context, override) {
 }
 
 async function fetchHotDueDay(context) {
+  if (context instanceof GatewayClient) return null; // not exposed on the gateway
   const json = await requestJson(context, PLATFORM_BASE + API.hotDueDay).catch(() => null);
   const days = json && Number(json.data);
   return Number.isFinite(days) && days > 0 ? days : null;
 }
 
 async function fetchPage(context, payload) {
-  const json = await requestJson(context, PLATFORM_BASE + API.page, { method: 'POST', data: payload });
+  const json = context instanceof GatewayClient
+    ? await gateway.callGateway({ method: 'POST', ...GATEWAY_PAGE, body: payload, timeoutMs: 90000 })
+    : await requestJson(context, PLATFORM_BASE + API.page, { method: 'POST', data: payload });
   if (Number(json.retcode) !== 0) {
     const detail = String(json.detail || '').trim().split('\n').filter(Boolean)[0] || '';
     throw new PlatformError(`log platform query failed: ${json.retmsg || 'unknown error'}${detail ? ` | ${detail.slice(0, 300)}` : ''}`, {
@@ -329,6 +354,11 @@ function buildQuery(args, nowMs = Date.now()) {
     pageSize: boundedNumber(args['page-size'], 100, 1, 500),
     maxPages: boundedNumber(args['max-pages'], 1, 1, 50),
     maxBody: boundedNumber(args['max-body'], 2000, 200, 200000),
+    via: (() => {
+      const via = String(args.via || 'auto').toLowerCase();
+      if (!VIA.has(via)) throw new Error(`unsupported via: ${args.via} (use auto|gateway|browser)`);
+      return via;
+    })(),
   };
 }
 
@@ -346,12 +376,27 @@ async function main(argv) {
     return 1;
   }
 
-  const paths = resolvePaths(args, PAGE_URL);
   const userNameOverride = args['user-name'] || process.env.LOG_PLATFORM_USER_NAME;
   const startedAt = Date.now();
-  const result = await collectWithCachedSession(paths, query, userNameOverride, startedAt)
-    || await collectWithBrowser(paths, query, userNameOverride, startedAt);
-  const { rows, pagesFetched, totalNum, totalPage, cost, hotDueDay, warnings, sessionSource } = result;
+  let result = null;
+  let gatewayNote = '';
+  if (query.via !== 'browser' && (query.via === 'gateway' || gateway.readToken())) {
+    try {
+      result = { ...await collectRows(new GatewayClient(), { ...query }, userNameOverride, startedAt), transport: 'gateway', sessionSource: 'lxctl-token' };
+    } catch (error) {
+      // Only an unusable gateway falls back; an error from the log service itself (PlatformError) is the answer.
+      if (query.via === 'gateway' || !(error instanceof gateway.GatewayError)) throw error;
+      gatewayNote = `gateway transport unavailable (${error.code}: ${error.message}); used the browser session instead`;
+    }
+  }
+  if (!result) {
+    const paths = browserDeps().resolvePaths(args, PAGE_URL);
+    result = await collectWithCachedSession(paths, query, userNameOverride, startedAt)
+      || await collectWithBrowser(paths, query, userNameOverride, startedAt);
+    result.transport = 'browser';
+    if (gatewayNote) result.warnings.unshift(gatewayNote);
+  }
+  const { rows, pagesFetched, totalNum, totalPage, cost, hotDueDay, warnings, sessionSource, transport } = result;
   const output = {
     app: query.app,
     from: formatTime(query.from),
@@ -377,6 +422,7 @@ async function main(argv) {
     rows: rows.map((row) => normalizeRow(row, query.maxBody)),
     warnings,
     cost,
+    transport,
     sessionSource,
     elapsedMs: Date.now() - startedAt,
   };
@@ -394,8 +440,8 @@ async function collectRows(client, query, userNameOverride, startedAt) {
   const hotDueDay = await fetchHotDueDay(client);
   const warnings = [];
   if (hotDueDay && query.from < startedAt - hotDueDay * 86400000) {
-    warnings.push(`start time is older than the hot retention (${hotDueDay} days); the platform switches to the cold history table, `
-      + 'which was returning "table doesn\'t exist" on 2026-09-16 -- expect an error or an empty result');
+    warnings.push(`start time is older than the hot retention (${hotDueDay} days); the service reads the history table for that range `
+      + '(failed with "table doesn\'t exist" on 2026-09-16, returned rows 120 and 180 days back on 2026-11-11)');
   }
 
   const rows = [];
@@ -423,6 +469,7 @@ async function collectRows(client, query, userNameOverride, startedAt) {
 // Cache hit: no Chromium and no profile lock. Any failure (stale cookies or a real API error)
 // falls back to the browser path, which reports real errors and refreshes the snapshot.
 async function collectWithCachedSession(paths, query, userNameOverride, startedAt) {
+  const { sessionCache } = browserDeps();
   if (!sessionCache.readCookieHeader(paths.profileDir, PLATFORM_BASE)) return null;
   try {
     const result = await collectRows(new DirectClient(paths.profileDir), { ...query }, userNameOverride, startedAt);
@@ -439,6 +486,7 @@ async function collectWithBrowser(paths, query, userNameOverride, startedAt) {
   let context;
   try {
     context = await openContext(paths, chromium);
+    const { sessionCache } = browserDeps();
     const result = await collectRows(context, query, userNameOverride, startedAt);
     await sessionCache.saveContextCookies(context, paths.profileDir, PLATFORM_BASE);
     await sessionCache.saveContextCookies(context, paths.profileDir, SESSION_URL);
@@ -459,6 +507,7 @@ if (require.main === module) {
 
 module.exports = {
   API,
+  GATEWAY_PAGE,
   ENVS,
   KEYWORD_MODES,
   LOG_TYPES,

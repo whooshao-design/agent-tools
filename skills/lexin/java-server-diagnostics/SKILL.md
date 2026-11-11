@@ -2,7 +2,7 @@
 name: java-server-diagnostics
 description: "通过 java_app_diag MCP 对 Java 应用所在服务器做只读排查。Use when 用户要求排查某台服务器上 Java 应用的报错、进程、端口、JVM、线程或 GC；默认先只看 error.log 判断有没有问题，只有 error.log 暴露线索后才递进排查 info/debug/启动日志与运行时状态。"
 metadata:
-  version: 1.4.6
+  version: 1.4.7
 ---
 
 # java-server-diagnostics
@@ -93,8 +93,8 @@ metadata:
 
 ### 2. 容器日志与历史日志
 
-容器 Pod 日志的快检/取证（`container_log_check.js`、`webshell_log_check.js`）和日志平台 `log.oa.fenqile.com` 的检索统一由 `query-app-logs` 承接：
-目标是容器、日志已轮转或超出服务器保存期、需要跨机器按 traceId 汇总时，按该 skill 的路由规则执行，本 skill 不再重复其步骤。
+容器 Pod 日志的快检/取证（`container_log_check.js`、`webshell_log_check.js`）和架构日志服务（日志平台 `log.oa.fenqile.com` 背后的检索接口，默认经 OA 网关加 `lxctl` token 访问）的检索统一由 `query-app-logs` 承接：
+`prod`/`pre`/`gray` 的应用日志按时间、关键字、traceId、IP 检索时它是首选，不需要登堡垒机；目标是容器、日志已轮转、需要跨机器汇总时也按该 skill 的路由规则执行，本 skill 不再重复其步骤。
 两个容器脚本仍位于 `scripts/`，路径不变。
 
 ### 3. 基于 error.log 递进定位
@@ -128,6 +128,10 @@ metadata:
 - 需要确认 JVM 参数或轻量 GC 概览：查 `java_jvm_summary(ip, app_name|pid)`。
 
 不要把线程 dump 全量粘贴到最终回复；只提取阻塞线程、异常线程名、deadlock 证据和数量级。
+
+只需要指标数值（老年代使用率、堆用量、G1 GC 次数、活跃线程数）而不需要 GC 日志或线程栈时，不必登机：
+`node $AGENT_TOOLS_ROOT/skills/lexin/lxctl-gateway/scripts/lxctl_gateway.js eye --query 'max(old_gen_mem_ratio{app="<app_name>",env="prod"}) by (ident)'`
+按实例返回当前值（PromQL 即时查询，趋势用 `max_over_time(...[1h])`、`increase(...[1h])`）；指标名与标签见 `lxctl-gateway`。
 
 ## 汇总结论
 

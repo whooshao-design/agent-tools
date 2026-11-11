@@ -2,7 +2,7 @@
 name: inspect-healthy-metrics
 description: 只读查看 Healthy/雷神/Nightingale 指标上报状态。Use when 用户要求确认指标是否有数据、最近是否正常上报、批量检查 stable 或线上指标、按 metric 列表或 app+suffix 展开查询 Prometheus 样本、区分未注册/无数据/已过期/正常上报。
 metadata:
-  version: 1.1.4
+  version: 1.1.5
 ---
 
 # inspect-healthy-metrics
@@ -16,6 +16,7 @@ metadata:
 - `register-healthy-metrics`：用于 `/api/n9e/metric-manage` 的先查后注册；不判断时序数据是否上报。
 - `inspect-healthy-metrics`：用于 Prometheus 数据检查；只读，可选检查注册表辅助判断。
 - `healthy-dashboard-config`：用于大盘配置，不用于单指标上报排查。
+- `lxctl-gateway`：`eye` 子命令经 OA 网关做 PromQL 即时查询，只依赖 `lxctl` token；Healthy 浏览器登录态不可用时可用它确认某个 series 当前是否有值，但它没有窗口样本数、最近样本时间和注册表回查，上报状态分类仍以本 skill 的脚本为准。
 
 MCP 优先、脚本兜底：批量 PromQL 使用 `healthy_query_metrics`，指标注册状态和新鲜度分类用下文正式脚本。旧 MCP 进程需重启才能加载新增入口，期间直接调用正式脚本；不要复制临时 Node/Python/curl 客户端。
 登录态失效时复用 `get-browser-session` 刷新同一 profile；默认使用持久的 `~/.local/state/agent-tools/browser-profiles/healthy`，不要每次新建 profile。

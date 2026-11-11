@@ -64,6 +64,20 @@ node skills/lexin/get-browser-session/scripts/browser_session.js --doctor   # �
 
 macOS 用 Playwright 自带的 Chromium；Linux/WSL 优先 `<工具目录>/browsers/chrome-linux64/chrome`，没有时同 macOS。脚本结束时 `ldd` 发现缺库会提示上面的 `install-deps` 命令。现有 WSL 机器可以继续用 `~/tools/lexiao-browser`。登录态按 `get-browser-session` skill 在浏览器里完成 SSO 后保存到 `~/.local/state/agent-tools/`。
 
+## 5.1 lxctl（OA 网关通道，日志检索与指标即时查询的首选）
+
+`query-app-logs` 的日志检索和 `lxctl-gateway` 的 PromQL 即时查询默认经 OA AI 网关，用公司 CLI `lxctl` 的 OAuth token，不依赖 Playwright、浏览器登录态和堡垒机。每台机器一次（需要 Node.js ≥ 16、已连零信任）：
+
+```bash
+npm install -g @lx/lxctl --registry=http://registry.npm.frd.fenqile.com   # 只对这条命令指定内部源
+lxctl config init --new
+lxctl auth login                 # 自动打开浏览器，用户确认授权
+chmod 600 ~/.lxctl/tokens.json   # lxctl 0.1.32 写出来是 644
+node skills/lexin/lxctl-gateway/scripts/lxctl_gateway.js doctor --probe   # loggedIn=true 且 probe.ok=true
+```
+
+access token 有效 7200 秒，脚本过期时自动 `lxctl auth refresh`，refresh 失败才需要重新 `lxctl auth login`。不装 `lxctl` 时 `query-app-logs` 自动回退到浏览器登录态。`lxctl skill install` 写进 `~/.claude/skills/lxctl/`、`~/.codex/skills/lxctl/` 的三份公司说明可装可不装，日志查询仍以 `query-app-logs` 为入口。macOS 上的可用性未验证。
+
 ## 6. 外部模型 wrapper（不在仓库内）
 
 `spawn-model-agent`、`build-codeagent` 与外部模型评审通过 PATH 上的包装器派发：`~/bin/claude-<后端>`、`~/bin/codex-<后端>` 是指向 `claude-profile` / `codex-profile` 的可执行文件，读取 `~/.config/ai-providers/<后端>` 里的网关地址、密钥与模型；`vps` 后端另需 `~/bin/ai-vps-exec`、`~/bin/ai-vps-proxy`。这些文件不随仓库迁移，从已配置的机器把 `~/bin/claude-profile`、`~/bin/codex-profile`、各 `claude-*` / `codex-*` 链接、`~/bin/ai-vps-*` 与 `~/.config/ai-providers/` 复制过来，再把密钥改成本机可用的值。
@@ -120,6 +134,8 @@ auto mode 的分类器对三类调用不会自动放行：改 `~/.claude` 下配
 "Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/query-clickhouse-water/scripts/clickhouse_http.js *)",
 "Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/query-dubbo-registry/scripts/query_dubbo_registry.js *)",
 "Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/query-app-logs/scripts/log_platform_query.js *)",
+"Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/lxctl-gateway/scripts/lxctl_gateway.js doctor*)", "Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/lxctl-gateway/scripts/lxctl_gateway.js eye *)",
+"Bash(lxctl --version)", "Bash(lxctl auth status:*)",
 "Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/inspect-healthy-metrics/scripts/inspect_metrics.js *)",
 "Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/inspect-healthy-jvm-dashboard/scripts/inspect_dashboard.js *)",
 "Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/inspect-app-call-topology/scripts/inspect_call_topology.js *)",

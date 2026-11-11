@@ -122,7 +122,8 @@
 | Skill | 说明 | 配套 MCP |
 |---|---|---|
 | `java-server-diagnostics` | Java 应用服务器只读诊断：默认先查 `error.log`，支持 warn/轮转日志及独立堡垒机会话；深入故障分析按需组织报告 | `java_app_diag` |
-| `query-app-logs` | 统一查应用日志：服务器/容器或日志平台；结论先行，保留数量口径与查询覆盖范围 | `java_app_diag`、`browser_session` |
+| `query-app-logs` | 统一查应用日志：检索默认走架构日志服务（OA 网关加 `lxctl` token，回退日志平台浏览器登录态），需要原始文件时走服务器/容器；结论先行，保留数量口径与查询覆盖范围 | `java_app_diag`、`browser_session` |
+| `lxctl-gateway` | OA AI 网关调用底层：`lxctl` 安装登录检查、token 自动续期、带重试的网关调用、雷神 PromQL 即时查询（JVM/RPC/机器指标）；供日志等 skill 复用 | - |
 | `healthy-dashboard-config` | stable/线上大盘读写、版本比对、动态筛选和页面查询验证；告警规则列举、新建、修改、停用/启用 | `healthy` |
 | `inspect-healthy-metrics` | 批量 PromQL、指标上报状态、最后样本和注册辅助信息，共用持久会话 | `healthy`, `browser_session` |
 | `inspect-healthy-jvm-dashboard` | 只读查看雷神 JVM/G1 看板，整理变量、面板、PromQL 和页面快照；巡检突出结论、指标与异常实例 | `healthy`, `browser_session` |

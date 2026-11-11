@@ -1,0 +1,6 @@
+interface:
+  display_name: "Lxctl Gateway"
+  short_description: "lxctl 安装登录检查、OA 网关调用与雷神 PromQL 即时查询"
+  default_prompt: "使用 $lxctl-gateway 检查 lxctl 登录状态并查询这个应用的 JVM 指标。"
+policy:
+  allow_implicit_invocation: true

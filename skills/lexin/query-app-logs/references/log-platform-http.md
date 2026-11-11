@@ -57,6 +57,25 @@
   `ClickHouse ... Table arch_log_db.t_arch_log_history_info doesn't exist`，即冷备链路当前在平台后端不可用。
   脚本不做特殊分支，只在起始时间早于 `hotDueDay` 时给出 warning 并原样透出错误摘要。
 
+## 经 OA 网关调用（`gateway` 传输）
+
+同一个检索接口也登记在 OA AI 网关上，公司 CLI `lxctl` 的 `log-query` 用的就是它：
+
+| 项 | 值 |
+|---|---|
+| URL | `POST https://gateway.oa.fenqile.com/rc_oa_gateway/jiagouzhongxin/ai/archLog/page` |
+| 请求头 | `Authorization: Bearer <lxctl access_token>`、`X-AI-AppId: arch_log_service`、`X-AI-Caller-Channel: lxctl`、`X-AI-Caller-Instance: lxctl-cli-instance`、`Content-Type: application/json` |
+| 请求体与响应 | 与上面的 `/api/archLog/page` 相同（2026-11-11 同一条件两种传输 `totalNum` 一致）；`min` 可省略，网关从 token 解析用户 |
+| 没有的接口 | `hotDueDay`、OA 会话接口不在网关上 |
+
+2026-11-11 实测（应用 `server_credit_api`）：
+
+- 环境：`prod`、`pre` 有数据；`gray`、`oa` 该时段 0 行；`stable`、`test` 返回 `retcode=0` 且 0 行。
+- 历史：1、3、7、15、30、60、90 天前的 1 小时窗口由 `ck realtime` 返回，120、180 天前由 `ck history` 返回，都有数据。
+- 分页：`limit` 传 100/500/1000/5000 都按数返回；`page=5000`（`limit=100`）正常返回。脚本仍把 `--page-size` 限制在 500。
+- 稳定性：约 30 次调用里出现过 4 次 `socket disconnected before secure TLS connection` 和 3 次 30 秒无响应（`lxctl` 自带超时），重试后成功；`pre` 出现过一次网关 `retcode=16051000`（上游 502）。`lxctl-gateway` 的 `callGateway()` 对这三类错误重试 2 次，超时由调用方设为 90 秒。
+- 错误码：token 无效时网关返回 `retcode=16051001`（`B端应用请求缺少 X-User-Min Header`）；`X-AI-AppId` 不在接口的 `authorizedAppIds` 里返回 `16051009`。
+
 ## 页面约束
 
 - 应用名为必填；时间范围必填，页面默认最近 1 小时。

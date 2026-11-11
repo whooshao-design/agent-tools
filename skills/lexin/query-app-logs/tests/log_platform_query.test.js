@@ -103,3 +103,17 @@ test('stops paging at max-pages, an empty page or the last page, but not at a de
   assert.equal(shouldFetchNextPage({ pagesFetched: 1, maxPages: 3, lastRowCount: 40, nextPage: 2, totalPage: 5 }), true);
   assert.equal(shouldFetchNextPage({ pagesFetched: 1, maxPages: 3, lastRowCount: 40, nextPage: 2, totalPage: NaN }), true);
 });
+
+test('level is parsed from both body layouts', () => {
+  const { parseLevel } = require('../scripts/log_platform_query');
+  assert.equal(parseLevel('2026-09-16 17:18:15.264|243|0A11|0|INFO|com.x.A|consume|53|UID=|msg'), 'INFO');
+  assert.equal(parseLevel('2026-11-11 14:20:01.798|40745|0A0B0D62-|ERROR|com.alibaba.dubbo.rpc.X|msg'), 'ERROR');
+  assert.equal(parseLevel('free text ERROR|'), null);
+});
+
+test('via defaults to auto and rejects unknown transports', () => {
+  const { buildQuery } = require('../scripts/log_platform_query');
+  assert.equal(buildQuery({ app: 'a' }).via, 'auto');
+  assert.equal(buildQuery({ app: 'a', via: 'Gateway' }).via, 'gateway');
+  assert.throws(() => buildQuery({ app: 'a', via: 'ssh' }), /unsupported via/);
+});
