@@ -69,6 +69,7 @@ cp config.json.example config.json
 | `bastion_port` | 堡垒机端口 |
 | `username` | 登录用户名 |
 | `password` | 密码（PEM 认证足够时可留空） |
+| `totp_secret` | 可选。MOA/动态验证码的 base32 密钥；填了以后堡垒机提示输入验证码且调用方没传 `otp` 时，按 RFC 6238 现算 6 位码。也可用环境变量 `BASTION_TOTP_SECRET` |
 | `pem_path` | PEM 私钥文件路径 |
 | `keepalive_ip` | 保活用的目标机器 IP |
 | `keepalive_interval` | SSH 心跳间隔（秒） |
@@ -216,6 +217,8 @@ PEM 密钥认证 ──成功──→ 进入堡垒机
 ```
 
 堡垒机服务端决定是否需要密码和验证码。PEM 认证足够时无需额外输入。
+
+PEM 认证通过后，堡垒机 shell 仍可能再问一次 `password:`，随后问 MOA 验证码（2026-11-11 实测：`config.json` 的 `password` 为空时三次连接都停在 `password:`；刚用其他客户端登录过的一段时间内不问，所以表现为时好时坏）。要让 agent 稳定登录，在 `config.json` 填 `password`（或设 `BASTION_PASSWORD`），需要验证码时再填 `totp_secret`（或设 `BASTION_TOTP_SECRET`）；这两个值只放在 gitignore 的 `config.json` 或进程环境里。
 
 ## 环境变量
 

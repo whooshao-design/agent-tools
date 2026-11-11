@@ -319,3 +319,50 @@ class ConnectFailureClassificationTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TotpTest(unittest.TestCase):
+    SECRET = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"  # base32 of the RFC 6238 SHA-1 test key "12345678901234567890"
+
+    def test_generate_totp_matches_rfc6238_vectors(self):
+        # RFC 6238 Appendix B (8 digits): T=59 -> 94287082, T=1111111109 -> 07081804; 6 digits are the last six.
+        self.assertEqual("287082", ssh_manager.generate_totp(self.SECRET, now=59))
+        self.assertEqual("081804", ssh_manager.generate_totp(self.SECRET, now=1111111109))
+        self.assertEqual("287082", ssh_manager.generate_totp("gezd gnbv gy3t qojq gezd gnbv gy3t qojq", now=59))
+
+    def test_moa_prompt_is_an_otp_prompt(self):
+        self.assertTrue(_is_auth_prompt("Welcome\nPlease enter MOA token:", ssh_manager._OTP_KEYWORDS))
+        self.assertFalse(_is_auth_prompt("MOA login ok\n>>> ", ssh_manager._OTP_KEYWORDS))
+
+    def _shell_auth(self, config, otp=""):
+        manager = SSHManager({"bastion_host": "h", "bastion_port": 1, **config})
+        manager._password = "pw"
+        manager._otp = otp
+        sent = []
+
+        def fake_send(ch, cmd, timeout=10):
+            sent.append(cmd)
+            return "MOA token:" if cmd == "pw" else ">>> "
+
+        with patch("bastion_mcp.ssh_manager.send_cmd", side_effect=fake_send), \
+                patch("bastion_mcp.ssh_manager.generate_totp", return_value="123456"), \
+                patch.dict("os.environ", {}, clear=False) as env:
+            env.pop("BASTION_TOTP_SECRET", None)
+            ok, message = manager._handle_shell_auth(object(), "password:")
+        return ok, message, sent
+
+    def test_shell_auth_generates_otp_from_configured_secret(self):
+        ok, _, sent = self._shell_auth({"totp_secret": self.SECRET})
+        self.assertTrue(ok)
+        self.assertEqual(["pw", "123456"], sent)
+
+    def test_explicit_otp_wins_over_configured_secret(self):
+        ok, _, sent = self._shell_auth({"totp_secret": self.SECRET}, otp="654321")
+        self.assertTrue(ok)
+        self.assertEqual(["pw", "654321"], sent)
+
+    def test_missing_otp_and_secret_reports_how_to_configure(self):
+        ok, message, sent = self._shell_auth({})
+        self.assertFalse(ok)
+        self.assertEqual(["pw"], sent)
+        self.assertIn("totp_secret", message)

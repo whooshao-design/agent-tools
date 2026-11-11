@@ -1,7 +1,12 @@
 """SSH 连接管理器 - 堡垒机连接、保活、通道复用、命令执行"""
 
+import base64
+import hashlib
+import hmac
+import os
 import re
 import socket
+import struct
 import threading
 import time
 import logging
@@ -34,7 +39,7 @@ SAFE_JCMD_COMMANDS = {
 
 # shell 认证相关关键词
 _PASSWORD_KEYWORDS = ("密码", "password", "Password")
-_OTP_KEYWORDS = ("安全码", "验证码", "otp", "OTP", "code")
+_OTP_KEYWORDS = ("安全码", "验证码", "otp", "OTP", "code", "MOA")
 _AUTH_FAIL_KEYWORDS = ("验证失败", "认证失败", "失败", "invalid", "Invalid", "incorrect")
 # 输入提示符：确认 shell 确实在等待用户输入，而非普通输出中碰巧包含关键词
 _INPUT_PROMPT_INDICATORS = ("请输入", "enter", "Enter", "input", "Input")
@@ -347,6 +352,17 @@ def _extract_marker_content(clean: str, marker_start: str, marker_end: str) -> s
     return None
 
 
+def generate_totp(secret: str, now: float | None = None) -> str:
+    """RFC 6238 TOTP（HMAC-SHA1、30 秒步长、6 位），secret 为 base32（忽略空格与大小写）。"""
+    cleaned = secret.replace(" ", "").upper()
+    key = base64.b32decode(cleaned + "=" * (-len(cleaned) % 8))
+    counter = int((time.time() if now is None else now) // 30)
+    digest = hmac.new(key, struct.pack(">Q", counter), hashlib.sha1).digest()
+    offset = digest[-1] & 0x0F
+    code = struct.unpack(">I", digest[offset:offset + 4])[0] & 0x7FFFFFFF
+    return f"{code % 1000000:06d}"
+
+
 def make_auth_handler(password="", otp=""):
     """创建 keyboard-interactive 认证处理器"""
     def handler(title, instructions, prompt_list):
@@ -355,7 +371,7 @@ def make_auth_handler(password="", otp=""):
             p = prompt.lower().strip()
             if "password" in p:
                 responses.append(password)
-            elif any(k in p for k in ("otp", "code", "验证", "token", "mfa")):
+            elif any(k in p for k in ("otp", "code", "验证", "token", "mfa", "moa")):
                 responses.append(otp)
             else:
                 responses.append("")
@@ -420,6 +436,20 @@ class SSHManager:
                     f"第 {attempt} 次连接在{e.stage}阶段被对端关闭（{e.detail}），{delay}s 后重试"
                 )
                 time.sleep(delay)
+
+    def _otp_value(self) -> str:
+        """调用方传入的 otp 优先；否则用 BASTION_TOTP_SECRET 或 config["totp_secret"] 在提示出现的时刻现算一个，
+        两者都没有返回空串。现算而不是连接开始时算，避免握手耗时后验证码过期。"""
+        if self._otp:
+            return self._otp
+        secret = os.environ.get("BASTION_TOTP_SECRET", "") or self.config.get("totp_secret", "")
+        if not secret:
+            return ""
+        try:
+            return generate_totp(secret)
+        except (ValueError, TypeError) as e:
+            logger.warning(f"totp_secret 不是合法的 base32，无法生成验证码：{type(e).__name__}")
+            return ""
 
     def _transport_active(self) -> bool:
         return self.transport is not None and self.transport.is_active()
@@ -500,8 +530,9 @@ class SSHManager:
                 return "错误：密钥认证失败且未提供密码，请传入 password 和 otp"
             logger.info("密钥认证失败，使用密码+验证码认证...")
             self._credentials_sent = True
+            self._otp = otp
             self.transport.auth_interactive(
-                username, make_auth_handler(password=password, otp=otp)
+                username, make_auth_handler(password=password, otp=self._otp_value())
             )
             logger.info("认证成功")
 
@@ -548,7 +579,8 @@ class SSHManager:
             if not self._password:
                 return False, (
                     "错误：堡垒机 shell 要求输入密码，但未提供 password 参数"
-                    f"（提示行：{_last_line(clean)!r}）"
+                    f"（提示行：{_last_line(clean)!r}）；可在 BASTION_CONFIG 指向的 config.json 填 password，"
+                    "或设置环境变量 BASTION_PASSWORD"
                 )
             logger.info("检测到 shell 二次密码认证，自动输入密码")
             self._credentials_sent = True
@@ -560,14 +592,15 @@ class SSHManager:
 
         # 第二步：检测安全码提示
         if _is_auth_prompt(clean, _OTP_KEYWORDS):
-            if not self._otp:
+            otp = self._otp_value()
+            if not otp:
                 return False, (
                     "错误：堡垒机 shell 要求输入安全码（OTP），请提供 otp 参数"
-                    f"（提示行：{_last_line(clean)!r}）"
+                    f"（提示行：{_last_line(clean)!r}）；或在 config.json 填 totp_secret / 设置 BASTION_TOTP_SECRET 自动生成"
                 )
             logger.info("检测到安全码提示，自动输入安全码")
             self._credentials_sent = True
-            out = send_cmd(ch, self._otp, timeout=10)
+            out = send_cmd(ch, otp, timeout=10)
             clean = strip_ansi(out)
             # 检测安全码是否被拒绝
             if any(k in clean for k in _AUTH_FAIL_KEYWORDS):
