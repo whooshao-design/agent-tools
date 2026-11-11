@@ -2,7 +2,7 @@
 name: prepare-ser-transfer-file
 description: 为米霍克 SER 迁移接口 TransferService#transfer 准备 filePath：从 decision_agent_server_java 服务器取解密后的 .ser，转成迁移工具读取的 XML，再上传到对应环境的 oss-fk 文件服务拿到 FastDFS 路径；区分线下 stable 与线上（预发布、灰度、prod 共用一套服务器和文件服务）。Use when 用户要迁移某个 SER 包（appId）到米霍克但手上没有 SER 包或迁移 XML、需要去服务器上找 SER 包、要在 stable 或预发布/线上调用 TransferService#transfer 而缺 filePath、或要把本地迁移 XML 上传到 oss-fk；只解析规则内容用 parse-experian-ser，不负责调用迁移接口本身。
 metadata:
-  version: 1.0.2
+  version: 1.0.3
 ---
 
 # prepare-ser-transfer-file
@@ -17,7 +17,7 @@ metadata:
 
 | | 线下（stable/项目环境） | 线上（预发布、灰度、prod 共用） |
 |---|---|---|
-| SER 所在服务器 | stable 的 `decision_agent_server_java` 实例 | 线上 `decision_agent_server_java` 实例（多台时比对 md5） |
+| SER 所在服务器 | stable 的 `decision_agent_server_java` 实例（2026-11-11 只有 1 个 Pod，堡垒机进不去，见流程第 2 步） | 线上 `decision_agent_server_java` 实例：prod 是 4 台虚拟机（多台时比对 md5）；pre 只有 1 个 Pod |
 | bastion profile | `dev` | `online`（需用户授权只读访问） |
 | 上传凭据 | `store.js` `upload_config` 的 stable 分支 | `store.js` `upload_config` 默认分支 |
 | oss-fk 地址 | `oss-fk.oa.fenqile.com` 解析到 stable 内网地址（本地配置 `OSS_FK_STABLE_IP`，脚本用 `--resolve`） | `oss-fk.oa.fenqile.com` 正常 DNS |
@@ -28,7 +28,7 @@ stable 与线上的上传凭据和地址不同（据此推断存储不互通，�
 ## 流程
 
 1. **先找现成 XML**：同一个包已迁移过时，优先复用已核对过的本地 XML（Hawk 工作区里通常是 `~/projects/backend/hawk/<包名小写>_ser_rules/<包名>.xml`），确认它就是线下验证通过的版本（比对修改时间、上次上传记录），然后直接跳到第 5 步。不要每次都从服务器重新生成，重新生成会丢掉人工修正。
-2. **定位 SER 文件**：用 `query-app-instances` 查 `decision_agent_server_java` 在目标环境（线下 `stable`，线上 `prod`）的实例，按上表 profile `connect_bastion` 后只读执行：
+2. **定位 SER 文件**：用 `query-app-instances` 查 `decision_agent_server_java` 在目标环境（线下 `stable`，线上 `prod`）的实例。先看 `query-app-instances` 返回的实例类型：只有 `instances.vm` 里的虚拟机 IP 能经堡垒机 `go <ip>` 进入；`instances.pod` 里的 Pod IP 用堡垒机进不去（2026-11-11 实测 `go` stable Pod `10.9.226.185` 失败）。2026-11-11 乐效登记的部署：stable 和 pre 各只有 1 个 Pod、没有虚拟机，prod 是 4 台虚拟机、没有 Pod。目标环境只有 Pod 时停下报告：本仓库目前没有在 Pod 里执行 `ls`/`md5sum`/分块 `base64` 的受支持通道（`webshell_log_check.js`、`container_log_check.js` 只读文本日志，k8s 工具只有 `get`/`describe`/`logs`），不要改写这些脚本或手工拼 WebShell 命令去取文件；请用户三选一：提供或确认本地已有的 XML（第 1 步）、授权从 prod 虚拟机只读拉取同名包（拉到的是线上版本，要向用户说明它不一定等于 stable 上部署的版本）、或由用户自己在乐效 WebShell 里导出文件。实例是虚拟机时，按上表 profile `connect_bastion` 后只读执行：
    ```bash
    ls -lt /home/publish_product/server_java/decision_agent_server_java/decision_ser_file/ | grep -i <包名>
    ls -lt /home/publish_product/server_java/decision_agent_server_java/decision_ser_file/salve_decision_agent_server_ser_<包名小写>/ | head
