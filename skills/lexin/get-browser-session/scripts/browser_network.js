@@ -8,11 +8,14 @@ const INTERNAL_HOST_SUFFIXES = [
 // Hippo 的海外站点用各自国家的域名（hippo.oa.wowcredito.com、hippo.oa.kredito.id），
 // 但都是 hippo.oa.* 内网域名。按主机前缀识别，避免把整个国家域当成内网，
 // 也避免每新增一个国家就要改这里。
-const INTERNAL_HOST_PATTERNS = [/^(?:[a-z0-9-]+-)?hippo\.oa\./i];
+// OA 网关控制台的海外站点同理：fk-gateway.oa.wowcredito.com（墨西哥）、fk-gateway.oa.kredito.id（印尼）。
+const INTERNAL_HOST_PATTERNS = [/^(?:[a-z0-9-]+-)?hippo\.oa\./i, /^fk-gateway\.oa\./i];
 const INTERNAL_NO_PROXY = [
   '.oa.fenqile.com',
   'hippo.oa.wowcredito.com',
   'hippo.oa.kredito.id',
+  'fk-gateway.oa.wowcredito.com',
+  'fk-gateway.oa.kredito.id',
   '.lexincloud.com',
   '.fql.com',
   'localhost',

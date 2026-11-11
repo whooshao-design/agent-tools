@@ -126,3 +126,13 @@ test('sensitive URL parameters are redacted in diagnostics', () => {
   assert.doesNotMatch(value, /secret-value/);
   assert.match(value, /ticket=%3Credacted%3E/);
 });
+
+test('the overseas OA gateway consoles count as internal and bypass the proxy', () => {
+  for (const url of ['https://fk-gateway.oa.wowcredito.com/', 'https://fk-gateway.oa.kredito.id/']) {
+    assert.equal(isInternalUrl(url), true, `${url} must stay on the direct path`);
+  }
+  assert.equal(isInternalUrl('https://fk-gateway.example.com/'), false);
+  const noProxy = buildBrowserEnv('https://fk-gateway.oa.wowcredito.com/', {}).env.NO_PROXY;
+  assert.match(noProxy, /fk-gateway\.oa\.wowcredito\.com/);
+  assert.match(noProxy, /fk-gateway\.oa\.kredito\.id/);
+});

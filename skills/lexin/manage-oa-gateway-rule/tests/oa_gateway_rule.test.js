@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
-  approvalInfo, buildPayload, classifyProbe, consoleIp, normalizeRuleUrl, runAdd, sameRuleUrl, validateAddArgs,
+  SITES, approvalInfo, buildPayload, classifyProbe, consoleIp, normalizeRuleUrl, resolveSite, runAdd, sameRuleUrl, validateAddArgs,
 } = require('../scripts/oa_gateway_rule');
 
 const TEMPLATE = {
@@ -135,4 +135,20 @@ test('project console ip comes from the argument or local env and is required', 
     if (saved === undefined) delete process.env.OA_GATEWAY_PRJ_CONSOLE_IP;
     else process.env.OA_GATEWAY_PRJ_CONSOLE_IP = saved;
   }
+});
+
+test('sites resolve by code or alias to their own console and default probe domain', () => {
+  assert.deepEqual(Object.keys(SITES), ['cn', 'mx', 'id']);
+  assert.equal(resolveSite(undefined).key, 'cn');
+  assert.equal(resolveSite(undefined).consoleHost, 'gateway.oa.fenqile.com');
+  for (const alias of ['mx', 'MX', 'mexico', '墨西哥', 'wowcredito']) {
+    const site = resolveSite(alias);
+    assert.deepEqual([site.key, site.console, site.consoleHost, site.probeDomain],
+      ['mx', 'https://fk-gateway.oa.wowcredito.com', 'fk-gateway.oa.wowcredito.com', 'mihawk.oa.wowcredito.com']);
+  }
+  for (const alias of ['id', 'idn', 'indonesia', '印尼', 'kredito']) {
+    const site = resolveSite(alias);
+    assert.deepEqual([site.key, site.console, site.probeDomain], ['id', 'https://fk-gateway.oa.kredito.id', 'mihawk.oa.kredito.id']);
+  }
+  assert.throws(() => resolveSite('us'), /--site 只支持/);
 });

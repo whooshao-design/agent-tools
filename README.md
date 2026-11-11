@@ -95,7 +95,7 @@
 | `prepare-ser-transfer-file` | 从服务器取 SER 包转迁移 XML 并上传 oss-fk，产出 `TransferService#transfer` 的 filePath（线下 stable / 线上共用） | `bastion` |
 | `query-oa-gateway-interface` | 查询前端 URL 映射的后端接口和代码链路 | `browser_session` |
 | `locate-frontend-page` | 从 Dubbo 接口、网关 URL 或 MySQL 表反查线上前端页面地址 | `browser_session` |
-| `manage-oa-gateway-rule` | 按模板新增 OA 网关路由规则（线上/项目环境），回读并探活 | `browser_session` |
+| `manage-oa-gateway-rule` | 按模板新增 OA 网关路由规则（国内线上/项目环境，墨西哥、印尼线上，`--site cn|mx|id`），回读并探活 | `browser_session` |
 | `start-local-frontend` | 米霍克 OA 前端本地启动、改 whistle 联调分组的网关行到预发布/项目环境、页面访问与前后端项目环境联调步骤 | `browser_session` |
 | `manage-tqm-test-cases` | 在质量管理平台（TQM）给需求版本查看模块与用例，批量创建核心测试用例（≤10 条、同名跳过），在测试阶段填写用例执行结果；先 dry-run、写后回读 | `browser_session` |
 

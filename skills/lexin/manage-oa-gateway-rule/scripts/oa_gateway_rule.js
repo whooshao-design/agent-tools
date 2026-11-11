@@ -14,7 +14,8 @@ if (!root) { console.error(['agent-tools: 未找到仓库根', ...tried, '请在
 
 // OA 网关路由规则（url -> FSOF 接口方法）的查询、按模板新增与运行时探活。
 // 所有控制台请求都在已登录的浏览器页面内发出（同源 fetch，Cookie 由浏览器管理，不导出）。
-// prod：直连 gateway.oa.fenqile.com，新增会触发审批；prj：把同一域名映射到项目环境控制台 IP，免审批直接保存。
+// 站点 --site cn|mx|id（国内、墨西哥、印尼）各有自己的控制台域名。
+// prod：直连该站点控制台，新增可能触发审批；prj（仅 cn）：把国内控制台域名映射到项目环境控制台 IP，免审批直接保存。
 
 const https = require('https');
 const { createRequire } = require('module');
@@ -23,8 +24,24 @@ const SESSION_SCRIPTS = skillDir('get-browser-session', 'scripts');
 const { acquireProfileLock, parseArgs, resolvePaths } = require(path.join(SESSION_SCRIPTS, 'browser_session'));
 const { buildBrowserEnv, chromiumArgsFor } = require(path.join(SESSION_SCRIPTS, 'browser_network'));
 
-const CONSOLE = 'https://gateway.oa.fenqile.com';
-const CONSOLE_HOST = 'gateway.oa.fenqile.com';
+// 三个站点的控制台接口路径与返回结构相同（2026-11-11 实测未登录时都返回 16051006），只有域名不同。
+// probeDomain 是探活默认用的运行时域名（各站点米霍克规则的 domain 字段，2026-11-11 查询所得）；其他系统用 --domain 传该规则的 domain。
+const SITES = {
+  cn: { console: 'https://gateway.oa.fenqile.com', probeDomain: 'mihawk.oa.fenqile.com' },
+  mx: { console: 'https://fk-gateway.oa.wowcredito.com', probeDomain: 'mihawk.oa.wowcredito.com' },
+  id: { console: 'https://fk-gateway.oa.kredito.id', probeDomain: 'mihawk.oa.kredito.id' },
+};
+const SITE_ALIASES = {
+  cn: 'cn', china: 'cn', '国内': 'cn', standard: 'cn',
+  mx: 'mx', mexico: 'mx', '墨西哥': 'mx', wowcredito: 'mx',
+  id: 'id', idn: 'id', indonesia: 'id', '印尼': 'id', kredito: 'id',
+};
+
+function resolveSite(value) {
+  const key = SITE_ALIASES[String(value || 'cn').trim().toLowerCase()];
+  if (!key) throw new Error(`--site 只支持 cn|mx|id（或 墨西哥/印尼 等别名），收到 ${value}`);
+  return { key, ...SITES[key], consoleHost: new URL(SITES[key].console).host };
+}
 const RULE_API = '/rc_oa_gateway/application/url_interface_rule';
 const NOT_LOGGED_IN = '16051006';
 const NOT_ROUTED = '16051005';
@@ -106,14 +123,15 @@ function checkRetcode(response, what) {
   return response;
 }
 
-async function openConsole(args, env) {
+async function openConsole(args, env, site) {
+  const CONSOLE = site.console;
   const paths = resolvePaths(args, CONSOLE);
   const release = await acquireProfileLock(paths.profileDir, { timeoutMs: 60000, pollMs: 200 });
   let context;
   try {
     const network = buildBrowserEnv(CONSOLE);
     network.env.LD_LIBRARY_PATH = [paths.runtimeLibDir, process.env.LD_LIBRARY_PATH].filter(Boolean).join(':');
-    const extra = env === 'prj' ? [`--host-resolver-rules=MAP ${CONSOLE_HOST} ${consoleIp(args)}`] : [];
+    const extra = env === 'prj' ? [`--host-resolver-rules=MAP ${site.consoleHost} ${consoleIp(args)}`] : [];
     const chromium = createRequire(paths.playwrightPackage)('playwright').chromium;
     context = await chromium.launchPersistentContext(paths.profileDir, {
       executablePath: paths.chromePath, headless: true, env: network.env,
@@ -182,7 +200,7 @@ function probeRuntime(domain, url, ip) {
   });
 }
 
-async function runAdd(call, args, env) {
+async function runAdd(call, args, env, site = 'cn') {
   validateAddArgs(args);
   const url = normalizeRuleUrl(args.url);
   const existing = await queryRules(call, { url });
@@ -194,7 +212,7 @@ async function runAdd(call, args, env) {
     url, method: args.method, interfaceName: args.interface, lsfApp: args['lsf-app'], timeout: args.timeout,
     checkAuth: args['check-auth'], funcDesc: args['func-desc'], urlManager: args['url-manager'],
   });
-  const result = { env, template: pickRule(templates[0]), payload };
+  const result = { site, env, template: pickRule(templates[0]), payload };
   if (!args.apply) return { ...result, outcome: 'dry-run' };
 
   const addPath = `${RULE_API}/add_with_approval.json`;
@@ -218,25 +236,27 @@ async function main() {
   const env = args.env || 'prod';
   if (!['prod', 'prj'].includes(env)) throw new Error('--env 只支持 prod 或 prj');
   if (!['query', 'add', 'probe'].includes(action)) {
-    throw new Error('用法: oa_gateway_rule.js <query|add|probe> --env prod|prj ...（见 SKILL.md）');
+    throw new Error('用法: oa_gateway_rule.js <query|add|probe> [--site cn|mx|id] --env prod|prj ...（见 SKILL.md）');
   }
+  const site = resolveSite(args.site);
+  if (env === 'prj' && site.key !== 'cn') throw new Error('项目环境（--env prj）只有国内站点有，--site mx|id 只支持 --env prod');
   if (action === 'probe') {
-    const domain = args.domain || 'mihawk.oa.fenqile.com';
+    const domain = args.domain || site.probeDomain;
     if (env === 'prj' && !args['probe-ip']) throw new Error('prj 探活需要 --probe-ip（项目环境网关机 IP）');
     console.log(JSON.stringify(await probeRuntime(domain, normalizeRuleUrl(args.url), args['probe-ip']), null, 2));
     return;
   }
   if (action === 'add') validateAddArgs(args);
-  const session = await openConsole(args, env);
+  const session = await openConsole(args, env, site);
   try {
     let result;
     if (action === 'query') {
       const rows = await queryRules(session.call, {
         url: args.url ? normalizeRuleUrl(args.url) : '', interfaceName: args.interface, method: args.method,
       });
-      result = { env, total: rows.length, rules: rows.map(pickRule) };
+      result = { site: site.key, console: site.console, env, total: rows.length, rules: rows.map(pickRule) };
     } else {
-      result = await runAdd(session.call, args, env);
+      result = await runAdd(session.call, args, env, site.key);
     }
     if (env === 'prj') result.consoleIp = consoleIp(args);
     console.log(JSON.stringify(result, null, 2));
@@ -252,4 +272,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { approvalInfo, buildPayload, classifyProbe, consoleIp, normalizeRuleUrl, runAdd, sameRuleUrl, validateAddArgs };
+module.exports = { SITES, approvalInfo, buildPayload, classifyProbe, consoleIp, normalizeRuleUrl, resolveSite, runAdd, sameRuleUrl, validateAddArgs };
