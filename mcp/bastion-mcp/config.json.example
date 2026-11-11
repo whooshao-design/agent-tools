@@ -14,7 +14,7 @@
   ],
   "profiles": {
     "db": {
-      "bastion_host": "dba.ssh.jumpserver.fenqile.cn",
+      "bastion_host": "dba.ssh.jumpserver.lexincloud.com",
       "bastion_port": 39000,
       "username": "your_username",
       "password": "",
