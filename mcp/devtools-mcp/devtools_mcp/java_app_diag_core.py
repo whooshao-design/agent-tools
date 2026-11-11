@@ -217,8 +217,9 @@ class BastionDiagSession:
         return f"{state}（profile={profile}）"
 
     async def execute(self, ip: str, command: str, timeout: int, env: str = "", profile: str = "") -> str:
-        # Each command opens its own channel on the shared transport
-        # (SSHManager._execute_on_target), so commands may run concurrently.
+        # SSHManager._execute_on_target opens one channel per command when the bastion asks for no
+        # shell credentials (commands may run concurrently), and serializes commands on the single
+        # authenticated channel when it asked for a password / one-time code.
         # Only (re)connecting swaps self.ssh_mgr, and that must not race.
         async with self._lock:
             desired_profile = self._desired_profile(env=env, profile=profile)

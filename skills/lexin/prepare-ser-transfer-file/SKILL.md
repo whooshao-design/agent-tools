@@ -2,7 +2,7 @@
 name: prepare-ser-transfer-file
 description: 为米霍克 SER 迁移接口 TransferService#transfer 准备 filePath：从 decision_agent_server_java 服务器取解密后的 .ser，转成迁移工具读取的 XML，再上传到对应环境的 oss-fk 文件服务拿到 FastDFS 路径；区分线下 stable 与线上（预发布、灰度、prod 共用一套服务器和文件服务）。Use when 用户要迁移某个 SER 包（appId）到米霍克但手上没有 SER 包或迁移 XML、需要去服务器上找 SER 包、要在 stable 或预发布/线上调用 TransferService#transfer 而缺 filePath、或要把本地迁移 XML 上传到 oss-fk；只解析规则内容用 parse-experian-ser，不负责调用迁移接口本身。
 metadata:
-  version: 1.0.1
+  version: 1.0.2
 ---
 
 # prepare-ser-transfer-file
@@ -58,7 +58,7 @@ stable 与线上的上传凭据和地址不同（据此推断存储不互通，�
 
 ## 失败处理
 
-- `connect_bastion` 要 password/OTP 或报 `Error reading SSH protocol banner`：停下请用户处理连接，不换通道绕过。
+- `connect_bastion` 返回“要求输入安全码”：弹出输入框向用户要一次当前 6 位 MOA 码，带 `otp` 重连；返回“要求输入密码”：请用户在 bastion 的 `config.json` 填 `password`。报 `Error reading SSH protocol banner`、命令结果是“命令没有在目标机执行”或 `Socket is closed`：按 MCP/网络故障停下报告，不重复向用户要码，不换通道绕过。
 - 上传返回 `ok:false`：报告 `retcode/retmsg`，核对 `--env` 与凭据分支是否一致；不改用别的上传接口。
 - `store.js` 结构变化导致取不到凭据：按 `upload_config` 的新写法修脚本，不把凭据复制进脚本或命令行。
 - 迁移报读不到文件：先确认 `filePath` 是在调用环境对应的文件服务上传的（见环境对照）。

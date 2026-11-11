@@ -218,7 +218,11 @@ PEM 密钥认证 ──成功──→ 进入堡垒机
 
 堡垒机服务端决定是否需要密码和验证码。PEM 认证足够时无需额外输入。
 
-PEM 认证通过后，堡垒机 shell 仍可能再问一次 `password:`，随后问 MOA 验证码（2026-11-11 实测：`config.json` 的 `password` 为空时三次连接都停在 `password:`；刚用其他客户端登录过的一段时间内不问，所以表现为时好时坏）。要让 agent 稳定登录，在 `config.json` 填 `password`（或设 `BASTION_PASSWORD`），需要验证码时再填 `totp_secret`（或设 `BASTION_TOTP_SECRET`）；这两个值只放在 gitignore 的 `config.json` 或进程环境里。没有配置 `totp_secret` 时，连接会返回“要求输入安全码”的错误，agent 应向用户弹出输入框要当前 6 位 MOA 码，再带 `otp` 重连；连上后由保活线程维持，同一 MCP 进程内不用再输。
+PEM 认证通过后，堡垒机 shell 仍可能再问一次 `password:`，随后问 MOA 验证码（2026-11-11 实测：`config.json` 的 `password` 为空时三次连接都停在 `password:`；刚用其他客户端登录过的一段时间内不问，所以表现为时好时坏）。要让 agent 稳定登录，在 `config.json` 填 `password`（或设 `BASTION_PASSWORD`），需要验证码时再填 `totp_secret`（或设 `BASTION_TOTP_SECRET`）；这两个值只放在 gitignore 的 `config.json` 或进程环境里。没有配置 `totp_secret` 时，连接会返回“要求输入安全码”的错误，agent 应向用户弹出输入框要当前 6 位 MOA 码，再带 `otp` 重连。
+
+安全码只能用一次，而堡垒机对每个新开的 shell channel 都会重新追问。所以只要 shell 追问过密码或安全码，`SSHManager` 就进入复用模式：认证过的那一条 channel 同时用于保活和之后的全部命令，命令串行执行，换目标机时先 `exit` 回堡垒机菜单再 `go <ip>`；不再为每条命令新开 channel。这条 channel 关闭后需要重新 `connect_bastion` 并给一个新码。堡垒机不追问时（DBA 通道处于免认证状态时）仍是每条命令各开一条 channel、可以并发。
+
+判定规则（2026-11-11 用线上堡垒机实测后加）：发出安全码后最后一行仍是认证提示即判失败；命令结果只认独占一行的 `===MCP_START===`，只有命令回显时返回错误而不是把回显当结果；`whoami` 结果必须是合法用户名；保活目标机不可达时保留已认证的 channel 并在连接结果里说明，不把它当成登录失败。
 
 ## 环境变量
 

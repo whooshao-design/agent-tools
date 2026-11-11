@@ -366,3 +366,169 @@ class TotpTest(unittest.TestCase):
         self.assertFalse(ok)
         self.assertEqual(["pw"], sent)
         self.assertIn("totp_secret", message)
+
+
+class _FakeBastion:
+    """Scripted bastion shell: password -> MOA code (single use) -> menu -> `go <ip>` -> target shell."""
+
+    def __init__(self, valid_codes=("111111",), reprompt_text="请输入6位 MOA 安全码或输入exit退出:"):
+        self.valid_codes = set(valid_codes)
+        self.reprompt_text = reprompt_text
+        self.state = "password"
+        self.host = None
+        self.closed = False
+        self.sent = []
+        self.eof_received = False
+
+    def recv_ready(self):
+        return False
+
+    def send(self, data):
+        self.sent.append(data)
+
+    def close(self):
+        self.closed = True
+
+    def handle(self, cmd):
+        self.sent.append(cmd)
+        if self.state == "password":
+            self.state = "otp"
+            return "\n请输入6位 MOA 安全码或输入exit退出:"
+        if self.state == "otp":
+            if cmd in self.valid_codes:
+                self.valid_codes.discard(cmd)
+                self.state = "menu"
+                return "\n欢迎\n>>> "
+            return f"\n{'*' * len(cmd)}\n{self.reprompt_text}"
+        if self.state == "menu":
+            if cmd.startswith("go "):
+                self.host = cmd[3:]
+                self.state = "shell"
+                return f"{cmd}\nLast login\n[app@{self.host} ~]$ "
+            if cmd == "exit":
+                self.closed = True
+                return ""
+            return f"{cmd}\n无效输入\n>>> "
+        # target shell
+        prompt = f"[app@{self.host} ~]$ "
+        if cmd == "exit":
+            self.state = "menu"
+            return "exit\nlogout\n>>> "
+        if cmd == "whoami":
+            return f"whoami\napp\n{prompt}"
+        if cmd.startswith("echo ===MCP_SHELL==="):
+            return f"{cmd}\n===MCP_SHELL===0\n{prompt}"
+        if cmd.startswith("echo ===MCP_START=== && hostname"):
+            return f"{cmd}\n===MCP_START===\nhost-{self.host}\n===MCP_END===\n{prompt}"
+        if cmd.startswith("echo ===MCP_START=== && ls /nope"):
+            return f"{cmd}\n===MCP_START===\n{prompt}"
+        return f"{cmd}\n{prompt}"
+
+
+class _FakeBastionTransport:
+    def __init__(self, bastion_factory):
+        self.bastion_factory = bastion_factory
+        self.channels = []
+
+    def is_active(self):
+        return True
+
+    def set_keepalive(self, interval):
+        pass
+
+    def open_session(self):
+        channel = self.bastion_factory()
+        channel.get_pty = lambda **kwargs: None
+        channel.invoke_shell = lambda: None
+        self.channels.append(channel)
+        return channel
+
+    def close(self):
+        pass
+
+
+class SharedChannelTest(unittest.TestCase):
+    def _manager(self, bastion_factory, otp="111111"):
+        manager = SSHManager({"bastion_host": "h", "bastion_port": 1, "idle_cmd_interval": 3600})
+        manager.transport = _FakeBastionTransport(bastion_factory)
+        manager._password = "pw"
+        manager._otp = otp
+        patches = [
+            patch("bastion_mcp.ssh_manager.send_cmd", side_effect=lambda ch, cmd, timeout=10: ch.handle(cmd)),
+            patch("bastion_mcp.ssh_manager.recv_until_idle", return_value="password:"),
+        ]
+        for item in patches:
+            item.start()
+            self.addCleanup(item.stop)
+        self.addCleanup(manager.disconnect)
+        return manager
+
+    def test_one_code_serves_keepalive_verify_and_commands_on_two_hosts(self):
+        manager = self._manager(_FakeBastion)
+        self.assertIsNone(manager._start_keepalive("10.0.0.1"))
+        self.assertEqual((None, "app"), manager._verify_connection("10.0.0.1"))
+        self.assertEqual("host-10.0.0.1", manager.execute_on_target("10.0.0.1", "hostname"))
+        self.assertEqual("host-10.0.0.2", manager.execute_on_target("10.0.0.2", "hostname"))
+        self.assertEqual("host-10.0.0.2", manager.execute_on_target("10.0.0.2", "hostname"))
+        self.assertEqual(1, len(manager.transport.channels))  # never re-authenticated on a second channel
+        channel = manager.transport.channels[0]
+        self.assertEqual(1, channel.sent.count("111111"))
+        self.assertEqual(["go 10.0.0.1", "go 10.0.0.2"], [c for c in channel.sent if c.startswith("go ")])
+
+    def test_rejected_code_reprompt_is_a_failure_not_a_login(self):
+        manager = self._manager(lambda: _FakeBastion(valid_codes=()), otp="999999")
+        error = manager._start_keepalive("10.0.0.1")
+        self.assertIn("安全码验证失败", error)
+        channel = manager.transport.channels[0]
+        self.assertFalse(any(c.startswith("go ") for c in channel.sent))  # nothing typed into the code prompt
+        self.assertIsNone(manager._shared_channel)
+
+    def test_failed_and_chain_returns_partial_output_and_keeps_channel_usable(self):
+        manager = self._manager(_FakeBastion)
+        self.assertIsNone(manager._start_keepalive("10.0.0.1"))
+        self.assertEqual("", manager.execute_on_target("10.0.0.1", "ls /nope"))
+        self.assertIn("\x03", manager.transport.channels[0].sent)
+        self.assertEqual("host-10.0.0.1", manager.execute_on_target("10.0.0.1", "hostname"))
+
+    def test_closed_shared_channel_asks_for_reconnect(self):
+        manager = self._manager(_FakeBastion)
+        self.assertIsNone(manager._start_keepalive("10.0.0.1"))
+        manager.transport.channels[0].closed = True
+        self.assertIn("请重新 connect_bastion", manager.execute_on_target("10.0.0.2", "hostname"))
+
+
+class MarkerAndWhoamiTest(unittest.TestCase):
+    def test_echo_only_output_is_not_a_result(self):
+        echo = "echo ===MCP_START=== && hostname && echo ===MCP_END===\n请输入6位 MOA 安全码或输入exit退出:"
+        self.assertIsNone(ssh_manager._extract_marker_content(echo, "===MCP_START===", "===MCP_END==="))
+
+    def test_standalone_markers_delimit_output(self):
+        out = "echo ===MCP_START=== && ls && echo ===MCP_END===\r\n===MCP_START===\r\na\r\nb\r\n===MCP_END===\r\n[u@h ~]$ "
+        self.assertEqual("a\nb", ssh_manager._extract_marker_content(out, "===MCP_START===", "===MCP_END==="))
+
+    def test_whoami_rejects_masked_echo(self):
+        manager = SSHManager({"bastion_host": "h", "bastion_port": 1})
+        with patch("bastion_mcp.ssh_manager.send_cmd", return_value="whoami\n******\n请输入6位 MOA 安全码或输入exit退出:"):
+            self.assertEqual("", manager._whoami(object()))
+        with patch("bastion_mcp.ssh_manager.send_cmd", return_value="whoami\r\nbi_clickhouse\r\n[bi_clickhouse@h ~]$ "):
+            self.assertEqual("bi_clickhouse", manager._whoami(object()))
+
+
+class _UnreachableKeepaliveBastion(_FakeBastion):
+    def handle(self, cmd):
+        if self.state == "menu" and cmd == "go 10.0.0.1":
+            self.sent.append(cmd)
+            return "go 10.0.0.1\n目标登录机器10.0.0.1不可达\n\n*****\n提示：\n  go xxx - 登录机器\n>>> "
+        return super().handle(cmd)
+
+
+class UnreachableKeepaliveTest(SharedChannelTest):
+    def test_unreachable_keepalive_host_keeps_the_authenticated_channel(self):
+        manager = self._manager(_UnreachableKeepaliveBastion)
+        self.assertIsNone(manager._start_keepalive("10.0.0.1"))
+        self.assertIn("保活目标 10.0.0.1 进不去（目标登录机器10.0.0.1不可达）", manager._keepalive_note)
+        self.assertEqual((None, ""), manager._verify_connection("10.0.0.1"))
+        self.assertEqual("host-10.0.0.2", manager.execute_on_target("10.0.0.2", "hostname"))
+        self.assertIn("没有进入目标机 shell", manager.execute_on_target("10.0.0.1", "hostname"))
+        self.assertEqual("host-10.0.0.2", manager.execute_on_target("10.0.0.2", "hostname"))
+        self.assertEqual(1, len(manager.transport.channels))

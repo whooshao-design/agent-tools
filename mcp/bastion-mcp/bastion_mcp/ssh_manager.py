@@ -44,6 +44,10 @@ _AUTH_FAIL_KEYWORDS = ("验证失败", "认证失败", "失败", "invalid", "Inv
 # 输入提示符：确认 shell 确实在等待用户输入，而非普通输出中碰巧包含关键词
 _INPUT_PROMPT_INDICATORS = ("请输入", "enter", "Enter", "input", "Input")
 _SUDO_PROMPT = "[sudo-password]:"
+# whoami 的合法结果；堡垒机把输入当安全码回显时得到的是一串 *，不能当成用户名
+_USERNAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,63}$")
+# 只有真正的 shell 才会把 `echo ===MCP_SHELL===$?` 输出成独占一行的 ===MCP_SHELL===0
+_SHELL_PROBE = "===MCP_SHELL==="
 _OPENSSH_VERSION = re.compile(r"OpenSSH_(\d+)\.(\d+)")
 _RSA_SHA2_MIN_OPENSSH_VERSION = (7, 2)
 _RSA_SHA2_ALGORITHMS = ["rsa-sha2-256", "rsa-sha2-512"]
@@ -89,6 +93,13 @@ def _channel_dead(ch) -> bool:
 def _last_line(text: str) -> str:
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     return lines[-1] if lines else ""
+
+
+def _first_line(text: str, skip: str = "") -> str:
+    for line in text.replace("\r", "").split("\n"):
+        if line.strip() and line.strip() != skip:
+            return line.strip()
+    return ""
 
 
 def _is_auth_prompt(text: str, keywords: tuple[str, ...]) -> bool:
@@ -343,13 +354,18 @@ def send_cmd_with_sudo_password(channel, cmd, password="", timeout=30):
 
 
 def _extract_marker_content(clean: str, marker_start: str, marker_end: str) -> str | None:
-    last_start = clean.rfind(marker_start)
-    last_end = clean.rfind(marker_end)
-    if last_start >= 0 and last_end > last_start:
-        return clean[last_start + len(marker_start):last_end].strip("\r\n")
-    if last_start >= 0:
-        return clean[last_start + len(marker_start):].strip("\r\n")
-    return None
+    """取两个 marker 之间的输出。marker 必须独占一行：命令回显里的
+    `echo ===MCP_START=== && ...` 不算，否则命令根本没执行时会把回显当成结果。
+    没有独占一行的起始 marker 返回 None；有起始没有结束（`&&` 链中途失败）返回起始之后、末行提示符之前的内容。"""
+    lines = clean.replace("\r", "").split("\n")
+    starts = [i for i, line in enumerate(lines) if line.strip() == marker_start]
+    if not starts:
+        return None
+    start = starts[-1]
+    for end in range(start + 1, len(lines)):
+        if lines[end].strip() == marker_end:
+            return "\n".join(lines[start + 1:end]).strip("\n")
+    return "\n".join(lines[start + 1:-1]).strip("\n")
 
 
 def generate_totp(secret: str, now: float | None = None) -> str:
@@ -395,6 +411,13 @@ class SSHManager:
         self._otp: str = ""
         self._credentials_sent = False
         self._authenticated = False
+        # 堡垒机 shell 追问过密码/安全码时为 True：安全码一次有效，之后所有命令必须复用这一个已认证的
+        # channel（_shared_channel），不能再各开 channel 重新认证。
+        self._shell_auth_used = False
+        self._shared_channel: paramiko.Channel = None
+        self._shared_ip: str | None = None
+        self._shared_lock = threading.Lock()
+        self._keepalive_note = ""
 
     def connect(self, password: str = "", otp: str = "",
                 keepalive_ip: str = "") -> str:
@@ -557,6 +580,8 @@ class SSHManager:
                 raise _GatewayClosed("验证目标机", verify_error)
             return verify_error
 
+        if self._keepalive_note:
+            return f"已连接堡垒机 {host}:{port} 并通过认证；{self._keepalive_note}"
         return f"已连接堡垒机 {host}:{port}，保活目标 {kip}，验证成功(whoami={whoami_result})"
 
     def is_connected(self) -> bool:
@@ -584,6 +609,7 @@ class SSHManager:
                 )
             logger.info("检测到 shell 二次密码认证，自动输入密码")
             self._credentials_sent = True
+            self._shell_auth_used = True
             out = send_cmd(ch, self._password, timeout=10)
             clean = strip_ansi(out)
             # 检测密码是否被拒绝
@@ -602,11 +628,17 @@ class SSHManager:
                 )
             logger.info("检测到安全码提示，自动输入安全码")
             self._credentials_sent = True
+            self._shell_auth_used = True
             out = send_cmd(ch, otp, timeout=10)
             clean = strip_ansi(out)
-            # 检测安全码是否被拒绝
-            if any(k in clean for k in _AUTH_FAIL_KEYWORDS):
-                return False, "错误：安全码验证失败（可能已过期），请提供新的 otp 重新连接"
+            # 检测安全码是否被拒绝：出现失败关键词，或者堡垒机又问了一次安全码/密码
+            if (any(k in clean for k in _AUTH_FAIL_KEYWORDS)
+                    or _is_auth_prompt(clean, _OTP_KEYWORDS)
+                    or _is_auth_prompt(clean, _PASSWORD_KEYWORDS)):
+                return False, (
+                    "错误：安全码验证失败（已过期或已被使用过），请向用户索取新的 6 位 MOA 安全码后重新连接"
+                    f"（提示行：{_last_line(clean)!r}）"
+                )
 
         return True, clean
 
@@ -637,9 +669,28 @@ class SSHManager:
                 raise _GatewayClosed("打开 shell", f"shell channel 已关闭（{msg}）")
             return msg
 
-        send_cmd(ch, f"go {keepalive_ip}", timeout=15)
-        send_cmd(ch, "export TMOUT=86400", timeout=5)
-        send_cmd(ch, "tail -f /dev/null &", timeout=5)
+        go_out = send_cmd(ch, f"go {keepalive_ip}", timeout=15)
+        if self._shell_auth_used:
+            # 这条 channel 用掉了一次有效的安全码，后续命令都复用它；先确认真的进了目标机 shell
+            self._shared_channel = ch
+            if self._at_target_shell(ch):
+                self._shared_ip = keepalive_ip
+            else:
+                # 保活目标机进不去（下线/不可达）不等于登录失败：安全码已经用掉，channel 停在堡垒机菜单，
+                # 照样可以 go 到别的机器，所以保留它，只在连接结果里说明
+                if _channel_dead(ch):
+                    self._shared_channel = None
+                    ch.close()
+                    raise _GatewayClosed("进入保活目标机", "shell channel 已关闭")
+                self._shared_ip = None
+                self._keepalive_note = (
+                    f"保活目标 {keepalive_ip} 进不去（{self._redact(_first_line(strip_ansi(go_out), skip=f'go {keepalive_ip}'))}），"
+                    "channel 停在堡垒机菜单，请把 config.json 的 keepalive_ip 换成一台在线机器"
+                )
+                logger.warning(self._keepalive_note)
+        if not self._shell_auth_used or self._shared_ip is not None:
+            send_cmd(ch, "export TMOUT=86400", timeout=5)
+            send_cmd(ch, "tail -f /dev/null &", timeout=5)
         self.keepalive_channel = ch
         logger.info(f"保活 channel 已建立，目标 {keepalive_ip}")
 
@@ -649,8 +700,19 @@ class SSHManager:
         def _keepalive_loop():
             while not self._stop_keepalive.wait(idle_interval):
                 try:
-                    if self.keepalive_channel and not self.keepalive_channel.closed:
-                        self.keepalive_channel.send("\n")
+                    kch = self.keepalive_channel
+                    if not kch or kch.closed:
+                        continue
+                    if kch is self._shared_channel:
+                        # 复用模式：命令执行期间不插空行；发完把回显读掉，避免混进下一条命令的输出
+                        if self._shared_lock.acquire(blocking=False):
+                            try:
+                                kch.send("\n")
+                                recv_until_idle(kch, timeout=3, idle=0.5)
+                            finally:
+                                self._shared_lock.release()
+                    else:
+                        kch.send("\n")
                 except Exception as e:
                     logger.warning(f"保活发送失败: {e}")
                     break
@@ -667,6 +729,16 @@ class SSHManager:
         Returns:
             (error, whoami_result): (错误信息, whoami结果)。错误为None表示成功
         """
+        if self._shared_channel is not None:
+            # 复用模式：已在保活目标机上，直接在这条已认证的 channel 里验证
+            if self._shared_ip is None:
+                return None, ""  # 停在堡垒机菜单，没有目标机可验证；_keepalive_note 已说明原因
+            with self._shared_lock:
+                whoami_result = self._whoami(self._shared_channel)
+            if whoami_result:
+                return None, whoami_result
+            return "错误：连接验证失败，whoami 没有返回合法用户名（命令可能没有在目标机执行）", ""
+
         shell_timeout = self.config.get("shell_timeout", 10)
         ch = None
         whoami_result = ""
@@ -686,15 +758,7 @@ class SSHManager:
             if any(k in jump_clean for k in ("权限", "没有")):
                 return f"跳转失败: {jump_clean.strip()}", ""
 
-            # 执行 whoami 验证连接成功
-            whoami_out = send_cmd(ch, "whoami", timeout=10)
-            whoami_clean = strip_ansi(whoami_out)
-
-            # 提取 whoami 结果（去掉命令回显和提示符）
-            lines = whoami_clean.strip().split("\n")
-            # 去掉第一行（命令回显 whoami）和可能的空行
-            result_lines = [l for l in lines if l.strip() and l.strip() != "whoami"]
-            whoami_result = result_lines[0].strip() if result_lines else ""
+            whoami_result = self._whoami(ch)
 
             if whoami_result:
                 logger.info(f"连接验证成功: whoami = {whoami_result}")
@@ -710,6 +774,55 @@ class SSHManager:
                     ch.close()
                 except Exception:
                     pass
+
+    def _whoami(self, ch) -> str:
+        """在 ch 上执行 whoami，返回第一行合法用户名；没有则返回空串。
+        目标机用户不一定等于堡垒机用户名（DBA 通道是 bi_clickhouse），所以只校验形状，不和 config 比对。"""
+        lines = strip_ansi(send_cmd(ch, "whoami", timeout=10)).replace("\r", "").split("\n")
+        for line in lines:
+            text = line.strip()
+            if text and text != "whoami" and _USERNAME_RE.match(text):
+                return text
+        return ""
+
+    def _redact(self, text: str) -> str:
+        for secret in (self._password, self._otp):
+            if secret:
+                text = text.replace(secret, "***")
+        return text
+
+    def _at_target_shell(self, ch) -> bool:
+        out = strip_ansi(send_cmd(ch, f"echo {_SHELL_PROBE}$?", timeout=5)).replace("\r", "")
+        return any(line.strip() == f"{_SHELL_PROBE}0" for line in out.split("\n"))
+
+    def _shared_goto(self, ip: str) -> str | None:
+        """复用模式下把已认证的 channel 切到目标机 ip。调用方持有 _shared_lock。返回 None 表示已在 ip 上。"""
+        ch = self._shared_channel
+        if _channel_dead(ch):
+            return "错误：堡垒机已认证的 shell channel 已关闭，请重新 connect_bastion（需要新的安全码）"
+        if ch.recv_ready():
+            recv_until_idle(ch, timeout=2, idle=0.5)  # 丢掉上一条命令或保活留下的残余输出
+        if self._shared_ip == ip:
+            return None
+        if self._shared_ip is not None:
+            # 从当前目标机退回堡垒机菜单；su 之类的嵌套 shell 可能要退多层，以探针不再命中为准
+            self._shared_ip = None
+            for _ in range(3):
+                send_cmd(ch, "exit", timeout=5)
+                if _channel_dead(ch):
+                    return "错误：退出上一台目标机时 channel 被关闭，请重新 connect_bastion（需要新的安全码）"
+                if not self._at_target_shell(ch):
+                    break
+            else:
+                return "错误：无法从上一台目标机退回堡垒机菜单，请重新 connect_bastion"
+        jump = strip_ansi(send_cmd(ch, f"go {ip}", timeout=15))
+        if any(k in jump for k in ("权限", "没有")):
+            return f"跳转失败: {jump.strip()}"
+        if not self._at_target_shell(ch):
+            return f"错误：go {ip} 之后没有进入目标机 shell，尾部输出：{self._redact(jump)[-300:]!r}"
+        send_cmd(ch, "export TMOUT=86400", timeout=5)
+        self._shared_ip = ip
+        return None
 
     def execute_on_target(self, ip: str, command: str,
                           timeout: int = 30) -> str:
@@ -801,6 +914,18 @@ class SSHManager:
                 return f"命令被拒绝：'{rejected}' 不在允许列表中。允许的命令: {', '.join(allowed)}"
             sudo_su_command = _parse_sudo_su_command(command, allowed_sudo_users)
 
+        if self._shared_channel is not None:
+            # 复用模式：命令在唯一一条已认证的 channel 上串行执行，不再开新 channel 重新认证
+            with self._shared_lock:
+                try:
+                    error = self._shared_goto(ip)
+                    if error:
+                        return error
+                    return self._run_marked(self._shared_channel, command, sudo_su_command,
+                                            always_mark_end, timeout, shared=True)
+                except Exception as e:
+                    return f"执行失败: {e}"
+
         shell_timeout = self.config.get("shell_timeout", 10)
         ch = None
         try:
@@ -818,44 +943,7 @@ class SSHManager:
             jump_clean = strip_ansi(jump_out)
             if any(k in jump_clean for k in ("权限", "没有")):
                 return f"跳转失败: {jump_clean.strip()}"
-            # 用 marker 方式执行命令
-            marker_start = "===MCP_START==="
-            marker_end = "===MCP_END==="
-            if sudo_su_command:
-                raw = self._execute_via_interactive_sudo_su(
-                    ch,
-                    sudo_su_command[0],
-                    sudo_su_command[1],
-                    marker_start,
-                    marker_end,
-                    timeout,
-                )
-                clean = strip_ansi(raw)
-                content = _extract_marker_content(clean, marker_start, marker_end)
-                return content if content is not None else clean.strip()
-
-            if always_mark_end:
-                cmd = f"echo {marker_start}; {command}; echo {marker_end}"
-            else:
-                cmd = f"echo {marker_start} && {command} && echo {marker_end}"
-            if "sudo -S" in command:
-                raw = send_cmd_with_sudo_password(
-                    ch,
-                    cmd,
-                    password=self._password,
-                    timeout=timeout,
-                )
-            else:
-                raw = send_cmd(ch, cmd, timeout=timeout)
-            clean = strip_ansi(raw)
-
-            # 提取 marker 之间的输出
-            content = _extract_marker_content(clean, marker_start, marker_end)
-            if content is not None:
-                return content
-            # fallback: 去掉首行（命令回显）和末行（prompt）
-            lines = clean.split("\n")
-            return "\n".join(lines[1:-1]).strip() if len(lines) > 2 else clean.strip()
+            return self._run_marked(ch, command, sudo_su_command, always_mark_end, timeout, shared=False)
         except Exception as e:
             return f"执行失败: {e}"
         finally:
@@ -864,6 +952,54 @@ class SSHManager:
                     ch.close()
                 except Exception:
                     pass
+
+    def _run_marked(self, ch, command: str, sudo_su_command, always_mark_end: bool,
+                    timeout: int, shared: bool) -> str:
+        """在已位于目标机 shell 的 ch 上用 marker 执行命令并取输出。"""
+        # 用 marker 方式执行命令
+        marker_start = "===MCP_START==="
+        marker_end = "===MCP_END==="
+        if sudo_su_command:
+            raw = self._execute_via_interactive_sudo_su(
+                ch,
+                sudo_su_command[0],
+                sudo_su_command[1],
+                marker_start,
+                marker_end,
+                timeout,
+            )
+            clean = strip_ansi(raw)
+            content = _extract_marker_content(clean, marker_start, marker_end)
+            return content if content is not None else self._redact(clean.strip())
+
+        if always_mark_end:
+            cmd = f"echo {marker_start}; {command}; echo {marker_end}"
+        else:
+            cmd = f"echo {marker_start} && {command} && echo {marker_end}"
+        if "sudo -S" in command:
+            raw = send_cmd_with_sudo_password(
+                ch,
+                cmd,
+                password=self._password,
+                timeout=timeout,
+            )
+        else:
+            raw = send_cmd(ch, cmd, timeout=timeout)
+        clean = strip_ansi(raw)
+
+        # 提取 marker 之间的输出
+        content = _extract_marker_content(clean, marker_start, marker_end)
+        if shared and not any(line.strip() == marker_end for line in clean.replace("\r", "").split("\n")):
+            # 没见到结束 marker：命令可能还在跑（超时）或 && 链中途失败。发 Ctrl-C 并读掉残余，
+            # 保证这条共用 channel 回到提示符，下一条命令不被污染
+            ch.send("\x03")
+            recv_until_idle(ch, timeout=3, idle=0.5)
+        if content is not None:
+            return content
+        return (
+            "错误：命令没有在目标机执行（输出里没有独占一行的 ===MCP_START===，只有命令回显）。"
+            f"尾部输出：{self._redact(clean.strip())[-300:]!r}"
+        )
 
     def disconnect(self):
         """断开连接，停止保活"""
@@ -874,6 +1010,10 @@ class SSHManager:
             except Exception:
                 pass
             self.keepalive_channel = None
+        self._shared_channel = None
+        self._shared_ip = None
+        self._shell_auth_used = False
+        self._keepalive_note = ""
         if self.transport:
             try:
                 self.transport.close()
