@@ -136,6 +136,7 @@ auto mode 的分类器对三类调用不会自动放行：改 `~/.claude` 下配
 "Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/query-app-logs/scripts/log_platform_query.js *)",
 "Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/lxctl-gateway/scripts/lxctl_gateway.js doctor*)", "Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/lxctl-gateway/scripts/lxctl_gateway.js eye *)",
 "Bash(lxctl --version)", "Bash(lxctl auth status:*)",
+"Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/java-server-diagnostics/scripts/pod_file_fetch.js * --action=list *)", "Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/java-server-diagnostics/scripts/pod_file_fetch.js * --action=stat *)",
 "Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/inspect-healthy-metrics/scripts/inspect_metrics.js *)",
 "Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/inspect-healthy-jvm-dashboard/scripts/inspect_dashboard.js *)",
 "Bash(node <AGENT_TOOLS_ROOT>/skills/lexin/inspect-app-call-topology/scripts/inspect_call_topology.js *)",

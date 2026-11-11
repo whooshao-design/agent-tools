@@ -2,7 +2,7 @@
 name: java-server-diagnostics
 description: "通过 java_app_diag MCP 对 Java 应用所在服务器做只读排查。Use when 用户要求排查某台服务器上 Java 应用的报错、进程、端口、JVM、线程或 GC；默认先只看 error.log 判断有没有问题，只有 error.log 暴露线索后才递进排查 info/debug/启动日志与运行时状态。"
 metadata:
-  version: 1.4.7
+  version: 1.5.0
 ---
 
 # java-server-diagnostics
@@ -96,6 +96,25 @@ metadata:
 容器 Pod 日志的快检/取证（`container_log_check.js`、`webshell_log_check.js`）和架构日志服务（日志平台 `log.oa.fenqile.com` 背后的检索接口，默认经 OA 网关加 `lxctl` token 访问）的检索统一由 `query-app-logs` 承接：
 `prod`/`pre`/`gray` 的应用日志按时间、关键字、traceId、IP 检索时它是首选，不需要登堡垒机；目标是容器、日志已轮转、需要跨机器汇总时也按该 skill 的路由规则执行，本 skill 不再重复其步骤。
 两个容器脚本仍位于 `scripts/`，路径不变。
+
+### 2.1 从 Pod 里只读取一个文件
+
+堡垒机 `go <ip>` 只能进虚拟机，进不了 Pod；本机 `kubectl` 没有可用 context 时，Pod 里的文件只能经乐效 WebShell 读。需要 Pod 里某个非日志文件（规则包、配置、jar）时用 `scripts/pod_file_fetch.js`，不要改写日志脚本或手工拼 WebShell 命令：
+
+```bash
+URL='<query-app-instances 返回的 login_pod_addr，原样使用>'
+P=~/.local/state/agent-tools/browser-profiles/main
+node scripts/pod_file_fetch.js --url="$URL" --app=<app_name> --action=list  --path=/home/publish_product/server_java/<app_name>/<目录> --profile=$P
+node scripts/pod_file_fetch.js --url="$URL" --app=<app_name> --action=stat  --path=<文件绝对路径> --profile=$P
+node scripts/pod_file_fetch.js --url="$URL" --app=<app_name> --action=fetch --path=<文件绝对路径> --out=<本地文件> --profile=$P
+```
+
+- 只有三个动作：`list`（`ls -lt`，最新在前，最多 200 条，`total`/`truncated` 说明是否截断）、`stat`（size、mtime、md5）、`fetch`（整文件 base64 回传）。远端脚本由本脚本按固定模板生成，调用方只传动作和路径，不能传命令。
+- `--path` 必须是 `/home/publish_product/server_java/<app_name>/` 之下的绝对路径，只允许 `[A-Za-z0-9_./-]`，含 `..`、空白或其他字符直接拒绝。Pod 侧先用 `readlink -f` 解析符号链接，真实位置不在该目录内的返回 `PATH_OUTSIDE_ROOT`。`--app` 由调用方给出，脚本不校验它与 `--url` 的 Pod 是否同一应用，所以实际可读范围是该 Pod 里 `/home/publish_product/server_java/<任一合法应用名>/`；其中的配置文件可能含密钥，只取任务需要的那个文件。
+- `fetch` 在本地重算 size 和 md5，与 Pod 上 `stat`/`md5sum` 的结果一致才写 `--out`（权限 600，已存在则拒绝覆盖），不一致报 `VERIFY_FAILED` 且不落盘；文件内容不打印。默认上限 20 MiB（`--max-bytes`，最大 32 MiB），超限报 `FILE_TOO_LARGE`；`--out` 写到一半失败会删掉半截文件。脚本只接受 `--url --app --action --path --out --max-bytes --timeout --profile --headed`，其他选项报错。
+- 只走 Gotty WebSocket，不回退终端 DOM。2026-11-11 在 stable Pod 实测：588 KB 6 秒，7.9 MB 41 秒，校验都一致。
+- `errorCode`：`LOGIN_REQUIRED`/`PROXY_INTERCEPTED`/`FORBIDDEN`（WebShell 登录态，按“登录态排查顺序”处理，`manualUrl` 交给用户）、`LOGIN_URL_INVALID`、`WEBSHELL_TIMEOUT`、`WEBSHELL_WS_FAILED`、`PATH_MISSING`、`PATH_OUTSIDE_ROOT`、`NOT_A_FILE`、`NOT_A_DIR`、`FILE_TOO_LARGE`、`REMOTE_TOOL_MISSING`（镜像缺 `stat`/`md5sum`/`base64`）、`OUTPUT_INCOMPLETE`、`VERIFY_FAILED`。
+- 取回的文件可能含业务规则或配置：只放会话 scratchpad，用完删除，不进 Git。
 
 ### 3. 基于 error.log 递进定位
 

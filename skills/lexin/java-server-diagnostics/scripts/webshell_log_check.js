@@ -590,8 +590,12 @@ async function runGottyWebSocket(page, command, args) {
       socket.onmessage = (event) => {
         const data = String(event.data || '');
         if (data[0] === '1') {
-          output += decodeBase64Utf8(data.slice(1));
-          if (output.includes(endMarker)) {
+          const chunk = decodeBase64Utf8(data.slice(1));
+          // Look for the end marker only where it can newly appear (the previous tail plus this chunk);
+          // rescanning the whole buffer on every message made large transfers slower than linear.
+          const tail = output.slice(-endMarker.length) + chunk;
+          output += chunk;
+          if (tail.includes(endMarker)) {
             settle({ method: 'gotty-websocket', opened, completed: true, timeout: false, output });
           }
         }
@@ -636,41 +640,14 @@ async function runDomTerminal(page, command, args) {
   };
 }
 
-async function main() {
-  const args = parseArgs(process.argv.slice(2));
-  if (args.help) {
-    usage();
-    return;
-  }
-  if (!args.url) throw new Error('missing --url=<login_pod_addr>');
-  if (!args.app) throw new Error('missing --app=<log_app_name>');
-  if (!/^[a-zA-Z0-9_-]+$/.test(String(args.app))) throw new Error('invalid --app value');
-  const lines = Number(args.lines || 120);
-  if (!Number.isInteger(lines) || lines < 1 || lines > 500) throw new Error('--lines must be an integer between 1 and 500');
-  const mode = args.mode || 'auto';
-  if (!['auto', 'gotty', 'dom'].includes(mode)) throw new Error('--mode must be auto, gotty, or dom');
-  const hasForensicsArgs = ['from', 'to', 'trace-id', 'rule-id', 'keyword', 'files', 'context', 'context-before', 'context-after', 'include-rotated']
-    .some((name) => args[name] !== undefined);
-  const logMode = args['log-mode'] || (hasForensicsArgs ? 'forensics' : 'quick');
-  if (!['quick', 'forensics'].includes(logMode)) throw new Error('--log-mode must be quick or forensics');
-  const query = logMode === 'forensics'
-    ? normalizeQuery({ ...args, files: args.files || 'error.log,info.log' })
-    : null;
-  const commandBody = logMode === 'forensics'
-    ? buildForensicsCommand(args, query)
-    : buildCommand(args, lines);
-  const command = wrapCommand(commandBody);
+// Opens the WebShell page for args.url in the browser profile, checks the login state and runs one wrapped
+// script in the Pod. Shared by the log checks here and by pod_file_fetch.js.
+// Returns { stage: 'url' } when the URL is not an allowed WebShell address, { stage: 'session', errorCode } when the
+// profile is not logged in, otherwise { stage: 'done', result } where result.output is the raw terminal stream.
+async function runWebShellScript(args, command, options = {}) {
+  const mode = options.mode || 'auto';
   const urlValidation = validateWebShellUrl(args.url);
-  if (!urlValidation.valid) {
-    console.log(JSON.stringify({
-      app: args.app,
-      completed: false,
-      errorCode: 'LOGIN_URL_INVALID',
-      loginUrlValidation: urlValidation,
-      manualUrl: null,
-    }, null, 2));
-    return;
-  }
+  if (!urlValidation.valid) return { stage: 'url', urlValidation };
 
   const launched = await openContext(args);
   const { context } = launched;
@@ -694,23 +671,7 @@ async function main() {
       const errorCode = session.sessionState === 'PROXY_INTERCEPTED'
         ? 'PROXY_INTERCEPTED'
         : (session.sessionState === 'FORBIDDEN' ? 'FORBIDDEN' : 'LOGIN_REQUIRED');
-      console.log(JSON.stringify({
-        url: redactUrl(args.url),
-        app: args.app,
-        logMode,
-        completed: false,
-        errorCode,
-        networkPolicy: launched.networkPolicy,
-        session: {
-          state: session.sessionState,
-          title: session.title,
-          currentHost: session.currentHost,
-          terminalReady: session.terminalReady,
-          stableReadyPolls: session.stableReadyPolls,
-        },
-        manualUrl: args.url,
-      }, null, 2));
-      return;
+      return { stage: 'session', errorCode, session, launched, urlValidation };
     }
 
     let result;
@@ -743,6 +704,69 @@ async function main() {
     if (args.screenshot) {
       await page.screenshot({ path: args.screenshot, fullPage: true });
     }
+    return { stage: 'done', result, fallbackError, session, launched, urlValidation };
+  } finally {
+    await context.close().catch(() => {});
+  }
+}
+
+async function main() {
+  const args = parseArgs(process.argv.slice(2));
+  if (args.help) {
+    usage();
+    return;
+  }
+  if (!args.url) throw new Error('missing --url=<login_pod_addr>');
+  if (!args.app) throw new Error('missing --app=<log_app_name>');
+  if (!/^[a-zA-Z0-9_-]+$/.test(String(args.app))) throw new Error('invalid --app value');
+  const lines = Number(args.lines || 120);
+  if (!Number.isInteger(lines) || lines < 1 || lines > 500) throw new Error('--lines must be an integer between 1 and 500');
+  const mode = args.mode || 'auto';
+  if (!['auto', 'gotty', 'dom'].includes(mode)) throw new Error('--mode must be auto, gotty, or dom');
+  const hasForensicsArgs = ['from', 'to', 'trace-id', 'rule-id', 'keyword', 'files', 'context', 'context-before', 'context-after', 'include-rotated']
+    .some((name) => args[name] !== undefined);
+  const logMode = args['log-mode'] || (hasForensicsArgs ? 'forensics' : 'quick');
+  if (!['quick', 'forensics'].includes(logMode)) throw new Error('--log-mode must be quick or forensics');
+  const query = logMode === 'forensics'
+    ? normalizeQuery({ ...args, files: args.files || 'error.log,info.log' })
+    : null;
+  const commandBody = logMode === 'forensics'
+    ? buildForensicsCommand(args, query)
+    : buildCommand(args, lines);
+  const command = wrapCommand(commandBody);
+  const run = await runWebShellScript(args, command, { mode });
+  if (run.stage === 'url') {
+    console.log(JSON.stringify({
+      app: args.app,
+      completed: false,
+      errorCode: 'LOGIN_URL_INVALID',
+      loginUrlValidation: run.urlValidation,
+      manualUrl: null,
+    }, null, 2));
+    return;
+  }
+  const { session, launched, urlValidation } = run;
+  if (run.stage === 'session') {
+    console.log(JSON.stringify({
+      url: redactUrl(args.url),
+      app: args.app,
+      logMode,
+      completed: false,
+      errorCode: run.errorCode,
+      networkPolicy: launched.networkPolicy,
+      session: {
+        state: session.sessionState,
+        title: session.title,
+        currentHost: session.currentHost,
+        terminalReady: session.terminalReady,
+        stableReadyPolls: session.stableReadyPolls,
+      },
+      manualUrl: args.url,
+    }, null, 2));
+    return;
+  }
+  const { result, fallbackError } = run;
+  {
     const text = extractLogText(result.output);
     const summary = logMode === 'quick' ? parseSummary(text) : undefined;
     const forensics = logMode === 'forensics' ? parseForensics(text, query) : undefined;
@@ -779,8 +803,6 @@ async function main() {
       manualUrl: transportCompleted ? null : args.url,
       text,
     }, null, 2));
-  } finally {
-    await context.close().catch(() => {});
   }
 }
 
@@ -792,10 +814,15 @@ if (require.main === module) {
 }
 
 module.exports = {
+  LOG_BEGIN_MARKER,
+  LOG_END_MARKER,
   buildCommand,
   buildForensicsCommand,
   forensicsAwkProgram,
   parseArgs,
   parseForensics,
   parseSummary,
+  cleanTerminalText,
+  runWebShellScript,
+  wrapCommand,
 };

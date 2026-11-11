@@ -2,7 +2,7 @@
 name: parse-experian-ser
 description: 只读拉取并解析旧规则引擎的 Experian Strategy Manager SER 规则包（解密后的 .ser，Java 序列化 ExecutableStrategy），输出可读的决策流程、拒绝规则、衍生变量脚本和输入输出字段。Use when 用户要求查看某个 SER 包（如 FQLDHTE、BE）里的规则内容、决策点分支、阈值或原因码，核对旧 SER 规则逻辑，或为 SER 迁移米霍克做规则对照；不用于米霍克规则或 SER 部署发布。
 metadata:
-  version: 1.2.2
+  version: 1.3.0
 ---
 
 # parse-experian-ser
@@ -24,7 +24,7 @@ metadata:
 
 ## 流程
 
-1. **定位实例和文件**：用 `query-app-instances` 查 `decision_agent_server_java` 的目标环境实例；生产需要用户明确授权只读访问。先看 `query-app-instances` 返回的实例类型：只有 `instances.vm` 里的虚拟机 IP 能经堡垒机 `go <ip>` 进入；`instances.pod` 里的 Pod IP 用堡垒机进不去（2026-11-11 实测 `go` stable Pod `10.9.226.185` 失败）。2026-11-11 乐效登记的部署：stable 和 pre 各只有 1 个 Pod、没有虚拟机，prod 是 4 台虚拟机、没有 Pod。目标环境只有 Pod 时停下报告：本仓库目前没有在 Pod 里执行 `ls`/`md5sum`/分块 `base64` 的受支持通道（`webshell_log_check.js`、`container_log_check.js` 只读文本日志，k8s 工具只有 `get`/`describe`/`logs`），不要改写这些脚本或手工拼 WebShell 命令去取文件；请用户改从 prod 虚拟机拉取（需授权，并说明拉到的是线上版本）或自己在乐效 WebShell 里导出。实例是虚拟机时，`connect_bastion` 后：
+1. **定位实例和文件**：用 `query-app-instances` 查 `decision_agent_server_java` 的目标环境实例；生产需要用户明确授权只读访问。先看 `query-app-instances` 返回的实例类型：只有 `instances.vm` 里的虚拟机 IP 能经堡垒机 `go <ip>` 进入；`instances.pod` 里的 Pod IP 用堡垒机进不去（2026-11-11 实测 `go` stable Pod `10.9.226.185` 失败）。2026-11-11 乐效登记的部署：stable 和 pre 各只有 1 个 Pod、没有虚拟机，prod 是 4 台虚拟机、没有 Pod。实例是 Pod 时用 `$AGENT_TOOLS_ROOT/skills/lexin/java-server-diagnostics/scripts/pod_file_fetch.js`（`--url` 取该 Pod 的 `login_pod_addr`，`--action=list|stat|fetch`，用法见 `java-server-diagnostics` 的“从 Pod 里只读取一个文件”）：`list` 找文件、`stat` 记下 size 和 md5、`fetch --out=<scratchpad 路径>` 一次取回并自动校验，不需要分块，也不要改写日志脚本或手工拼 WebShell 命令。取到的文件先看 size：2026-11-11 实测 stable Pod 上抽查的三个包（`student` 的 master 与 salve、`FQLDHJYD` 的 salve）的 `.ser` 都只有 1 字节，是占位文件，不能用于解析或迁移；pre Pod 上同名的 `FQLDHJYD` 包是 536737 字节、修改时间 2024-06-04（随镜像带入，不一定等于 prod 当前版本）。目标环境的 `.ser` 是 1 字节占位或 Pod 通道不可用时停下报告，请用户授权改从 prod 虚拟机拉取（并说明拉到的是线上版本）。Pod 上 `fetch` 成功时跳过下面的分块拉取，直接进入渲染。实例是虚拟机时，`connect_bastion` 后：
    ```bash
    ls -lt /home/publish_product/server_java/decision_agent_server_java/decision_ser_file/salve_decision_agent_server_ser_<scene>/ | head
    stat -c %s FILE && md5sum FILE
